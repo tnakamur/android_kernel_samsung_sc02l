@@ -174,7 +174,7 @@ fw-shipped-$(CONFIG_KEYBOARD_TC300K) += coreriver/tc305k_j7topelte.fw coreriver/
 										coreriver/tc350k_j7duo.fw coreriver/tc350k_j7duo_rev04.fw
 #touch based grip sensor
 fw-shipped-$(CONFIG_SENSORS_TC3XXK_A7Y18LTE) += coreriver/tc305k_a7y18lte_grip.fw
-fw-shipped-$(CONFIG_SENSORS_A96T3X6) += abov/a96t346_a6elte.fw abov/a96t326_jackpotvelte.fw 
+fw-shipped-$(CONFIG_SENSORS_A96T3X6) += abov/a96t326_jackpotvelte.fw 
 fw-shipped-$(CONFIG_SENSORS_A96T3X6_VIEW2) += abov/a96t346_gview2lte.fw
 
 #Sensor Hub
