@@ -162,7 +162,7 @@ fw-shipped-$(CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_TD4X00) += tsp_synaptics/td4100_j3
 														tsp_synaptics/td4100_j3top.fw tsp_synaptics/td4100_j3top_recovery.fw
 fw-shipped-$(CONFIG_TOUCHSCREEN_IST40XX) += tsp_imagis/ist40xx_a7_2018.fw tsp_imagis/ist40xx_a7_2018_cmcs.bin
 
-TSPFIRMWARE_DIRECTORY = firmware/tsp_zinitix
+TSPFIRMWARE_DIRECTORY = $(srctree)/firmware/tsp_zinitix
 ifeq ($(shell test -d $(TSPFIRMWARE_DIRECTORY) && echo yes),yes)
 fw-shipped-$(CONFIG_TOUCHSCREEN_ZINITIX_ZT75XX_TCLM) += tsp_zinitix/zt7548_a6.fw tsp_zinitix/zt7548_feel2.fw
 else
