@@ -19,7 +19,7 @@
 #include "ssp.h"
 
 #if ANDROID_VERSION >= 80000
-#define SSP_FIRMWARE_REVISION_STM       18091200
+#define SSP_FIRMWARE_REVISION_STM       18120500
 #else
 #define SSP_FIRMWARE_REVISION_STM       18061200
 #endif

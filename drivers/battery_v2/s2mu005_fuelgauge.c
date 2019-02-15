@@ -664,12 +664,11 @@ static void s2mu005_reset_fg(struct s2mu005_fuelgauge_data *fuelgauge)
 	 * The code below restores the FG data version in 0x48 register to its initalized value.
 	 */
 	pr_info("%s: FG data version %02x\n", __func__, fuelgauge->info.data_ver);
-	if (fuelgauge->info.data_ver != 0) {
-		s2mu005_read_reg_byte(fuelgauge->i2c, 0x48, &temp);
-		temp &= 0xF1;
-		temp |= (fuelgauge->info.data_ver << 1);
-		s2mu005_write_and_verify_reg_byte(fuelgauge->i2c, 0x48, temp);
-	}
+
+	s2mu005_read_reg_byte(fuelgauge->i2c, 0x48, &temp);
+	temp &= 0xF1;
+	temp |= (fuelgauge->info.data_ver << 1);
+	s2mu005_write_and_verify_reg_byte(fuelgauge->i2c, 0x48, temp);
 	
 	mutex_unlock(&fuelgauge->fg_lock);
 
@@ -2370,6 +2369,11 @@ static int s2mu005_fuelgauge_probe(struct i2c_client *client,
 		fuelgauge->pdata->fuelgauge_name = "s2mu005-fuelgauge";
 
 	fuelgauge_cfg.drv_data = fuelgauge;
+
+	if (!fuelgauge->info.data_ver) {
+		s2mu005_read_reg_byte(fuelgauge->i2c, 0x48, &temp);
+		fuelgauge->info.data_ver = (temp & 0x0E) >> 1;
+	}
 
 	/* 0x48[7:4]=0010 : EVT2 */
 	fuelgauge->revision = 0;

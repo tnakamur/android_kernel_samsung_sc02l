@@ -3084,6 +3084,9 @@ static void cod3035x_gdet_adc_work(struct work_struct *work)
 	if (cod3035x->is_suspend)
 		regcache_cache_only(cod3035x->regmap, false);
 
+	/* For defence jack detect lock, PDB_JD power on */
+	snd_soc_update_bits(codec, COD3035X_80_PDB_ACC1, PDB_JD_MASK, PDB_JD_MASK);
+
 	snd_soc_write(codec, COD3035X_85_CTR_POP2, 0xC0);
 
 	/* read adc for water detection */
@@ -3298,12 +3301,16 @@ void cod3035x_jack_reset(struct cod3035x_priv *cod3035x)
 
 	mutex_lock(&cod3035x->reset_lock);
 	/* jack power reset */
+	if (cod3035x->is_suspend)
+		regcache_cache_only(cod3035x->regmap, false);
 	snd_soc_update_bits(codec, COD3035X_80_PDB_ACC1,
 			PDB_JD_MASK, 0);
 	cod3035x_usleep(100);
 	snd_soc_update_bits(codec, COD3035X_80_PDB_ACC1,
 			PDB_JD_MASK, PDB_JD_MASK);
 	cod3035x_usleep(100);
+	if (cod3035x->is_suspend)
+		regcache_cache_only(cod3035x->regmap, true);
 	mutex_unlock(&cod3035x->reset_lock);
 }
 
@@ -3729,6 +3736,7 @@ static void cod3035x_buttons_work(struct work_struct *work)
 		dev_err(cod3035x->dev, "Skip button events for jack_out\n");
 		if (jd->privious_button_state == BUTTON_PRESS) {
 			jd->button_det = false;
+			jd->privious_button_state = BUTTON_RELEASE;
 			input_report_key(cod3035x->input, jd->button_code, 0);
 			input_sync(cod3035x->input);
 			cod3035x_process_button_ev(cod3035x->codec, jd->button_code, 0);
@@ -3804,8 +3812,18 @@ static void cod3035x_buttons_work(struct work_struct *work)
 		current_button_state = BUTTON_PRESS;
 	}
 
-	if (!jd->jack_det) {
-		dev_dbg(cod3035x->dev, "skip button event, jack was not detected\n");
+	if (current_button_state == BUTTON_PRESS &&
+			(!jd->jack_det || jd->privious_button_state == current_button_state)){
+		if (!jd->jack_det)
+			dev_dbg(cod3035x->dev, "skip button press event, jack was not detected\n");
+		if (jd->privious_button_state == current_button_state)
+			dev_dbg(cod3035x->dev, "skip button press event, status are same\n");
+		jd->button_det = false;
+		jd->privious_button_state = BUTTON_RELEASE;
+		input_report_key(cod3035x->input, jd->button_code, 0);
+		input_sync(cod3035x->input);
+		cod3035x_process_button_ev(cod3035x->codec, jd->button_code, 0);
+		dev_dbg(cod3035x->dev, ":key %d released when jack_out\n", jd->button_code);
 		return;
 	}
 
@@ -3917,19 +3935,27 @@ static irqreturn_t cod3035x_ant_thread_isr(int irq, void *data)
 	 * case 14[EXT ANT inserted + 4 pole jack remove]: Low -> High
 		=> use cod3035x_ant_thread_isr()
 	 */
-	pre_data = 0;
+	curr_data = gpio_get_value(cod3035x->ant_det_gpio);
+	pre_data = curr_data;
 	loopcnt = 0;
+	dev_dbg(cod3035x->dev, "%s pre_data: %d", __func__, pre_data);
 	while (true) {
 		curr_data = gpio_get_value(cod3035x->ant_det_gpio);
-		if (pre_data == curr_data)
+
+		/*
+		 * If current gpio value was checked differently with pre gpio state,
+		 * skip processing for antenna interrupt.
+		 */
+		if (pre_data != curr_data) {
+			dev_dbg(cod3035x->dev, "%s skip ant irq: pre_data != curr_data\n", __func__);
+			mutex_unlock(&cod3035x->key_lock);
+			goto skip;
+		} else {
 			loopcnt++;
-		else
-			loopcnt = 0;
-		pre_data = curr_data;
+		}
 
 		if (loopcnt >= check_loop_cnt)
 			break;
-
 		msleep(20);
 	}
 	det_status_change = true;
@@ -3972,7 +3998,7 @@ static irqreturn_t cod3035x_ant_thread_isr(int irq, void *data)
 		regcache_cache_only(cod3035x->regmap, true);
 
 	jd->ant_irq = false;
-
+skip:
 	return IRQ_HANDLED;
 }
 
@@ -4757,11 +4783,19 @@ static int cod3035x_notifier_handler(struct notifier_block *nb,
 		/* Impedance value reset */
 		snd_soc_write(codec, COD3035X_A6_IMP_CNT11, 0x42);
 
+		/* For defence jack detect lock, PDB_JD power on */
+		snd_soc_update_bits(codec, COD3035X_80_PDB_ACC1, PDB_JD_MASK, PDB_JD_MASK);
+
 		if (cod3035x->is_suspend)
 			regcache_cache_only(cod3035x->regmap, true);
 
 		cancel_work_sync(&cod3035x->jack_det_work);
 		queue_work(cod3035x->jack_det_wq, &cod3035x->jack_det_work);
+
+		if (cod3035x->use_btn_adc_mode)
+			queue_work(cod3035x->buttons_wq, &cod3035x->buttons_work);
+		else
+			pr_err("[DEBUG] %s , line %d\n", __func__, __LINE__);
 
 		mutex_unlock(&cod3035x->key_lock);
 		goto out;
