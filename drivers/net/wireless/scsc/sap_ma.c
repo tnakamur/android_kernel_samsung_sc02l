@@ -412,6 +412,7 @@ void slsi_rx_netdev_data_work(struct work_struct *work)
 	while (1) {
 		SLSI_MUTEX_LOCK(ndev_vif->vif_mutex);
 		if (!ndev_vif->activated) {
+			slsi_skb_queue_purge(&w->queue);
 			SLSI_MUTEX_UNLOCK(ndev_vif->vif_mutex);
 			break;
 		}

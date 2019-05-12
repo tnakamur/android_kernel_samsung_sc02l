@@ -1592,6 +1592,7 @@ void slsi_vif_deactivated(struct slsi_dev *sdev, struct net_device *dev)
 
 	/* MUST be done first to ensure that other code doesn't treat the VIF as still active */
 	ndev_vif->activated = false;
+	slsi_skb_queue_purge(&ndev_vif->rx_data.queue);
 
 	/* delete the TSPEC entries (if any) if it is a STA vif */
 	if (ndev_vif->vif_type == FAPI_VIFTYPE_STATION &&

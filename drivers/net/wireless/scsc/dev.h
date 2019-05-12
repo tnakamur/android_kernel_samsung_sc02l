@@ -836,9 +836,12 @@ struct slsi_dev {
 
 #ifdef CONFIG_SCSC_WLAN_MUTEX_DEBUG
 	struct slsi_mutex          netdev_add_remove_mutex;
+    struct slsi_mutex          netdev_remove_mutex;
 #else
 	/* a std mutex */
 	struct mutex               netdev_add_remove_mutex;
+    /* a std mutex */
+    struct mutex               netdev_remove_mutex;
 #endif
 	int                        netdev_up_count;
 	struct net_device          __rcu *netdev[CONFIG_SCSC_WLAN_MAX_INTERFACES + 1];               /* 0 is reserved */

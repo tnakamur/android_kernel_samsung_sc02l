@@ -1167,7 +1167,9 @@ static int slsi_netif_add_locked(struct slsi_dev *sdev, const char *name, int if
 	return 0;
 
 exit_with_error:
+    SLSI_MUTEX_LOCK(sdev->netdev_remove_mutex);
 	free_netdev(dev);
+    SLSI_MUTEX_UNLOCK(sdev->netdev_remove_mutex);
 	return ret;
 }
 
@@ -1325,7 +1327,9 @@ static void slsi_netif_remove_locked(struct slsi_dev *sdev, struct net_device *d
 		atomic_set(&ndev_vif->is_registered, 0);
 		unregister_netdevice(dev);
 	} else {
+        SLSI_MUTEX_LOCK(sdev->netdev_remove_mutex);
 		free_netdev(dev);
+        SLSI_MUTEX_UNLOCK(sdev->netdev_remove_mutex);
 	}
 }
 

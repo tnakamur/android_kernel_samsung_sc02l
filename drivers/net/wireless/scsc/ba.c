@@ -494,6 +494,7 @@ static int slsi_rx_ba_start(struct net_device *dev,
 	ba_session_rx->buffer_size = buffer_size;
 	ba_session_rx->start_sn = start_sn;
 	ba_session_rx->expected_sn = start_sn;
+	ba_session_rx->highest_received_sn = 0;
 	ba_session_rx->trigger_ba_after_ssn = false;
 	ba_session_rx->tid = tid;
 	ba_session_rx->timer_on = false;

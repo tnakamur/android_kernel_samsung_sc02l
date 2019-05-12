@@ -224,6 +224,7 @@ struct slsi_dev *slsi_dev_attach(struct device *dev, struct scsc_mx *core, struc
 	sdev->mlme_blocked = false;
 
 	SLSI_MUTEX_INIT(sdev->netdev_add_remove_mutex);
+    SLSI_MUTEX_INIT(sdev->netdev_remove_mutex);
 	SLSI_MUTEX_INIT(sdev->start_stop_mutex);
 	SLSI_MUTEX_INIT(sdev->device_config_mutex);
 #ifdef CONFIG_SCSC_WLAN_ENHANCED_LOGGING

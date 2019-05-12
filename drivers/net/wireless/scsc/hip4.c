@@ -23,6 +23,10 @@
 
 #include "debug.h"
 
+static int max_buffered_frames = 10000;
+module_param(max_buffered_frames, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(max_buffered_frames, "Maximum number of frames to buffer in the driver");
+
 static ktime_t intr_received;
 static ktime_t bh_init;
 static ktime_t bh_end;
@@ -800,6 +804,40 @@ exit:
 	spin_unlock_irqrestore(&hip->hip_priv->watchdog_lock, flags);
 }
 
+static bool slsi_check_rx_flowcontrol(struct slsi_dev *sdev)
+{
+	struct netdev_vif *ndev_vif;
+	int qlen = 0;
+
+	ndev_vif = netdev_priv(sdev->netdev[SLSI_NET_INDEX_WLAN]);
+	if (ndev_vif)
+		qlen = skb_queue_len(&ndev_vif->rx_data.queue);
+
+	SLSI_MUTEX_LOCK(sdev->netdev_remove_mutex);
+#if defined(SLSI_NET_INDEX_P2PX_SWLAN)
+	if (sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN]) {
+		ndev_vif = netdev_priv(sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN]);
+		if (ndev_vif)
+			qlen += skb_queue_len(&ndev_vif->rx_data.queue);
+	}
+#elif defined(SLSI_NET_INDEX_P2PX)
+	if (sdev->netdev[SLSI_NET_INDEX_P2PX]) {
+		ndev_vif = netdev_priv(sdev->netdev[SLSI_NET_INDEX_P2PX]);
+		if (ndev_vif)
+			qlen += skb_queue_len(&ndev_vif->rx_data.queue);
+	}
+#endif
+	SLSI_MUTEX_UNLOCK(sdev->netdev_remove_mutex);
+
+	if (qlen > max_buffered_frames) {
+		SLSI_DBG1_NODEV(SLSI_HIP, "max qlen reached: %d\n", qlen);
+		return true;
+	}
+	SLSI_DBG3_NODEV(SLSI_HIP, "qlen %d\n", qlen);
+
+	return false;
+}
+
 /* Tasklet: high priority, low latency atomic tasks
  * cannot sleep (run atomically in soft IRQ context and are guaranteed to
  * never run on more than one CPU of a given processor, for a given tasklet)
@@ -833,6 +871,7 @@ static void hip4_wq(struct work_struct *data)
 	bool                    update = false;
 	bool			no_change = true;
 	u8                      retry;
+    bool                    rx_flowcontrol = false;
 
 #if defined(CONFIG_SCSC_WLAN_HIP4_PROFILING) || defined(CONFIG_SCSC_WLAN_DEBUG)
 	int                     id;
@@ -842,7 +881,8 @@ static void hip4_wq(struct work_struct *data)
 		WARN_ON(1);
 		return;
 	}
-
+    if (slsi_check_rx_flowcontrol(sdev))
+        rx_flowcontrol = true;
 	service = sdev->service;
 
 #ifndef TASKLET
@@ -1011,6 +1051,9 @@ consume_ctl_mbulk:
 	if (update)
 		hip4_update_index(hip, HIP4_MIF_Q_TH_CTRL, ridx, idx_r);
 
+    if (rx_flowcontrol)
+        goto skip_data_q;
+
 	idx_r = hip4_read_index(hip, HIP4_MIF_Q_TH_DAT, ridx);
 	idx_w = hip4_read_index(hip, HIP4_MIF_Q_TH_DAT, widx);
 	update = false;
@@ -1099,6 +1142,7 @@ consume_dat_mbulk:
 	if (no_change)
 		atomic_inc(&hip->hip_priv->stats.spurious_irqs);
 
+    skip_data_q:
 	if (!atomic_read(&hip->hip_priv->closing)) {
 		/* Reset status variable. DO THIS BEFORE UNMASKING!!!*/
 		atomic_set(&hip->hip_priv->watchdog_timer_active, 0);
