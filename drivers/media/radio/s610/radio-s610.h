@@ -14,7 +14,7 @@
 /*#undef	USE_FM_LNA_ENABLE*/
 
 #define USE_AUDIO_PM
-#undef USE_AUDIO_PM
+/*#undef USE_AUDIO_PM*/
 
 #define	RDS_POLLING_ENABLE
 
@@ -448,6 +448,7 @@ struct s610_radio {
 #endif /* USE_AUDIO_PM */
 	int tc_on;
 	int trf_on;
+	int trf_spur;
 	int dual_clk_on;
 	int vol_num;
 	u32 *vol_level_mod;
@@ -460,6 +461,7 @@ struct s610_radio {
 	u16 rssi_adjust;
 	bool rssi_ref_enable;
 	u32 agc_enable;
+	u32 agc_thresh;
 /*	debug print counter */
 	int idle_cnt_mod;
 	int rds_cnt_mod;

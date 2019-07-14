@@ -34,8 +34,6 @@
 #include <linux/of_reserved_mem.h>
 #endif
 
-#include <linux/shm_ipc.h>
-
 #include "include/gnss.h"
 #include "gnss_link_device_shmem.h"
 
@@ -831,6 +829,39 @@ static int shmem_dump_fault_mbx_to_user(struct link_device *ld,
 
 shmem_dump_mbx_to_fault:
 	return err;
+}
+
+static void __iomem *shm_request_region(unsigned long sh_addr, unsigned size)
+{	int i;
+	unsigned int num_pages = (size >> PAGE_SHIFT);
+	pgprot_t prot = pgprot_writecombine(PAGE_KERNEL);
+	struct page **pages;
+	void *v_addr;
+	if (!sh_addr)
+		return NULL;
+
+	if (size > (num_pages << PAGE_SHIFT))
+		num_pages++;
+
+	pages = kmalloc(sizeof(struct page *) * num_pages, GFP_ATOMIC);
+	if (!pages) {
+		pr_err("%s: pages allocation fail!\n", __func__);
+		return NULL;
+	}
+
+	for (i = 0; i < (num_pages); i++)
+	{
+		pages[i] = phys_to_page(sh_addr);
+		sh_addr += PAGE_SIZE;
+	}
+
+	v_addr = vmap(pages, num_pages, VM_MAP, prot);
+	if (v_addr == NULL)
+		pr_err("%s: Failed to vmap pages\n", __func__);
+
+	kfree(pages);
+
+	return (void __iomem *)v_addr;
 }
 
 struct link_device *create_link_device_shmem(struct platform_device *pdev)

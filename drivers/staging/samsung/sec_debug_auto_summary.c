@@ -100,13 +100,30 @@ static const struct auto_summary_log_map init_data[SEC_DEBUG_AUTO_COMM_BUF_SIZE]
 	{PRIO_LV0, 0}
 };
 
+static int sec_debug_auto_summary_check_init(void)
+{
+	if (auto_summary_info) {
+		return 0;
+	} else {
+		pr_crit("%s: auto comment is not ready\n", __func__);
+
+		return 1;
+	}
+}
+
 void sec_debug_auto_summary_log_disable(int type)
 {
+	if (sec_debug_auto_summary_check_init())
+		return;
+
 	atomic_inc(&auto_summary_info->auto_comm_buf[type].logging_disable);
 }
 
 void sec_debug_auto_summary_log_once(int type)
 {
+	if (sec_debug_auto_summary_check_init())
+		return;
+
 	if (atomic64_read(&auto_summary_info->auto_comm_buf[type].logging_entry))
 		sec_debug_auto_summary_log_disable(type);
 	else
@@ -126,6 +143,9 @@ static inline void sec_debug_hook_auto_comm(int type, const char *buf, size_t si
 {
 	struct sec_debug_auto_comm_buf *p = &auto_summary_info->auto_comm_buf[type];
 	int offset = p->offset;
+
+	if (sec_debug_auto_summary_check_init())
+		return;
 
 	if (atomic64_read(&p->logging_disable))
 		return;
@@ -229,6 +249,11 @@ static ssize_t sec_reset_auto_summary_proc_read(struct file *file, char __user *
 	if (pos >= AUTO_SUMMARY_SIZE) {
 		pr_err("%s : pos 0x%llx\n", __func__, pos);
 		return -ENOENT;
+	}
+
+	if (strncmp(auto_summary_buf, "@ Ramdump", 9)) {
+		pr_err("%s : no data in auto_comment\n", __func__);
+		return 0;
 	}
 
 	count = min(len, (size_t)(AUTO_SUMMARY_SIZE - pos));

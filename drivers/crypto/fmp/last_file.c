@@ -11,20 +11,11 @@
 
 #include <linux/init.h>
 
-const int last_fmp_rodata = 1000;
-int last_fmp_data   = 2000;
+__attribute__ ((section(".rodata"), unused))
+const unsigned char last_fmp_rodata = 0x20;
 
-void last_fmp_text(void) __attribute__((unused));
-void last_fmp_text(void)
-{
-}
+__attribute__ ((section(".text"), unused))
+void last_fmp_text(void){}
 
-void __init last_fmp_init(void) __attribute__((unused));
-void __init last_fmp_init(void)
-{
-}
-
-void __exit last_fmp_exit(void) __attribute__((unused));
-void __exit last_fmp_exit(void)
-{
-}
+__attribute__ ((section(".init.text"), optimize("-O0"), unused))
+static void last_fmp_init(void){};

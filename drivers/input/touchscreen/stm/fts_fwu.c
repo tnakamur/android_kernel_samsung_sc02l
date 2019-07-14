@@ -299,7 +299,7 @@ int fts_fw_wait_for_event(struct fts_ts_info *info, unsigned char eid)
 			input_err(true, info->dev, "%s: Time Over (%2X,%2X,%2X,%2X)\n", __func__, data[0],data[1],data[2],data[3]);
 			break;
 		}
-		fts_delay(20);
+		fts_delay(50);
 	}
 
 	return rc;
@@ -330,7 +330,7 @@ int fts_fw_wait_for_event_D3(struct fts_ts_info *info, unsigned char eid0, unsig
 			input_err(true, info->dev, "%s: Time Over (%2X,%2X,%2X,%2X)\n", __func__, data[0],data[1],data[2],data[3]);
 			break;
 		}
-		fts_delay(20);
+		fts_delay(50);
 	}
 
 	return rc;
@@ -361,11 +361,22 @@ int fts_fw_wait_for_specific_event(struct fts_ts_info *info, unsigned char eid0,
 			input_err(true, info->dev, "%s: Time Over ( %2X,%2X,%2X,%2X )\n", __func__, data[0],data[1],data[2],data[3]);
 			break;
 		}
-		fts_delay(20);
+		fts_delay(50);
 	}
 
 	return rc;
 }
+
+#ifdef TCLM_CONCEPT
+int sec_tclm_execute_force_calibration(struct i2c_client *client, int cal_mode)
+{
+	struct fts_ts_info *info = (struct fts_ts_info *)i2c_get_clientdata(client);
+
+	fts_execute_autotune(info, true);
+
+	return 0;
+}
+#endif
 
 static void fts_set_factory_history_data(struct fts_ts_info *info, u8 level)
 {
@@ -422,6 +433,10 @@ void fts_execute_autotune(struct fts_ts_info *info, bool IsSaving)
 {
 	input_info(true, info->dev, "%s: start\n", __func__);
 
+	info->fts_command(info, SENSEOFF);
+	fts_delay(50);
+	fts_interrupt_set(info, INT_DISABLE);
+
 	info->fts_command(info, CX_TUNNING);
 	fts_delay(300);
 	fts_fw_wait_for_event_D3(info, STATUS_EVENT_MUTUAL_AUTOTUNE_DONE, 0x00);
@@ -446,17 +461,23 @@ void fts_execute_autotune(struct fts_ts_info *info, bool IsSaving)
 
 	/* Reset FTS */
 	info->fts_systemreset(info, 30);
+	fts_interrupt_set(info, INT_ENABLE);
 }
 
-void fts_fw_init(struct fts_ts_info *info, bool boot)
+void fts_fw_init(struct fts_ts_info *info, bool restore_cal)
 {
-	input_info(true, info->dev, "%s: boot(%d)\n", __func__,boot);
+	input_info(true, info->dev, "%s: boot(%d)\n", __func__,restore_cal);
 
 	info->fts_command(info, FTS_CMD_TRIM_LOW_POWER_OSCILLATOR);
 	fts_delay(200);
 
-#ifdef PAT_CONTROL
-	fts_ts_tclm(info, boot, false);
+#ifdef TCLM_CONCEPT
+	if (restore_cal) {
+		input_info(true, &info->client->dev, "%s: RUN OFFSET CALIBRATION\n", __func__);
+
+		if (sec_execute_tclm_package(info->tdata, 0) < 0)
+			input_err(true, &info->client->dev, "%s: sec_execute_tclm_package fail\n", __func__);
+	}
 #endif
 
 	info->fts_command(info, SENSEON);
@@ -474,7 +495,7 @@ void fts_fw_init(struct fts_ts_info *info, bool boot)
 	fts_delay(20);
 }
 
-const int fts_fw_updater(struct fts_ts_info *info, unsigned char *fw_data, bool boot)
+const int fts_fw_updater(struct fts_ts_info *info, unsigned char *fw_data, bool restore_cal)
 {
 	const struct fts_header *header;
 	int retval;
@@ -511,7 +532,7 @@ const int fts_fw_updater(struct fts_ts_info *info, unsigned char *fw_data, bool 
 					  "%s: Success Firmware update\n",
 					  __func__);
 
-				fts_fw_init(info, boot);
+				fts_fw_init(info, restore_cal);
 				retval = 0;
 				break;
 			}
@@ -536,6 +557,7 @@ int fts_fw_update_on_probe(struct fts_ts_info *info)
 	unsigned char *fw_data = NULL;
 	char fw_path[FTS_MAX_FW_PATH];
 	const struct fts_header *header;
+	bool restore_cal = false;
 
 	if (info->board->bringup == 1)
 		return 0;
@@ -584,28 +606,47 @@ int fts_fw_update_on_probe(struct fts_ts_info *info)
 		goto done;
 	}
 
-#ifdef PAT_CONTROL
+#ifdef TCLM_CONCEPT
+	retval = info->tdata->tclm_read(info->tdata->client, SEC_TCLM_NVM_ALL_DATA);
+	if (retval < 0) {
+		input_info(true, &info->client->dev, "%s: SEC_TCLM_NVM_ALL_DATA i2c read fail", __func__);
+	}
+
+	input_info(true, &info->client->dev, "%s: tune_fix_ver [%04X] afe_base [%04X]\n",
+		__func__, info->tdata->nvdata.tune_fix_ver, info->tdata->afe_base);
+
+	if ((info->tdata->tclm_level > TCLM_LEVEL_CLEAR_NV) &&
+		((info->tdata->nvdata.tune_fix_ver == 0xffff)
+		|| (info->tdata->afe_base > info->tdata->nvdata.tune_fix_ver))) {
+		/* tune version up case */
+		sec_tclm_root_of_cal(info->tdata, CALPOSITION_TUNEUP);
+		restore_cal = true;
+	} else if (info->tdata->tclm_level == TCLM_LEVEL_CLEAR_NV) {
+		/* firmup case */
+		sec_tclm_root_of_cal(info->tdata, CALPOSITION_FIRMUP);
+		restore_cal = true;
+	}
+#endif
 	if ((info->fw_main_version_of_ic < info->fw_main_version_of_bin)
 		|| ((info->config_version_of_ic < info->config_version_of_bin))
-		|| ((info->fw_version_of_ic < info->fw_version_of_bin))
-		|| (info->boot_crc_check_fail == FTS_BOOT_CRC_FAIL))
+			|| ((info->fw_version_of_ic < info->fw_version_of_bin)))
 		retval = FTS_NEED_FW_UPDATE;
 	else
 		retval = FTS_NOT_ERROR;
 
-	/* ic fw ver > bin fw ver && force is false*/
+	/* ic fw ver > bin fw ver && force is false */
 	if (retval != FTS_NEED_FW_UPDATE) {
-		/* clear nv,  forced f/w update eventhough same f/w,  then apply pat magic */
-		if (info->board->pat_function == PAT_CONTROL_FORCE_UPDATE) {
-			input_info(true, info->dev, "%s: run forced f/w update and excute autotune\n", __func__);
-		} else {
-			input_info(true, info->dev, "%s: skip fw update & nv read\n", __func__);
+		if (restore_cal)
+			input_err(true, info->dev, "%s: unexpected route\n", __func__);
+		else
+			input_err(true, info->dev, "%s: skip fw update\n", __func__);
+
 			goto done;
 		}
-	}
 
-	/* pat_control - boot(true) */
-	retval = fts_fw_updater(info, fw_data, true);
+	retval = fts_fw_updater(info, fw_data, restore_cal);
+#ifdef TCLM_CONCEPT
+	sec_tclm_root_of_cal(info->tdata, CALPOSITION_NONE);
 #endif
 
 done:
@@ -622,6 +663,7 @@ static int fts_load_fw_from_kernel(struct fts_ts_info *info,
 	int retval;
 	const struct firmware *fw_entry = NULL;
 	unsigned char *fw_data = NULL;
+	bool restore_cal = false;
 
 	if (!fw_path) {
 		input_err(true, info->dev, "%s: Firmware name is not defined\n",
@@ -647,12 +689,17 @@ static int fts_load_fw_from_kernel(struct fts_ts_info *info,
 
 	info->fts_systemreset(info, 10);
 
-	/* pat_control - boot(false) */
-	retval = fts_fw_updater(info, fw_data, false);
+#ifdef TCLM_CONCEPT
+	sec_tclm_root_of_cal(info->tdata, CALPOSITION_TESTMODE);
+	restore_cal = true;
+#endif
+	retval = fts_fw_updater(info, fw_data, restore_cal);
 	if (retval)
 		input_err(true, info->dev, "%s: failed update firmware\n",
 			__func__);
-
+#ifdef TCLM_CONCEPT
+	sec_tclm_root_of_cal(info->tdata, CALPOSITION_NONE);
+#endif
 	enable_irq(info->irq);
  done:
 	if (fw_entry)
@@ -719,9 +766,13 @@ static int fts_load_fw_from_ums(struct fts_ts_info *info)
 					(header->released_ver[0] << 8) +
 					(header->released_ver[1]));
 
-				/* pat_control - boot(false) */
-				error = fts_fw_updater(info, fw_data, false);
-
+#ifdef TCLM_CONCEPT
+				sec_tclm_root_of_cal(info->tdata, CALPOSITION_TESTMODE);
+#endif
+				error = fts_fw_updater(info, fw_data, true);
+#ifdef TCLM_CONCEPT
+				sec_tclm_root_of_cal(info->tdata, CALPOSITION_NONE);
+#endif
 				enable_irq(info->irq);
 
 			} else {

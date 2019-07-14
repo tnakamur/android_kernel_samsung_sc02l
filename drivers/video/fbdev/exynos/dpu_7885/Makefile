@@ -15,3 +15,5 @@ obj-$(CONFIG_DECON_EVENT_LOG) += event_log.o
 obj-$(CONFIG_EXYNOS_SUPPORT_DOZE) += decon_doze.o dsim_doze.o
 decon-y += decon_core.o decon_dsi.o helper.o win_update.o bts.o decon_board.o decon_notify.o decon_abd.o
 obj-y += panels/
+
+ccflags-$(CONFIG_SAMSUNG_TUI)	+= -Idrivers/misc/tui

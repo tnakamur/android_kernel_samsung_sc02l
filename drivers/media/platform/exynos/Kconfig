@@ -14,8 +14,33 @@ if VIDEO_EXYNOS
         source "drivers/media/platform/exynos/scaler/Kconfig"
         source "drivers/media/platform/exynos/mfc/Kconfig"
         source "drivers/media/platform/exynos/smfc/Kconfig"
-        source "drivers/media/platform/exynos/fimc-is2/Kconfig"
         source "drivers/media/platform/exynos/camera-pp/Kconfig"
+endif
+
+config VIDEO_EXYNOS_FIMC_IS2
+        bool "Exynos FIMC-IS2 (Image Subsystem) driver"
+        depends on VIDEO_EXYNOS
+        select MEDIA_EXYNOS
+        select EXYNOS_FIMC_IS
+        default n
+        help
+          This is a v4l2 driver for exynos FIMC-IS device.
+
+if VIDEO_EXYNOS_FIMC_IS2
+        source "drivers/media/platform/exynos/fimc-is2/Kconfig"
+endif
+
+config VIDEO_EXYNOS_FIMC_LEGACY
+        bool "Exynos FIMC-LEGACY (Image Subsystem) driver"
+        depends on VIDEO_EXYNOS
+        select MEDIA_EXYNOS
+        select EXYNOS_FIMC_IS
+        default n
+        help
+          This is a v4l2 driver for exynos FIMC-IS device.
+
+if VIDEO_EXYNOS_FIMC_LEGACY
+        source "drivers/media/platform/exynos/fimc-legacy/Kconfig"
 endif
 
 config MEDIA_EXYNOS

@@ -276,11 +276,9 @@ static irqreturn_t muic_irq_thread(int irq, void *data)
 	irq_ret = max77865_muic_irq_handler(pmuic, irq);
 	switch (irq_ret) {
 	case INT_REQ_DONE_VB:
-		muic_detect_dev(pmuic, irq);
-		muic_handle_vbus(pmuic);
-		break;
 	case INT_REQ_DONE:
 		muic_detect_dev(pmuic, irq);
+		muic_handle_vbus(pmuic);
 		break;
 #if defined(CONFIG_MUIC_HV_MAX77865)
 	case INT_REQ_DONE_HV:
@@ -638,6 +636,8 @@ static void muic_shutdown(struct platform_device *pdev)
 		pr_info("%s: usb_work is not pending.\n", __func__);
 
 	pr_info("%s:%s open D+,D-\n", pmuic->chip_name, __func__);
+	pmuic->is_hiccup_mode = false;
+	pmuic->afc_water_disable = false;
 	ret = com_to_open_with_vbus(pmuic);
 	if (ret < 0)
 		pr_err("%s:%s fail to open mansw1 reg\n", pmuic->chip_name,

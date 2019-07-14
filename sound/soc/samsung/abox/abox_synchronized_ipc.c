@@ -73,7 +73,7 @@ int tfadsp_read(int devidx, int size, void *buf)
 	ipc_dbg("size = %d", size);
 
 	abox_request_cpu_gear(&data->pdev_abox->dev, aboxdata,
-					(void *)REALTIME_GEAR_ID, 4);
+					REALTIME_GEAR_ID, 4);
 
 	tfadrv_read_buf = (char *)buf;
 	
@@ -94,7 +94,7 @@ int tfadsp_read(int devidx, int size, void *buf)
 			abox_ipc_read_avail, msecs_to_jiffies(TIMEOUT_MS));
 
 	abox_request_cpu_gear(&data->pdev_abox->dev, aboxdata,
-					(void *)REALTIME_GEAR_ID, 12);
+					REALTIME_GEAR_ID, 12);
 
 	if (!ret) {
 		ipc_err("wait_event timeout");
@@ -118,7 +118,7 @@ int tfadsp_write(int devidx, int size, void *buf)
 	ipc_dbg("size = %d", size);
 
 	abox_request_cpu_gear(&data->pdev_abox->dev, aboxdata,
-					(void *)REALTIME_GEAR_ID, 4);
+					REALTIME_GEAR_ID, 4);
 
 	tfadrv_write_buf = (char *)buf;
 	smem_write_buf = (char *)abox_addr_to_kernel_addr(aboxdata, SMEM_WRITE);
@@ -143,7 +143,7 @@ int tfadsp_write(int devidx, int size, void *buf)
 		abox_ipc_write_avail, msecs_to_jiffies(TIMEOUT_MS));
 	
 	abox_request_cpu_gear(&data->pdev_abox->dev, aboxdata,
-					(void *)REALTIME_GEAR_ID, 12);
+					REALTIME_GEAR_ID, 12);
 
 	if (!ret) {
 		ipc_err("wait_event timeout");

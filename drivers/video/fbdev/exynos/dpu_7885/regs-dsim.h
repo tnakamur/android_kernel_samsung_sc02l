@@ -25,6 +25,7 @@
 
 #define DSIM_LINK_STATUS1				(0xc)
 #define DSIM_LINK_STATUS1_CMD_MODE_STATUS_GET(x)	(x >> 26 & 0x1)
+#define DSIM_LINK_STATUS1_CMD_TRANSF_CNT_GET(x)		((x >> 0) & 0x1ffffff)
 
 #define DSIM_LINK_STATUS2               (0x10)
 #define DSIM_LINK_STATUS2_CLK_LANE_STATUS_GET(x)    (x >> 4 & 0x3)

@@ -17,7 +17,7 @@
 #define DSIM_LP_RX_TIMEOUT		0xffff
 #define DSIM_MULTI_PACKET_CNT		0xffff
 #define DSIM_PLL_STABLE_TIME		0x15f90
-#define DSIM_FIFOCTRL_THRESHOLD	0x20 /* 1 ~ 32 */
+#define DSIM_PH_FIFOCTRL_THRESHOLD	1 /* 1 ~ 32 */
 
 /* If below values depend on panel. These values wil be move to panel file.
   * And these values are valid in case of video mode only. */
@@ -739,8 +739,8 @@ void dsim_reg_set_cmd_ctrl(u32 id, struct decon_lcd *lcd_info, struct dsim_clks 
 	unsigned int time_te_tout;
 
 	time_stable_vfp = lcd_info->xres * DSIM_STABLE_VFP_VALUE * 3 / 100;
-	time_te_protect_on = (clks->hs_clk * TE_PROTECT_ON_TIME) / 16;
-	time_te_tout = (clks->hs_clk * TE_TIMEOUT_TIME) / 16;
+	time_te_protect_on = (clks->hs_clk * TE_PROTECT_ON_TIME) / 8;
+	time_te_tout = (clks->hs_clk * TE_TIMEOUT_TIME) / 8;
 	dsim_reg_set_time_stable_vfp(id, time_stable_vfp);
 	dsim_reg_set_time_te_protect_on(id, time_te_protect_on);
 	dsim_reg_set_time_te_timeout(id, time_te_tout);
@@ -757,7 +757,7 @@ void dsim_reg_enable_clocklane(u32 id, u32 en)
 {
 	u32 val = en ? ~0 : 0;
 
-	dsim_write_mask(id, DSIM_CONFIG, val, DSIM_CLK_CTRL_CLKLANE_ONOFF);
+	dsim_write_mask(id, DSIM_CLK_CTRL, val, DSIM_CLK_CTRL_CLKLANE_ONOFF);
 }
 
 void dsim_reg_enable_packetgo(u32 id, u32 en)
@@ -882,18 +882,21 @@ int dsim_reg_wait_hs_clk_disable(u32 id)
 	return 0;
 }
 
-u32 dsim_reg_is_writable_fifo_state(u32 id, struct decon_lcd *lcd_info)
+u32 dsim_reg_payload_fifo_is_empty(u32 id)
+{
+
+	return dsim_read_mask(id, DSIM_FIFOCTRL, DSIM_FIFOCTRL_EMPTY_PL_SFR);
+}
+
+bool dsim_reg_is_writable_ph_fifo_state(u32 id)
 {
 	u32 val = dsim_read(id, DSIM_FIFOCTRL);
-	u32 threshold = DSIM_FIFOCTRL_THRESHOLD;
 
-	if (lcd_info->mode == DECON_VIDEO_MODE)
-		threshold = DSIM_FIFOCTRL_THRESHOLD - 0x05;
-
-	if (DSIM_FIFOCTRL_NUMBER_OF_PH_SFR_GET(val) < threshold)
-		return 1;
+	val = DSIM_FIFOCTRL_NUMBER_OF_PH_SFR_GET(val);
+	if (val < DSIM_PH_FIFOCTRL_THRESHOLD)
+		return true;
 	else
-		return 0;
+		return false;
 }
 
 u32 dsim_reg_header_fifo_is_empty(u32 id)
@@ -1222,7 +1225,7 @@ void dsim_reg_set_config(u32 id, struct decon_lcd *lcd_info, u32 data_lane_cnt,
 	dsim_reg_set_num_of_transfer(id, num_of_transfer);
 
 	dsim_reg_set_num_of_lane(id, (data_lane_cnt-1));
-	dsim_reg_enable_eotp(id, 1);
+	dsim_reg_enable_eotp(id, !lcd_info->eotp_disabled);
 	dsim_reg_enable_per_frame_read(id, 0);
 	dsim_reg_set_pixel_format(id, DSIM_PIXEL_FORMAT_RGB24);
 	dsim_reg_set_vc_id(id, 0);
@@ -1254,7 +1257,7 @@ void dsim_reg_set_config(u32 id, struct decon_lcd *lcd_info, u32 data_lane_cnt,
 	}
 
 	if (lcd_info->mode == DECON_VIDEO_MODE) {
-		dsim_reg_set_multi_packet_count(id, 0xff);
+		dsim_reg_set_multi_packet_count(id, DSIM_PH_FIFOCTRL_THRESHOLD);
 		dsim_reg_enable_multi_cmd_packet(id, 0);
 	}
 	dsim_reg_enable_packetgo(id, 0);
@@ -1312,7 +1315,7 @@ int dsim_reg_init(u32 id, struct decon_lcd *lcd_info, u32 data_lane_cnt,
  * configure and set DPHY PLL, byte clock, escape clock and hs clock
  *	- PMS value have to be optained by using PMS Gen. tool (MSC_PLL_WIZARD2_00.exe)
  *	- PLL out is source clock of HS clock
- *	- byte clock = HS clock / 16
+ *	- byte clock = HS clock / 8
  *	- calculate divider of escape clock using requested escape clock
  *	  from driver
  *	- DPHY PLL, byte clock, escape clock are enabled.
@@ -1471,6 +1474,22 @@ u32 dsim_reg_get_rx_fifo(u32 id)
 	return dsim_read(id, DSIM_RXFIFO);
 }
 
+int dsim_reg_get_linecount(u32 id, u32 mode)
+{
+	u32 val = 0;
+
+	if (mode == DECON_VIDEO_MODE) {
+		val = dsim_read(id, DSIM_LINK_STATUS0);
+		return DSIM_LINK_STATUS0_VM_LINE_CNT_GET(val);
+	} else if (mode == DECON_MIPI_COMMAND_MODE) {
+		val = dsim_read(id, DSIM_LINK_STATUS1);
+		return DSIM_LINK_STATUS1_CMD_TRANSF_CNT_GET(val);
+	}
+
+	return -EINVAL;
+}
+
+
 int dsim_reg_rx_err_handler(u32 id, u32 rx_fifo)
 {
 	int ret = 0;
@@ -1605,6 +1624,33 @@ int dsim_reg_set_smddi_ulps(u32 id, u32 en, u32 lanes)
 	return ret;
 }
 
+/*
+ * enter or exit ulps mode
+ *
+ * Parameter
+ *	1 : enter ULPS mode
+ *	0 : not used
+ */
+int dsim_reg_set_magnaddi_ulps(u32 id, u32 en, u32 lanes)
+{
+	int ret = 0;
+
+	if (en) {
+		/* Enable ULPS clock and data lane */
+		dsim_reg_enter_ulps(id, 1);
+
+		/* Check ULPS request for data lane */
+		ret = dsim_reg_wait_enter_ulps_state(id, lanes);
+		if (ret)
+			return ret;
+
+		/* Clear ULPS enter request */
+		dsim_reg_enter_ulps(id, 0);
+	}
+
+	return ret;
+}
+
 int dsim_reg_set_ulps_by_ddi(u32 id, u32 ddi_type, u32 lanes, u32 en)
 {
 	int ret;
@@ -1614,8 +1660,7 @@ int dsim_reg_set_ulps_by_ddi(u32 id, u32 ddi_type, u32 lanes, u32 en)
 		ret = dsim_reg_set_smddi_ulps(id, en, lanes);
 		break;
 	case TYPE_OF_MAGNA_DDI:
-		dsim_err("This ddi(%d) doesn't support ULPS\n", ddi_type);
-		ret = -EINVAL;
+		ret = dsim_reg_set_magnaddi_ulps(id, en, lanes);
 		break;
 	case TYPE_OF_NORMAL_DDI:
 	default:

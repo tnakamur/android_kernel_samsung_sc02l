@@ -176,7 +176,7 @@ struct dw_mci {
 	/* For edmac */
 	struct dw_mci_dma_slave *dms;
 	/* Registers's physical base address */
-	void                    *phy_regs;
+	resource_size_t		phy_regs;
 
 	unsigned short          desc_sz;
 	struct pm_qos_request   pm_qos_lock;
@@ -245,6 +245,7 @@ struct dw_mci {
 	unsigned int		req_state;
 	struct dw_mci_debug_info        *debug_info;    /* debug info */
 	
+
 	/* HWACG q-active ctrl check */
 	unsigned int qactive_check;
 

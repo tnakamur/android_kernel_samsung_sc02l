@@ -1,5 +1,9 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/uh.h>
+#ifdef CONFIG_UH_RKP
+#include <linux/rkp.h>
+#endif
 #include "uh_reserve_mem.h"
 
 #ifdef CONFIG_NO_BOOTMEM
@@ -20,24 +24,15 @@ static int __init fill_uh_mem_info(void)
 {
 	int cnt = 0;
 
-	uh_mem[cnt].start_add 	= UH_START;
-	uh_mem[cnt++].size 	= UH_SIZE;
-
-	uh_mem[cnt].start_add 	= UH_LOG_START;
-	uh_mem[cnt++].size 	= UH_LOG_SIZE;
-
-	uh_mem[cnt].start_add 	= UH_HEAP_START;
-	uh_mem[cnt++].size 	= UH_HEAP_SIZE;
-
-	uh_mem[cnt].start_add 	= UH_BIGDATA_START;
-	uh_mem[cnt++].size 	= UH_BIGDATA_SIZE;
-
+	uh_mem[cnt].start_add 	= EL2_START;
+	uh_mem[cnt++].size 	= EL2_SIZE;
 #ifdef CONFIG_UH_RKP
-	uh_mem[cnt].start_add 	= RKP_PHYS_MAP_START;
-	uh_mem[cnt++].size 	= RKP_PHYS_MAP_SIZE;
-
-	uh_mem[cnt].start_add 	= RKP_ROBUF_START;
-	uh_mem[cnt++].size 	= RKP_ROBUF_SIZE;
+	do{
+		u64 el2_heap_base = EL2_START + EL2_SIZE , el2_heap_size = 0;
+		uh_call(UH_APP_INIT, 4, (u64)&el2_heap_base, (u64)&el2_heap_size, 0, 0);
+		uh_mem[cnt].start_add 	= el2_heap_base;
+		uh_mem[cnt++].size 	= el2_heap_size;
+	}while(0);
 #endif
 	return cnt;
 }
@@ -45,7 +40,7 @@ static int __init fill_uh_mem_info(void)
 int __init uh_reserve_mem(void)
 {
 	int num, i = 0;
-
+	init_dt_scan_uh_nodes();
 	num = fill_uh_mem_info();
 
 	for (i = 0; i < num; i++) {

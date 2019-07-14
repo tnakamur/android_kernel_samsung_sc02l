@@ -290,7 +290,7 @@ static int fimc_is_hw_vra_open(struct fimc_is_hw_ip *hw_ip, u32 instance,
 
 	fimc_is_hw_vra_reset(hw_ip);
 
-	for (i = 0; i < SENSOR_POSITION_END; i++) {
+	for (i = 0; i < SENSOR_POSITION_MAX; i++) {
 		hw_vra->applied_setfile[i] = NULL;
 	}
 #ifdef ENABLE_FPSIMD_FOR_USER
@@ -457,6 +457,7 @@ static int fimc_is_hw_vra_enable(struct fimc_is_hw_ip *hw_ip, u32 instance,
 
 	set_bit(HW_RUN, &hw_ip->state);
 	set_bit(HW_VRA_CH1_START, &hw_ip->state);
+	atomic_inc(&hw_ip->run_rsccount);
 
 	return ret;
 }
@@ -473,7 +474,19 @@ static int fimc_is_hw_vra_disable(struct fimc_is_hw_ip *hw_ip, u32 instance,
 	if (!test_bit_variables(hw_ip->id, &hw_map))
 		return 0;
 
-	if (atomic_read(&hw_ip->rsccount) > 1)
+	hw_vra = (struct fimc_is_hw_vra *)hw_ip->priv_info;
+	if (unlikely(!hw_vra)) {
+		mserr_hw("priv_info is NULL", instance, hw_ip);
+		return -EINVAL;
+	}
+
+	ret = fimc_is_lib_vra_stop_instance(&hw_vra->lib_vra, instance);
+	if (ret) {
+		mserr_hw("lib_vra_stop_instance is fail (%d)", instance, hw_ip, ret);
+		return ret;
+	}
+
+	if (atomic_dec_return(&hw_ip->run_rsccount) > 0)
 		return 0;
 
 	msinfo_hw("vra_disable: Vvalid(%d)\n", instance, hw_ip,
@@ -486,12 +499,6 @@ static int fimc_is_hw_vra_disable(struct fimc_is_hw_ip *hw_ip, u32 instance,
 
 		if (!timetowait)
 			mserr_hw("wait FRAME_END timeout (%ld)", instance, hw_ip, timetowait);
-
-		hw_vra = (struct fimc_is_hw_vra *)hw_ip->priv_info;
-		if (unlikely(!hw_vra)) {
-			mserr_hw("priv_info is NULL", instance, hw_ip);
-			return -EINVAL;
-		}
 
 		ret = fimc_is_lib_vra_stop(&hw_vra->lib_vra);
 		if (ret) {
@@ -549,7 +556,27 @@ static int fimc_is_hw_vra_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 
 	if (frame->type == SHOT_TYPE_INTERNAL) {
 		msdbg_hw(2, "request not exist\n", instance, hw_ip);
+		hw_ip->internal_fcount = frame->fcount;
 		goto new_frame;
+	} else {
+		BUG_ON(!frame->shot);
+		/* per-frame control
+		 * check & update size from region
+		 */
+		lindex = frame->shot->ctl.vendor_entry.lowIndexParam;
+		hindex = frame->shot->ctl.vendor_entry.highIndexParam;
+
+		/* if internal -> normat shot case
+		 * lindex/hindex set for update param forcely
+		 */
+		if (hw_ip->internal_fcount != 0) {
+			hw_ip->internal_fcount = 0;
+			lindex |= LOWBIT_OF(PARAM_FD_OTF_INPUT);
+			lindex |= LOWBIT_OF(PARAM_FD_DMA_INPUT);
+
+			hindex |= HIGHBIT_OF(PARAM_FD_OTF_INPUT);
+			hindex |= HIGHBIT_OF(PARAM_FD_DMA_INPUT);
+		}
 	}
 
 	BUG_ON(!frame->shot);
@@ -623,6 +650,7 @@ new_frame:
 		hw_ip->mframe = frame;
 	}
 	msdbg_hw(2, "[F:%d]lib_vra_new_frame\n", instance, hw_ip, frame->fcount);
+	lib_vra->fr_index = frame->fcount;
 	ret = fimc_is_lib_vra_new_frame(lib_vra, buffer_kva, buffer_dva, instance);
 	if (ret) {
 		mserr_hw("lib_vra_new_frame is fail (%d)", instance, hw_ip, ret);
@@ -757,7 +785,7 @@ static int fimc_is_hw_vra_frame_ndone(struct fimc_is_hw_ip *hw_ip,
 	output_id = FIMC_IS_HW_CORE_END;
 	if (test_bit_variables(hw_ip->id, &frame->core_flag))
 		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id, output_id,
-				done_type, true);
+				done_type, false);
 
 	return ret;
 }
@@ -1149,6 +1177,7 @@ int fimc_is_hw_vra_probe(struct fimc_is_hw_ip *hw_ip, struct fimc_is_interface *
 	hw_ip->is_leader = true;
 	atomic_set(&hw_ip->status.Vvalid, V_BLANK);
 	atomic_set(&hw_ip->rsccount, 0);
+	atomic_set(&hw_ip->run_rsccount, 0);
 	init_waitqueue_head(&hw_ip->status.wait_queue);
 
 	/* set fd sfr base address */

@@ -23,7 +23,6 @@
 #include <linux/blkdev.h>
 #include <asm/byteorder.h>
 #include <linux/ratelimit.h>
-#include <linux/android_aid.h>
 
 #include "ext4.h"
 #include "ext4_jbd2.h"
@@ -756,15 +755,17 @@ static inline int ext4_has_free_inodes(struct ext4_sb_info *sbi)
 			sbi->s_r_inodes_count * 2))
 		return 1;
 
+#if ANDROID_VERSION < 90000
 	if (percpu_counter_read_positive(&sbi->s_freeinodes_counter) >
 			sbi->s_r_inodes_count &&
 			in_group_p(AID_USE_SEC_RESERVED))
 		return 1;
+#endif
 
 	/* Hm, nope.  Are (enough) root reserved inodes available? */
 	if (uid_eq(sbi->s_resuid, current_fsuid()) ||
 	    (!gid_eq(sbi->s_resgid, GLOBAL_ROOT_GID) && in_group_p(sbi->s_resgid)) ||
-	    capable(CAP_SYS_RESOURCE) || in_group_p(AID_USE_ROOT_RESERVED))
+	    capable(CAP_SYS_RESOURCE) || ext4_android_claim_r_blocks(sbi))
 		return 1;
 	return 0;
 }
@@ -1132,6 +1133,17 @@ got:
 	if (err)
 		goto fail_drop;
 
+	/*
+	 * Since the encryption xattr will always be unique, create it first so
+	 * that it's less likely to end up in an external xattr block and
+	 * prevent its deduplication.
+	 */
+	if (encrypt) {
+		err = ext4_inherit_context(dir, inode);
+		if (err)
+			goto fail_free_drop;
+	}
+
 	err = ext4_init_acl(handle, inode, dir);
 	if (err)
 		goto fail_free_drop;
@@ -1153,12 +1165,6 @@ got:
 		ei->i_datasync_tid = handle->h_transaction->t_tid;
 	}
 
-	if (encrypt) {
-		err = ext4_inherit_context(dir, inode);
-		if (err)
-			goto fail_free_drop;
-	}
-
 	err = ext4_mark_inode_dirty(handle, inode);
 	if (err) {
 		ext4_std_error(sb, err);
@@ -1177,7 +1183,7 @@ fail_drop:
 	unlock_new_inode(inode);
 out:
 	if (err == -ENOSPC) {
-		printk_ratelimited(KERN_INFO "Return ENOSPC : No free inode (%d/%u)\n",
+		printk_ratelimited(KERN_INFO "Return ENOSPC: ifree=%d, inodes=%u\n",
 			(int) percpu_counter_read_positive(&sbi->s_freeinodes_counter),
 			le32_to_cpu(sbi->s_es->s_inodes_count));
 	}

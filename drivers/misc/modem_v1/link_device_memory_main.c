@@ -99,8 +99,10 @@ static inline void purge_txq(struct mem_link_device *mld)
 	}
 #endif
 
-	/* Purge the skb_txq in every IPC device (IPC_FMT, IPC_RAW, etc.) */
-	for (i = 0; i < MAX_SIPC5_DEVICES; i++) {
+	/* Purge the skb_txq in every IPC device
+	 * (IPC_MAP_FMT, IPC_MAP_NORM_RAW, etc.)
+	 */
+	for (i = 0; i < MAX_SIPC_MAP; i++) {
 		struct mem_ipc_device *dev = mld->dev[i];
 		skb_queue_purge(dev->skb_txq);
 	}
@@ -242,7 +244,7 @@ static enum hrtimer_restart tx_timer_func(struct hrtimer *timer)
 	}
 #endif
 
-	for (i = 0; i < MAX_SIPC5_DEVICES; i++) {
+	for (i = 0; i < MAX_SIPC_MAP; i++) {
 		struct mem_ipc_device *dev = mld->dev[i];
 		int ret;
 
@@ -281,7 +283,7 @@ static enum hrtimer_restart tx_timer_func(struct hrtimer *timer)
 	}
 
 	if (!need_schedule) {
-		for (i = 0; i < MAX_SIPC5_DEVICES; i++) {
+		for (i = 0; i < MAX_SIPC_MAP; i++) {
 			if (!txq_empty(mld->dev[i])) {
 				need_schedule = true;
 				break;
@@ -532,7 +534,7 @@ static int xmit_ipc_to_dev(struct mem_link_device *mld, enum sipc_ch_id ch,
 	struct link_device *ld = &mld->link_dev;
 	struct io_device *iod = skbpriv(skb)->iod;
 	struct modem_ctl *mc = ld->mc;
-	struct mem_ipc_device *dev = mld->dev[dev_id(ch)];
+	struct mem_ipc_device *dev = mld->dev[get_mmap_idx(ch, skb)];
 	struct sk_buff_head *skb_txq;
 	unsigned long flags;
 
@@ -650,7 +652,7 @@ static int xmit_udl(struct mem_link_device *mld, struct io_device *iod,
 		    enum sipc_ch_id ch, struct sk_buff *skb)
 {
 	int ret;
-	struct mem_ipc_device *dev = mld->dev[IPC_RAW];
+	struct mem_ipc_device *dev = mld->dev[IPC_MAP_NORM_RAW];
 	int count = skb->len;
 	int tried = 0;
 
@@ -719,7 +721,7 @@ static inline void link_to_demux(struct mem_link_device  *mld)
 {
 	int i;
 
-	for (i = 0; i < MAX_SIPC5_DEVICES; i++) {
+	for (i = 0; i < MAX_SIPC_MAP; i++) {
 		struct mem_ipc_device *dev = mld->dev[i];
 		struct sk_buff_head *skb_rxq = dev->skb_rxq;
 
@@ -885,7 +887,7 @@ static void recv_ipc_frames(struct mem_link_device *mld,
 	int i;
 	u16 intr = mst->int2ap;
 
-	for (i = 0; i < MAX_SIPC5_DEVICES; i++) {
+	for (i = 0; i < MAX_SIPC_MAP; i++) {
 		struct mem_ipc_device *dev = mld->dev[i];
 		int rcvd;
 
@@ -920,7 +922,7 @@ static void pass_skb_to_net(struct mem_link_device *mld, struct sk_buff *skb)
 
 	priv = skbpriv(skb);
 	if (unlikely(!priv)) {
-		mif_err("%s: ERR! No PRIV in skb@%p\n", ld->name, skb);
+		mif_err("%s: ERR! No PRIV in skb@%pK\n", ld->name, skb);
 		dev_kfree_skb_any(skb);
 		mem_forced_cp_crash(mld);
 		return;
@@ -928,7 +930,7 @@ static void pass_skb_to_net(struct mem_link_device *mld, struct sk_buff *skb)
 
 	iod = priv->iod;
 	if (unlikely(!iod)) {
-		mif_err("%s: ERR! No IOD in skb@%p\n", ld->name, skb);
+		mif_err("%s: ERR! No IOD in skb@%pK\n", ld->name, skb);
 		dev_kfree_skb_any(skb);
 		mem_forced_cp_crash(mld);
 		return;
@@ -1246,7 +1248,7 @@ static inline void reset_ipc_map(struct mem_link_device *mld)
 {
 	int i;
 
-	for (i = 0; i < MAX_SIPC5_DEVICES; i++) {
+	for (i = 0; i < MAX_SIPC_MAP; i++) {
 		struct mem_ipc_device *dev = mld->dev[i];
 
 		set_txq_head(dev, 0);
@@ -1268,7 +1270,7 @@ int mem_reset_ipc_link(struct mem_link_device *mld)
 
 	reset_ipc_map(mld);
 
-	for (i = 0; i < MAX_SIPC5_DEVICES; i++) {
+	for (i = 0; i < MAX_SIPC_MAP; i++) {
 		struct mem_ipc_device *dev = mld->dev[i];
 
 		skb_queue_purge(dev->skb_txq);
@@ -1651,7 +1653,7 @@ int mem_register_boot_rgn(struct mem_link_device *mld, phys_addr_t start,
 	if (!pages)
 		return -ENOMEM;
 
-	mif_err("%s: BOOT_RGN start:%pa size:%zu\n", ld->name, &start, size);
+	mif_err("%s: BOOT_RGN start:%pK size:%zu\n", ld->name, &start, size);
 
 	mld->boot_start = start;
 	mld->boot_size = size;
@@ -1685,7 +1687,7 @@ int mem_setup_boot_map(struct mem_link_device *mld)
 
 	mld->boot_base = (char __iomem *)base;
 
-	mif_err("%s: BOOT_RGN phys_addr:%pa virt_addr:%p size:%zu\n",
+	mif_err("%s: BOOT_RGN phys_addr:%pK virt_addr:%pK size:%zu\n",
 		ld->name, &start, base, size);
 
 	return 0;
@@ -1703,10 +1705,10 @@ static void remap_4mb_map_to_ipc_dev(struct mem_link_device *mld)
 	mld->magic = (u32 __iomem *)&map->magic;
 	mld->access = (u32 __iomem *)&map->access;
 
-	/* IPC_FMT */
-	dev = &mld->ipc_dev[IPC_FMT];
+	/* IPC_MAP_FMT */
+	dev = &mld->ipc_dev[IPC_MAP_FMT];
 
-	dev->id = IPC_FMT;
+	dev->id = IPC_MAP_FMT;
 	strcpy(dev->name, "FMT");
 
 	spin_lock_init(&dev->txq.lock);
@@ -1727,22 +1729,22 @@ static void remap_4mb_map_to_ipc_dev(struct mem_link_device *mld)
 	dev->req_ack_mask = MASK_REQ_ACK_FMT;
 	dev->res_ack_mask = MASK_RES_ACK_FMT;
 
-	dev->tx_lock = &ld->tx_lock[IPC_FMT];
+	dev->tx_lock = &ld->tx_lock[IPC_MAP_FMT];
 	dev->skb_txq = &ld->sk_fmt_tx_q;
 
-	dev->rx_lock = &ld->rx_lock[IPC_FMT];
+	dev->rx_lock = &ld->rx_lock[IPC_MAP_FMT];
 	dev->skb_rxq = &ld->sk_fmt_rx_q;
 
 	dev->req_ack_cnt[TX] = 0;
 	dev->req_ack_cnt[RX] = 0;
 
-	mld->dev[IPC_FMT] = dev;
+	mld->dev[IPC_MAP_FMT] = dev;
 
-	/* IPC_RAW */
-	dev = &mld->ipc_dev[IPC_RAW];
+	/* IPC_MAP_NORM_RAW */
+	dev = &mld->ipc_dev[IPC_MAP_NORM_RAW];
 
-	dev->id = IPC_RAW;
-	strcpy(dev->name, "RAW");
+	dev->id = IPC_MAP_NORM_RAW;
+	strcpy(dev->name, "NORM_RAW");
 
 	spin_lock_init(&dev->txq.lock);
 	atomic_set(&dev->txq.busy, 0);
@@ -1762,16 +1764,16 @@ static void remap_4mb_map_to_ipc_dev(struct mem_link_device *mld)
 	dev->req_ack_mask = MASK_REQ_ACK_RAW;
 	dev->res_ack_mask = MASK_RES_ACK_RAW;
 
-	dev->tx_lock = &ld->tx_lock[IPC_RAW];
+	dev->tx_lock = &ld->tx_lock[IPC_MAP_NORM_RAW];
 	dev->skb_txq = &ld->sk_raw_tx_q;
 
-	dev->rx_lock = &ld->rx_lock[IPC_RAW];
+	dev->rx_lock = &ld->rx_lock[IPC_MAP_NORM_RAW];
 	dev->skb_rxq = &ld->sk_raw_rx_q;
 
 	dev->req_ack_cnt[TX] = 0;
 	dev->req_ack_cnt[RX] = 0;
 
-	mld->dev[IPC_RAW] = dev;
+	mld->dev[IPC_MAP_NORM_RAW] = dev;
 }
 
 int mem_register_ipc_rgn(struct mem_link_device *mld, phys_addr_t start,
@@ -1785,7 +1787,7 @@ int mem_register_ipc_rgn(struct mem_link_device *mld, phys_addr_t start,
 	if (!pages)
 		return -ENOMEM;
 
-	mif_err("%s: IPC_RGN start:%pa size:%zu\n", ld->name, &start, size);
+	mif_err("%s: IPC_RGN start:%pK size:%zu\n", ld->name, &start, size);
 
 	mld->start = start;
 	mld->size = size;
@@ -1944,7 +1946,7 @@ struct mem_link_device *mem_create_link_device(enum mem_iface_type type,
 	skb_queue_head_init(&ld->sk_fmt_rx_q);
 	skb_queue_head_init(&ld->sk_raw_rx_q);
 
-	for (i = 0; i < MAX_SIPC5_DEVICES; i++) {
+	for (i = 0; i < MAX_SIPC_MAP; i++) {
 		spin_lock_init(&ld->tx_lock[i]);
 		spin_lock_init(&ld->rx_lock[i]);
 	}

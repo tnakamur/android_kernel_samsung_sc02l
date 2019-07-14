@@ -23,6 +23,11 @@
 #include <linux/etherdevice.h>
 #include <linux/device.h>
 #include <linux/module.h>
+#include <net/ip.h>
+#include <linux/ip.h>
+#include <linux/tcp.h>
+#include <linux/time.h>
+#include <linux/timer.h>
 #include <soc/samsung/pmu-cp.h>
 
 #include "modem_prj.h"
@@ -292,6 +297,25 @@ static int rx_raw_misc(struct sk_buff *skb)
 	return queue_skb_to_iod(skb, iod);
 }
 
+#ifdef CONFIG_MODEM_IF_NET_GRO
+static int check_gro_support(struct sk_buff *skb)
+{
+	switch (skb->data[0] & 0xF0) {
+	case 0x40:
+		return (ip_hdr(skb)->protocol == IPPROTO_TCP);
+
+	case 0x60:
+		return (ipv6_hdr(skb)->nexthdr == IPPROTO_TCP);
+	}
+	return 0;
+}
+#else
+static int check_gro_support(struct sk_buff *skb)
+{
+	return 0;
+}
+#endif
+
 static int rx_multi_pdp(struct sk_buff *skb)
 {
 	struct link_device *ld = skbpriv(skb)->ld;
@@ -343,16 +367,31 @@ static int rx_multi_pdp(struct sk_buff *skb)
 	mif_pkt(iod->id, "IOD-RX", skb);
 #endif
 
-	if (in_interrupt())
-		ret = netif_rx(skb);
-	else
-		ret = netif_rx_ni(skb);
+	skb_reset_transport_header(skb);
+	skb_reset_network_header(skb);
 
-	if (ret != NET_RX_SUCCESS) {
-		mif_err_limited("%s: %s<-%s: ERR! netif_rx fail\n",
-				ld->name, iod->name, iod->mc->name);
+	if (check_gro_support(skb)) {
+		ret = napi_gro_receive(napi_get_current(), skb);
+		if (ret == GRO_DROP) {
+			ndev->stats.rx_dropped++;
+		}
+
+		if (ld->gro_flush)
+			ld->gro_flush(ld);
+	} else {
+#ifdef CONFIG_LINK_DEVICE_NAPI
+		ret = netif_receive_skb(skb);
+#else /* !CONFIG_LINK_DEVICE_NAPI */
+		if (in_interrupt())
+			ret = netif_rx(skb);
+		else
+			ret = netif_rx_ni(skb);
+#endif /* CONFIG_LINK_DEVICE_NAPI */
+
+		if (ret != NET_RX_SUCCESS) {
+			ndev->stats.rx_dropped++;
+		}
 	}
-
 	return len;
 }
 
@@ -1074,7 +1113,7 @@ static ssize_t misc_read(struct file *filp, char *buf, size_t count,
 		skb_pull(skb, copied);
 		skb_queue_head(rxq, skb);
 	} else {
-		dev_kfree_skb_any(skb);
+		dev_consume_skb_any(skb);
 	}
 
 	return copied;
@@ -1269,7 +1308,7 @@ static int vnet_xmit(struct sk_buff *skb, struct net_device *ndev)
 	($skb_new will be freed by the link device.)
 	*/
 	if (skb_new != skb)
-		dev_kfree_skb_any(skb);
+		dev_consume_skb_any(skb);
 
 	return NETDEV_TX_OK;
 
@@ -1279,7 +1318,7 @@ retry:
 	because @skb will be reused by NET_TX.
 	*/
 	if (skb_new && skb_new != skb)
-		dev_kfree_skb_any(skb_new);
+		dev_consume_skb_any(skb_new);
 
 	return NETDEV_TX_BUSY;
 
@@ -1292,7 +1331,7 @@ drop:
 	If @skb has been expanded to $skb_new, $skb_new must also be freed here.
 	*/
 	if (skb_new != skb)
-		dev_kfree_skb_any(skb_new);
+		dev_consume_skb_any(skb_new);
 
 	return NETDEV_TX_OK;
 }
@@ -1333,6 +1372,9 @@ static void vnet_setup(struct net_device *ndev)
 	ndev->tx_queue_len = 1000;
 	ndev->mtu = ETH_DATA_LEN;
 	ndev->watchdog_timeo = 5 * HZ;
+#ifdef CONFIG_MODEM_IF_NET_GRO
+	ndev->features |= NETIF_F_GRO;
+#endif
 }
 
 static void vnet_setup_ether(struct net_device *ndev)
@@ -1346,6 +1388,9 @@ static void vnet_setup_ether(struct net_device *ndev)
 	ndev->tx_queue_len = 1000;
 	ndev->mtu = ETH_DATA_LEN;
 	ndev->watchdog_timeo = 5 * HZ;
+#ifdef CONFIG_MODEM_IF_NET_GRO
+	ndev->features |= NETIF_F_GRO;
+#endif
 }
 
 static inline void sipc5_inc_info_id(struct io_device *iod)
@@ -1470,11 +1515,14 @@ int sipc5_init_io_device(struct io_device *iod)
 		INIT_LIST_HEAD(&iod->node_ndev);
 
 		if (iod->use_handover)
-			iod->ndev = alloc_netdev_mqs(0, iod->name, NET_NAME_UNKNOWN,
-				vnet_setup_ether, MAX_NDEV_TX_Q, MAX_NDEV_RX_Q);
+			iod->ndev = alloc_netdev_mqs(sizeof(struct vnet),
+					iod->name, NET_NAME_UNKNOWN,
+					vnet_setup_ether, MAX_NDEV_TX_Q,
+					MAX_NDEV_RX_Q);
 		else
-			iod->ndev = alloc_netdev_mqs(0, iod->name, NET_NAME_UNKNOWN,
-				vnet_setup, MAX_NDEV_TX_Q, MAX_NDEV_RX_Q);
+			iod->ndev = alloc_netdev_mqs(sizeof(struct vnet),
+					iod->name, NET_NAME_UNKNOWN, vnet_setup,
+					MAX_NDEV_TX_Q, MAX_NDEV_RX_Q);
 
 		if (!iod->ndev) {
 			mif_info("%s: ERR! alloc_netdev fail\n", iod->name);
@@ -1487,9 +1535,9 @@ int sipc5_init_io_device(struct io_device *iod)
 			free_netdev(iod->ndev);
 		}
 
-		mif_debug("iod 0x%p\n", iod);
+		mif_debug("iod 0x%pK\n", iod);
 		vnet = netdev_priv(iod->ndev);
-		mif_debug("vnet 0x%p\n", vnet);
+		mif_debug("vnet 0x%pK\n", vnet);
 		vnet->iod = iod;
 
 		break;

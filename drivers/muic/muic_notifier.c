@@ -30,12 +30,12 @@
 		SET_MUIC_NOTIFIER_BLOCK(nb, NULL, -1)
 
 static struct muic_notifier_struct muic_notifier;
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)
 static struct muic_notifier_struct muic_ccic_notifier;
 #endif
 
 static int muic_uses_new_noti;
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)
 static int muic_ccic_uses_new_noti;
 #endif
 
@@ -81,7 +81,7 @@ static void __set_noti_cxt(int attach, int type)
 #endif
 }
 
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)
 static void __set_ccic_noti_cxt(int attach, int type)
 {
 	if (type < 0) {
@@ -205,7 +205,7 @@ static int muic_notifier_notify(void)
 	return ret;
 }
 
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)
 int muic_ccic_notifier_register(struct notifier_block *nb, notifier_fn_t notifier,
 			muic_notifier_device_t listener)
 {
@@ -304,7 +304,7 @@ void muic_pdic_notifier_attach_attached_dev(muic_attached_dev_t new_dev)
 {
 	pr_info("%s: (%d)\n", __func__, new_dev);
 
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)
 	__set_ccic_noti_cxt(MUIC_PDIC_NOTIFY_CMD_ATTACH, new_dev);
 
 	/* muic's attached_device attach broadcast */
@@ -321,7 +321,7 @@ void muic_pdic_notifier_detach_attached_dev(muic_attached_dev_t new_dev)
 {
 	pr_info("%s: (%d)\n", __func__, new_dev);
 
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)
 	__set_ccic_noti_cxt(MUIC_PDIC_NOTIFY_CMD_DETACH, new_dev);
 
 	/* muic's attached_device attach broadcast */
@@ -394,7 +394,7 @@ static int __init muic_notifier_init(void)
 #endif
 	BLOCKING_INIT_NOTIFIER_HEAD(&(muic_notifier.notifier_call_chain));
 	__set_noti_cxt(0, ATTACHED_DEV_UNKNOWN_MUIC);
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)
 	BLOCKING_INIT_NOTIFIER_HEAD(&(muic_ccic_notifier.notifier_call_chain));
 	__set_ccic_noti_cxt(0, ATTACHED_DEV_UNKNOWN_MUIC);
 	muic_ccic_uses_new_noti = 1;

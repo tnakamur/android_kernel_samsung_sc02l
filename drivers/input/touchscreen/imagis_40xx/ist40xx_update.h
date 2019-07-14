@@ -33,6 +33,7 @@
 #define rISP_AUTO_READ_CTRL         IST40XX_DA_ADDR(rISP_BASE | 0x14)
 #define rISP_CRC                    IST40XX_DA_ADDR(rISP_BASE | 0x18)
 #define rISP_COMPARE_MODE           IST40XX_DA_ADDR(rISP_BASE | 0x1C)
+#define rISP_TMODE1                 IST40XX_DA_ADDR(rISP_BASE | 0x30)
 #define rISP_STATUS                 IST40XX_DA_ADDR(rISP_BASE | 0x90)
 
 // DMA

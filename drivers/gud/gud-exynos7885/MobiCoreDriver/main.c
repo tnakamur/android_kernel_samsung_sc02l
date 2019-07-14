@@ -22,6 +22,7 @@
 
 #include "public/mc_user.h"
 #include "public/mc_admin.h"	/* MC_ADMIN_DEVNODE */
+/* ExySp */
 #include "public/mc_linux_api.h"
 
 #include "platform.h"		/* MC_PM_RUNTIME */
@@ -40,6 +41,7 @@
 #include "client.h"
 
 #include "build_tag.h"
+/* ExySp */
 #define MC_DEVICE_PROPNAME     "samsung,exynos-tee"
 
 /* Define a MobiCore device structure for use with dev_debug() etc */

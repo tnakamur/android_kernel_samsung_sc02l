@@ -45,7 +45,7 @@ static void slsi_fw_test_process_frame(struct slsi_dev *sdev, struct slsi_fw_tes
 
 	vif = fapi_get_vif(skb);
 
-	SLSI_DBG3(sdev, SLSI_FW_TEST, "sig:0x%.4X, vif:%d", fapi_get_sigid(skb), vif);
+	SLSI_DBG3(sdev, SLSI_FW_TEST, "sig:0x%.4X, vif:%d\n", fapi_get_sigid(skb), vif);
 	slsi_debug_frame(sdev, NULL, skb, "PROCESS");
 
 	slsi_skb_work_enqueue(&fwtest->fw_test_work, skb);
@@ -211,7 +211,7 @@ static void slsi_fw_test_connect_start_station(struct slsi_dev *sdev, struct net
 	dev->ieee80211_ptr->iftype = NL80211_IFTYPE_STATION;
 	ndev_vif->vif_type = FAPI_VIFTYPE_STATION;
 
-	SLSI_NET_DBG1(dev, SLSI_FW_TEST, "vif:%d slsi_vif_activated", ndev_vif->ifnum);
+	SLSI_NET_DBG1(dev, SLSI_FW_TEST, "vif:%d slsi_vif_activated\n", ndev_vif->ifnum);
 	if (WARN(slsi_vif_activated(sdev, dev) != 0, "slsi_vif_activated() Failed"))
 		return;
 

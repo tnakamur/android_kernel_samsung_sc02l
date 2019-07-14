@@ -69,8 +69,8 @@
 #endif
 
 /*
-IOCTL commands
-*/
+ * IOCTL commands
+ */
 #define IOCTL_MODEM_ON			_IO('o', 0x19)
 #define IOCTL_MODEM_OFF			_IO('o', 0x20)
 #define IOCTL_MODEM_RESET		_IO('o', 0x21)
@@ -283,7 +283,7 @@ enum iod_rx_state {
 	MAX_IOD_RX_STATE
 };
 
-static const char const *rx_state_string[] = {
+static const char * const rx_state_string[] = {
 	[IOD_RX_ON_STANDBY]	= "RX_ON_STANDBY",
 	[IOD_RX_HEADER]		= "RX_HEADER",
 	[IOD_RX_PAYLOAD]	= "RX_PAYLOAD",
@@ -318,7 +318,6 @@ struct io_device {
 	struct miscdevice  miscdev;
 	struct net_device *ndev;
 	struct list_head node_ndev;
-	struct napi_struct napi;
 
 	/* ID and Format for channel on the link */
 	unsigned int id;
@@ -512,6 +511,17 @@ struct link_device {
 
 	/* Reset buffer & dma_addr for zerocopy */
 	void (*reset_zerocopy)(struct link_device *ld);
+
+#ifdef CONFIG_LINK_DEVICE_NAPI
+	/* Poll function for NAPI */
+	int (*poll_recv_on_iod)(struct link_device *ld, struct io_device *iod,
+			int budget);
+
+	int (*enable_rx_int)(struct link_device *ld);
+	int (*disable_rx_int)(struct link_device *ld);
+#endif /* CONFIG_LINK_DEVICE_NAPI */
+
+	void (*gro_flush)(struct link_device *ld);
 };
 
 #define pm_to_link_device(pm)	container_of(pm, struct link_device, pm)
@@ -763,5 +773,14 @@ static inline bool rx_possible(struct modem_ctl *mc)
 
 int sipc5_init_io_device(struct io_device *iod);
 void sipc5_deinit_io_device(struct io_device *iod);
+
+#if defined(CONFIG_RPS) && defined(CONFIG_ARGOS)
+extern struct net init_net;
+extern int sec_argos_register_notifier(struct notifier_block *n, char *label);
+extern int sec_argos_unregister_notifier(struct notifier_block *n, char *label);
+int mif_init_argos_notifier(void);
+#else
+static inline int mif_init_argos_notifier(void) { return 0; }
+#endif
 
 #endif

@@ -112,6 +112,8 @@ static void mfc_handle_frame_all_extracted(struct s5p_mfc_ctx *ctx)
 			vb2_set_plane_payload(&dst_mb->vb.vb2_buf, i, 0);
 
 		dst_mb->vb.sequence = (ctx->sequence++);
+		dst_mb->vb.reserved2 = 0;
+
 		if (is_interlace) {
 			interlace_type = s5p_mfc_get_interlace_type();
 			if (interlace_type)
@@ -566,10 +568,17 @@ static void mfc_handle_reuse_buffer(struct s5p_mfc_ctx *ctx)
 	if (!released_flag)
 		return;
 
-	/* reuse not referenced buf anymore */
+	/* Reuse not referenced buf anymore */
 	for (i = 0; i < MFC_MAX_DPBS; i++)
 		if (released_flag & (1 << i))
-			s5p_mfc_move_reuse_buffer(ctx, i);
+			if (s5p_mfc_move_reuse_buffer(ctx, i))
+				released_flag &= ~(1 << i);
+
+	/* Not reused buffer should be released when there is a display frame */
+	dec->dec_only_release_flag |= released_flag;
+	for (i = 0; i < MFC_MAX_DPBS; i++)
+		if (released_flag & (1 << i))
+			clear_bit(i, &dec->available_dpb);
 }
 
 /* Handle frame decoding interrupt */

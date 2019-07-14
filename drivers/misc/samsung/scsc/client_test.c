@@ -290,6 +290,7 @@ static ssize_t client_test_dev_write(struct file *file, const char *data, size_t
 	unsigned long count;
 	char          str[2]; /* One value and carry return */
 	long int      val = 0;
+	bool          ok = true;
 
 	if (len > 2) {
 		SCSC_TAG_ERR(MXMAN_TEST, "Incorrect value len %zd\n", len);
@@ -308,7 +309,7 @@ static ssize_t client_test_dev_write(struct file *file, const char *data, size_t
 	if (test) {
 		if (val) {
 			SCSC_TAG_INFO(MXMAN_TEST, "Start services\n");
-			open_start_services(test->mx);
+			ok = open_start_services(test->mx);
 		} else {
 			SCSC_TAG_INFO(MXMAN_TEST, "Stop services\n");
 			stop_close_services();
@@ -317,9 +318,9 @@ static ssize_t client_test_dev_write(struct file *file, const char *data, size_t
 		SCSC_TAG_ERR(MXMAN_TEST, "Test not created\n");
 		goto error;
 	}
-	SCSC_TAG_ERR(MXMAN_TEST, "OK\n");
 error:
-	return len;
+	SCSC_TAG_ERR(MXMAN_TEST, "%s\n", ok ? "OK" : "FAIL");
+	return ok ? len : -EIO;
 }
 
 static ssize_t client_test_dev_read(struct file *filp, char *buffer, size_t length, loff_t *offset)

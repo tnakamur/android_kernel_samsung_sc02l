@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (c) 2012 - 2017 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2012 - 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
 
@@ -73,6 +73,8 @@ enum slsi_ac_index_wmm_pe {
 #define SLSI_ACTION_FRAME_WMM     (1 << 17)
 #define SLSI_ACTION_FRAME_WNM     (1 << 10)
 #define SLSI_ACTION_FRAME_QOS     (1 << 1)
+#define SLSI_ACTION_FRAME_PROTECTED_DUAL    BIT(9)
+#define SLSI_ACTION_FRAME_RADIO_MEASUREMENT    BIT(5)
 
 /* Firmware transmit rates */
 #define SLSI_TX_RATE_NON_HT_1MBPS 0x4001
@@ -99,10 +101,22 @@ extern struct ieee80211_sta_vht_cap       slsi_vht_cap;
 #define SLSI_MAX_PATTERN_LENGTH 6
 
 /*Default values of MIBS params for GET_STA_INFO driver private command */
-#define SLSI_DEFAULT_UNIFI_PEER_BANDWIDTH             -1
-#define SLSI_DEFAULT_UNIFI_PEER_NSS                          0
-#define SLSI_DEFAULT_UNIFI_PEER_RSSI                         1
-#define SLSI_DEFAULT_UNIFI_PEER_TX_DATA_RATE          0
+#define SLSI_DEFAULT_UNIFI_PEER_RX_RETRY_PACKETS 0
+#define SLSI_DEFAULT_UNIFI_PEER_RX_BC_MC_PACKETS 0
+#define SLSI_DEFAULT_UNIFI_PEER_BANDWIDTH       -1
+#define SLSI_DEFAULT_UNIFI_PEER_NSS              0
+#define SLSI_DEFAULT_UNIFI_PEER_RSSI             1
+#define SLSI_DEFAULT_UNIFI_PEER_TX_DATA_RATE     0
+
+#define SLSI_CHECK_TYPE(sdev, recv_type, exp_type) \
+	do { \
+		int var1 = recv_type; \
+		int var2 = exp_type; \
+		if (var1 != var2) { \
+			SLSI_WARN(sdev, "Type mismatched, expected type: %d and received type %d ", var2, var1); \
+		} \
+	} while (0)
+
 
 struct slsi_mlme_pattern_desc {
 	u8 offset;
@@ -119,7 +133,8 @@ struct slsi_mlme_pkt_filter_elem {
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 9))
 u16 slsi_get_chann_info(struct slsi_dev *sdev, struct cfg80211_chan_def *chandef);
-int slsi_check_channelization(struct slsi_dev *sdev, struct cfg80211_chan_def *chandef);
+int slsi_check_channelization(struct slsi_dev *sdev, struct cfg80211_chan_def *chandef,
+			      int wifi_sharing_channel_switched);
 #else
 u16 slsi_get_chann_info(struct slsi_dev *sdev, enum nl80211_channel_type channel_type);
 int slsi_check_channelization(struct slsi_dev *sdev, enum nl80211_channel_type channel_type);
@@ -138,6 +153,7 @@ void slsi_mlme_del_vif(struct slsi_dev *sdev, struct net_device *dev);
 int slsi_mlme_set_channel(struct slsi_dev *sdev, struct net_device *dev, struct ieee80211_channel *chan, u16 duration, u16 interval, u16 count);
 void slsi_ap_obss_scan_done_ind(struct net_device *dev, struct netdev_vif *ndev_vif);
 
+u16 slsi_compute_chann_info(struct slsi_dev *sdev, u16 width, u16 center_freq0, u16 channel_freq);
 /**
  * slsi_mlme_add_autonomous_scan() Returns:
  *  0 : Scan installed
@@ -197,7 +213,8 @@ int slsi_mlme_register_action_frame(struct slsi_dev *sdev, struct net_device *de
 int slsi_mlme_channel_switch(struct slsi_dev *sdev, struct net_device *dev,  u16 center_freq, u16 chan_info);
 int slsi_mlme_add_info_elements(struct slsi_dev *sdev, struct net_device *dev,  u16 purpose, const u8 *ies, const u16 ies_len);
 int slsi_mlme_send_frame_mgmt(struct slsi_dev *sdev, struct net_device *dev, const u8 *frame, int frame_len, u16 data_desc, u16 msg_type, u16 host_tag, u16 freq, u32 dwell_time, u32 period);
-int slsi_mlme_send_frame_data(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *skb, u16 host_tag, u16 msg_type, u32 period);
+int slsi_mlme_send_frame_data(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *skb, u16 msg_type,
+			      u16 host_tag, u32 dwell_time, u32 period);
 int slsi_mlme_reset_dwell_time(struct slsi_dev *sdev, struct net_device *dev);
 int slsi_mlme_set_packet_filter(struct slsi_dev *sdev, struct net_device *dev, int pkt_filter_len, u8 num_filters, struct slsi_mlme_pkt_filter_elem *pkt_filter_elems);
 void slsi_mlme_connect_resp(struct slsi_dev *sdev, struct net_device *dev);
@@ -220,6 +237,14 @@ int slsi_mlme_set_pno_list(struct slsi_dev *sdev, int count,
 			   struct slsi_epno_param *epno_param, struct slsi_epno_hs2_param *epno_hs2_param);
 int slsi_mlme_start_link_stats_req(struct slsi_dev *sdev, u16 mpdu_size_threshold, bool aggressive_statis_enabled);
 int slsi_mlme_stop_link_stats_req(struct slsi_dev *sdev, u16 stats_stop_mask);
+int slsi_mlme_nan_enable(struct slsi_dev *sdev, struct net_device *dev, struct slsi_hal_nan_enable_req *hal_req);
+int slsi_mlme_nan_publish(struct slsi_dev *sdev, struct net_device *dev, struct slsi_hal_nan_publish_req *hal_req,
+			  u16 publish_id);
+int slsi_mlme_nan_subscribe(struct slsi_dev *sdev, struct net_device *dev, struct slsi_hal_nan_subscribe_req *hal_req,
+			    u16 subscribe_id);
+int slsi_mlme_nan_tx_followup(struct slsi_dev *sdev, struct net_device *dev,
+			      struct slsi_hal_nan_transmit_followup_req *hal_req);
+int slsi_mlme_nan_set_config(struct slsi_dev *sdev, struct net_device *dev, struct slsi_hal_nan_config_req *hal_req);
 #endif
 
 int slsi_mlme_set_ext_capab(struct slsi_dev *sdev, struct net_device *dev, struct slsi_mib_value *mib_val);
@@ -234,4 +259,7 @@ int slsi_mlme_set_ctwindow(struct slsi_dev *sdev, struct net_device *dev, unsign
 int slsi_mlme_set_p2p_noa(struct slsi_dev *sdev, struct net_device *dev, unsigned int noa_count,
 			  unsigned int interval, unsigned int duration);
 void slsi_fw_tx_rate_calc(u16 fw_rate, struct rate_info *tx_rate, unsigned long *data_rate_mbps);
+int slsi_test_sap_configure_monitor_mode(struct slsi_dev *sdev, struct net_device *dev, struct cfg80211_chan_def *chandef);
+
+struct sk_buff *slsi_mlme_req_cfm(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *skb, u16 cfm_id);
 #endif /*__SLSI_MLME_H__*/

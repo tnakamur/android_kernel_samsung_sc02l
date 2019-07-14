@@ -1,8 +1,5 @@
-/* sn65dsi86_gview2_lcd_ctrl.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2018 Samsung Electronics
+/*
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -34,16 +31,7 @@
 #include "dpui.h"
 #endif
 
-#define HX8876_ID_REG			0x04	/* LCD ID1,ID2,ID3 */
 #define HX8876_ID_LEN			3
-
-#define get_bit(value, shift, width)	((value >> shift) & (GENMASK(width - 1, 0)))
-
-#define DSI_WRITE(cmd, size)		do {				\
-	ret = dsim_write_hl_data(lcd, cmd, size);			\
-	if (ret < 0)							\
-		dev_err(&lcd->ld->dev, "%s: failed to write %s\n", __func__, #cmd);	\
-} while (0)
 
 struct bridge_log {
 	ktime_t stamp;
@@ -61,9 +49,7 @@ struct bridge_trace {
 
 struct lcd_info {
 	unsigned int			connected;
-	unsigned int			bl;
 	unsigned int			brightness;
-	unsigned int			current_bl;
 	unsigned int			state;
 
 	struct lcd_device		*ld;
@@ -77,19 +63,15 @@ struct lcd_info {
 		u32			value;
 	} id_info;
 
-	int				lux;
-
 	struct dsim_device		*dsim;
 	struct mutex			lock;
 
 	struct notifier_block		fb_notif_panel;
-	struct notifier_block		abd_panel_register_notifier;
 
 	struct i2c_client		*blic_1;
 	struct i2c_client		*blic_2;
 	struct i2c_client		*bridge;
 
-	struct u8			*dft_bridge_param;
 	struct dentry			*debug_root;
 	struct bridge_trace		b_first;
 	struct bridge_trace		b_lcdon;
@@ -286,7 +268,7 @@ exit:
 
 static int panel_get_brightness(struct backlight_device *bd)
 {
-	return bd->props.brightness;
+	return brightness_table[bd->props.brightness];
 }
 
 static int panel_set_brightness(struct backlight_device *bd)
@@ -364,14 +346,12 @@ static int sn65dsi86_abd_print(struct seq_file *m, struct bridge_trace *trace, u
 			(unsigned long)tv.tv_sec, tv.tv_usec, log->onoff);
 
 		seq_puts(m, "[--] ");
-		for (j = 0; j < 16; j++) {
+		for (j = 0; j < 16; j++)
 			seq_printf(m, "%02x ", j);
-		}
 		seq_puts(m, " ");
 		seq_puts(m, "[--] ");
-		for (j = 0; j < 16; j++) {
+		for (j = 0; j < 16; j++)
 			seq_printf(m, "%02x ", j);
-		}
 		seq_puts(m, "\n");
 
 		for (j = 0; j <= 0xff; j += 32) {
@@ -420,29 +400,6 @@ static void sn65dsi86_abd_register(struct lcd_info *lcd)
 	debugfs_create_file("debug", 0444, lcd->debug_root, lcd, &panel_debug_fops);
 
 	dev_info(&lcd->ld->dev, "- %s\n", __func__);
-}
-
-static int abd_panel_register_callback(struct notifier_block *self,
-			unsigned long event, void *data)
-{
-	struct fb_event *evdata = data;
-	struct lcd_info *lcd = NULL;
-
-	switch (event) {
-	/* case FB_EARLY_EVENT_BLANK: */
-		break;
-	default:
-		return NOTIFY_DONE;
-	}
-
-	if (evdata->info->node)
-		return NOTIFY_DONE;
-
-	lcd = container_of(self, struct lcd_info, abd_panel_register_notifier);
-
-	dev_info(&lcd->ld->dev, "%s\n", __func__);
-
-	return NOTIFY_DONE;
 }
 
 static void sn65dsi86_dump(struct lcd_info *lcd, struct seq_file *m)
@@ -519,9 +476,7 @@ static void sn65dsi86_check_lt_fail(struct lcd_info *lcd)
 
 
 	if (rx_val & 0x02) {
-#ifndef CONFIG_SAMSUNG_PRODUCT_SHIP
 		inc_dpui_u32_field(DPUI_KEY_PNSDRE, 1);
-#endif
 		dev_err(&lcd->ld->dev, "%s: LT_FAIL [0x%02x]\n", __func__, rx_val);
 	}
 }
@@ -652,18 +607,80 @@ exit:
 	return ret;
 }
 
-static int sn65dsi86_command(struct i2c_client *client, unsigned cmd, void *arg)
+static int sn65dsi86_command(struct i2c_client *client, unsigned int num, void *arg)
 {
 	struct lcd_info *lcd = i2c_get_clientdata(client);
-	u32 *i2c_msg = (u32 *)arg;
 	int ret = 0;
+	struct i2c_msg *xfer = arg;
+	unsigned int command = 0, value = 0, i = 0;
 
-	if (cmd & I2C_M_RD) {
-		dev_info(&lcd->ld->dev, "%s: rx: %x\n", __func__, i2c_msg[0]);
-		ret = (i2c_msg[0] > U8_MAX) ? sn65dsi86_dpcd_rx(client, i2c_msg[0]) : i2c_smbus_read_byte_data(client, i2c_msg[0]);
+	if (!client) {
+		dev_info(&lcd->ld->dev, "%s: client is null\n", __func__);
+		return ret;
+	}
+
+	if (!lcd) {
+		dev_info(&lcd->ld->dev, "%s: lcd is null\n", __func__);
+		return ret;
+	}
+
+	if (!arg) {
+		dev_info(&lcd->ld->dev, "%s: arg is null\n", __func__);
+		return ret;
+	}
+
+	if (num > 2) {
+		dev_info(&lcd->ld->dev, "%s: num(%d) is invalid\n", __func__, num);
+		return ret;
+	}
+
+	for (i = 0; i < num; i++, xfer++) {
+		if (!xfer) {
+			dev_info(&lcd->ld->dev, "%s: %02d xfer is null\n", __func__, i);
+			return ret;
+		}
+
+		if (xfer->buf) {
+			dev_info(&lcd->ld->dev, "%s: %02d buf is null\n", __func__, i);
+			return ret;
+		}
+
+		if ((xfer->flags & I2C_M_RD) && xfer->len != 1) {
+			dev_info(&lcd->ld->dev, "%s: %02d rx len(%d) is invalid\n", __func__, i, xfer->len);
+			return ret;
+		}
+
+		if (!(xfer->flags & I2C_M_RD) && (xfer->flags & I2C_M_TEN) && xfer->len != 3) {
+			dev_info(&lcd->ld->dev, "%s: %02d tx len(%d) is invalid for I2C_M_TEN\n", __func__, i, xfer->len);
+			return ret;
+		}
+
+		if (!(xfer->flags & I2C_M_RD) && !(xfer->flags & I2C_M_TEN) && xfer->len != 2) {
+			dev_info(&lcd->ld->dev, "%s: %02d tx len(%d) is invalid\n", __func__, i, xfer->len);
+			return ret;
+		}
+	}
+
+	if (xfer[0].flags & I2C_M_TEN) {
+		command = xfer[0].buf[0] << 8 || xfer[0].buf[1];
+		value = xfer[0].buf[2];
 	} else {
-		dev_info(&lcd->ld->dev, "%s: tx: %x, %x\n", __func__, i2c_msg[0], i2c_msg[1]);
-		ret = (i2c_msg[0] > U8_MAX) ? sn65dsi86_dpcd_tx(client, i2c_msg[0], i2c_msg[1]) : i2c_smbus_write_byte_data(client, i2c_msg[0], i2c_msg[1]);
+		command = xfer[0].buf[0];
+		value = xfer[0].buf[1];
+	}
+
+	if (num == 2) {
+		dev_info(&lcd->ld->dev, "%s: rx: %x\n", __func__, command);
+		ret = (command > U8_MAX) ? sn65dsi86_dpcd_rx(client, command) : i2c_smbus_read_byte_data(client, command);
+		if (ret < 0)
+			dev_info(&lcd->ld->dev, "%s: %02x, i2c_rx errno: %d\n", __func__, command, ret);
+		else
+			xfer[1].buf[0] = ret;
+	} else {
+		dev_info(&lcd->ld->dev, "%s: tx: %x, %x\n", __func__, command, value);
+		ret = (command > U8_MAX) ? sn65dsi86_dpcd_tx(client, command, value) : i2c_smbus_write_byte_data(client, command, value);
+		if (ret < 0)
+			dev_info(&lcd->ld->dev, "%s: %02x, i2c_tx errno: %d\n", __func__, command, ret);
 	}
 
 	return ret;
@@ -750,7 +767,6 @@ static int sn65dsi86_hx8876_probe(struct lcd_info *lcd)
 	lcd->bd->props.brightness = UI_DEFAULT_BRIGHTNESS;
 
 	lcd->state = PANEL_STATE_RESUMED;
-	lcd->lux = -1;
 
 	ret = sn65dsi86_hx8876_read_init_info(lcd);
 	if (ret < 0)
@@ -758,9 +774,6 @@ static int sn65dsi86_hx8876_probe(struct lcd_info *lcd)
 
 	lcd->fb_notif_panel.notifier_call = fb_notifier_callback;
 	decon_register_notifier(&lcd->fb_notif_panel);
-
-	lcd->abd_panel_register_notifier.notifier_call = abd_panel_register_callback;
-	decon_register_notifier(&lcd->abd_panel_register_notifier);
 
 	sn65dsi86_id[0].driver_data = (kernel_ulong_t)lcd;
 	i2c_add_driver(&sn65dsi86_i2c_driver);
@@ -771,8 +784,6 @@ static int sn65dsi86_hx8876_probe(struct lcd_info *lcd)
 
 	sn65dsi86_abd_register(lcd);
 	sn65dsi86_dump(lcd, NULL);
-
-	lcd->dft_bridge_param = kmemdup(sn65dsi86_param, sizeof(sn65dsi86_param), GFP_KERNEL);
 
 	dev_info(&lcd->ld->dev, "- %s\n", __func__);
 
@@ -794,7 +805,7 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }
@@ -813,74 +824,11 @@ static ssize_t bridge_dump_show(struct device *dev,
 	return strlen(buf);
 }
 
-static ssize_t bridge_param_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	int i;
-	struct seq_file m = {
-		.buf = buf,
-		.size = PAGE_SIZE - 1,
-	};
-
-	seq_printf(&m, "--|  0|  1|  2|\n");
-	seq_printf(&m, "---------------\n");
-
-	for (i = 0; i < ARRAY_SIZE(sn65dsi86_param); i += 3) {
-		seq_printf(&m, "%2d| %2x| %2x| %2x|\n", (i / 3), sn65dsi86_param[i + 0], sn65dsi86_param[i + 1], sn65dsi86_param[i + 2]);
-	}
-
-	seq_puts(&m, "\n");
-	seq_puts(&m, "# cd /sys/class/lcd/panel\n");
-	seq_puts(&m, "# echo col row val > bridge_param\n");
-
-	return strlen(buf);
-}
-
-static ssize_t bridge_param_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	int ret = 0;
-	int w = 0, h = 0, val = 0, idx = 0;
-
-	ret = sscanf(buf, "%8d %8d %8x", &w, &h, &val);
-
-	idx = h * 3 + w;
-
-	dev_info(&lcd->ld->dev, "%s: col: %d, row: %d, val: %x, ret: %d, idx: %d\n", __func__, w, h, val, ret, idx);
-
-	if (ret == 1 && w == 0) {
-		dev_info(&lcd->ld->dev, "%s: input is 0(zero). reset bridge param to default\n", __func__);
-		memcpy(sn65dsi86_param, lcd->dft_bridge_param, sizeof(sn65dsi86_param));
-		goto exit;
-	} else if (ret != 3) {
-		dev_info(&lcd->ld->dev, "%s: invalid input: ret: %d\n", __func__, ret);
-		goto exit;
-	}
-
-	if (idx >= ARRAY_SIZE(sn65dsi86_param)) {
-		dev_info(&lcd->ld->dev, "%s: invalid input: idx: %d\n", __func__, idx);
-		goto exit;
-	} else if (val > U8_MAX) {
-		dev_info(&lcd->ld->dev, "%s: invalid input: val: %d\n", __func__, val);
-		goto exit;
-	}
-
-	sn65dsi86_param[idx] = val;
-
-exit:
-	return count;
-}
-
 #ifdef CONFIG_DISPLAY_USE_INFO
 /*
  * HW PARAM LOGGING SYSFS NODE
  */
-/*
- * [DEV ONLY]
- * HW PARAM LOGGING SYSFS NODE
- */
-static ssize_t dpui_dbg_show(struct device *dev,
+static ssize_t dpui_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int ret;
@@ -897,7 +845,7 @@ static ssize_t dpui_dbg_show(struct device *dev,
 	return ret;
 }
 
-static ssize_t dpui_dbg_store(struct device *dev,
+static ssize_t dpui_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
 	if (buf[0] == 'C' || buf[0] == 'c')
@@ -906,22 +854,20 @@ static ssize_t dpui_dbg_store(struct device *dev,
 	return size;
 }
 
-static DEVICE_ATTR(dpui_dbg, 0660, dpui_dbg_show, dpui_dbg_store);
+static DEVICE_ATTR(dpui, 0660, dpui_show, dpui_store);
 #endif
 
 static DEVICE_ATTR(lcd_type, 0444, lcd_type_show, NULL);
 static DEVICE_ATTR(window_type, 0444, window_type_show, NULL);
 static DEVICE_ATTR(bridge_dump, 0444, bridge_dump_show, NULL);
-static DEVICE_ATTR(bridge_param, 0644, bridge_param_show, bridge_param_store);
 
 static struct attribute *lcd_sysfs_attributes[] = {
 	&dev_attr_lcd_type.attr,
 	&dev_attr_window_type.attr,
 	&dev_attr_bridge_dump.attr,
 #ifdef CONFIG_DISPLAY_USE_INFO
-	&dev_attr_dpui_dbg.attr,
+	&dev_attr_dpui.attr,
 #endif
-	&dev_attr_bridge_param.attr,
 	NULL,
 };
 
@@ -931,7 +877,7 @@ static const struct attribute_group lcd_sysfs_attr_group = {
 
 static void lcd_init_sysfs(struct lcd_info *lcd)
 {
-	int ret = 0;
+	int ret = 0, len;
 	struct i2c_client *clients[] = {lcd->bridge, lcd->blic_1, lcd->blic_2, NULL};
 
 	ret = sysfs_create_group(&lcd->ld->dev.kobj, &lcd_sysfs_attr_group);
@@ -939,6 +885,12 @@ static void lcd_init_sysfs(struct lcd_info *lcd)
 		dev_err(&lcd->ld->dev, "failed to add lcd sysfs\n");
 
 	init_debugfs_backlight(lcd->bd, brightness_table, clients);
+
+	len = ARRAY_SIZE(sn65dsi86_param);
+	init_debugfs_param("bridge", &sn65dsi86_param, 8 * sizeof(u8), len, 3);
+
+	len = ARRAY_SIZE(lp8558_param);
+	init_debugfs_param("blic", &lp8558_param, 8 * sizeof(u8), len, 2);
 }
 
 static int dsim_panel_probe(struct dsim_device *dsim)

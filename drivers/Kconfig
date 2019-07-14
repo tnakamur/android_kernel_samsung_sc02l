@@ -218,14 +218,20 @@ source "drivers/vision/Kconfig"
 
 source "drivers/ccic/Kconfig"
 
+source "drivers/tee/Kconfig"
+
 source "drivers/fingerprint/Kconfig"
 
 source "drivers/sensorhub/Kconfig"
 
 source "drivers/sensors/Kconfig"
 
+source "drivers/gps/Kconfig"
+
 source "drivers/motor/Kconfig"
 
 source "drivers/five/Kconfig"
+
+source "drivers/icdrv/Kconfig"
 
 endmenu

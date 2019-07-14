@@ -1297,6 +1297,20 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 				input_report_key(ts->input_dev, KEY_BLACK_UI_GESTURE, 1);
 				ts->all_aod_tap_count++;
 				break;
+			case SEC_TS_GESTURE_CODE_SINGLE_TAP:
+				ts->scrub_id = SPONGE_EVENT_TYPE_SINGLE_TAP;
+				ts->scrub_x = (p_gesture_status->gesture_data_1 << 4)
+							| (p_gesture_status->gesture_data_3 >> 4);
+				ts->scrub_y = (p_gesture_status->gesture_data_2 << 4)
+							| (p_gesture_status->gesture_data_3 & 0x0F);
+#ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
+				input_info(true, &ts->client->dev, "%s: SINGLE TAP: %d\n", __func__, ts->scrub_id);
+#else
+				input_info(true, &ts->client->dev, "%s: SINGLE TAP: %d, %d, %d\n",
+						__func__, ts->scrub_id, ts->scrub_x, ts->scrub_y);
+#endif
+				input_report_key(ts->input_dev, KEY_BLACK_UI_GESTURE, 1);
+				break;
 			case SEC_TS_GESTURE_CODE_FORCE:
 				if (ts->power_status == SEC_TS_STATE_POWER_ON) {
 					if (p_gesture_status->gesture_id == SEC_TS_EVENT_PRESSURE_TOUCHED) {

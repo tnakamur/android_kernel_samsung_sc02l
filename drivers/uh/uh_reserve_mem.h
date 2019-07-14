@@ -26,5 +26,4 @@ typedef phys_addr_t uh_mem_t;
 typedef unsigned long uh_mem_t;
 #endif
 
-int uh_reserve_mem(void);
 #endif /* _UH_MEM_H */

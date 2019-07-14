@@ -40,6 +40,12 @@ config EXYNOS_PD
 	depends on PM
 	select PM_GENERIC_DOMAINS
 
+config EPX
+	bool "Enable Exynos Performance Box"
+	default n
+	depends on ARCH_EXYNOS
+	depends on !SAMSUNG_PRODUCT_SHIP
+
 config EXYNOS_BCM
 	bool "EXYNOS_BCM driver support"
 	default n

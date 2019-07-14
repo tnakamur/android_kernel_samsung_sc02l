@@ -124,6 +124,16 @@ int ist40xx_isp_enable(struct ist40xx_data *data, bool enable)
 	if (unlikely(ret))
 		return ret;
 
+	if (enable) {
+		val = 0xC100;
+		ret = ist40xx_write_buf(data->client, rISP_ACCESS_MODE, &val, 1);
+		if (unlikely(ret))
+			return ret;
+		val = 0x00100059;
+		ret = ist40xx_write_buf(data->client, rISP_TMODE1, &val, 1);
+		if (unlikely(ret))
+			return ret;
+	}
 	ist40xx_delay(1);
 
 	return ret;
@@ -498,7 +508,7 @@ int ist40xx_calib_wait(struct ist40xx_data *data)
 	while (cnt-- > 0) {
 		ist40xx_delay(100);
 
-		if (data->status.calib_msg[0] && data->status.calib_msg[1]) {
+		if (data->status.calib == 2) {
 			input_info(true, &data->client->dev,
 				   "SLF Calibration status : %d, Max gap : %d - (%08x)\n",
 				   CALIB_TO_STATUS(data->status.calib_msg[0]),
@@ -1136,7 +1146,9 @@ int ist40xx_auto_bin_update(struct ist40xx_data *data)
 #endif
 
 #ifndef TCLM_CONCEPT
+	mutex_lock(&data->lock);
 	ist40xx_calibrate(data, IST40XX_MAX_RETRY_CNT);
+	mutex_unlock(&data->lock);
 #endif
 end_update:
 

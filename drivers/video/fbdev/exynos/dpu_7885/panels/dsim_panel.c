@@ -1,12 +1,10 @@
-
-/* dsim_panel.c
- *
- * Copyright (c) 2017 Samsung Electronics
+/*
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include "../dsim.h"
@@ -35,6 +33,32 @@ struct dsim_lcd_driver *mipi_lcd_driver = &s6e8aa5_mipi_lcd_driver;
 struct dsim_lcd_driver *mipi_lcd_driver = &sn65dsi86_hx8876_mipi_lcd_driver;
 #elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E3FA7_A7Y18)
 struct dsim_lcd_driver *mipi_lcd_driver = &s6e3fa7_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_TD4101_J2COREPELTE)
+struct dsim_lcd_driver *mipi_lcd_driver = &td4101_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_HX8279D_GTA3XLLTE)
+struct dsim_lcd_driver *mipi_lcd_driver = &hx8279d_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_HX83112A_M20)
+struct dsim_lcd_driver *mipi_lcd_driver = &hx83112a_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_EA8076_M30)
+struct dsim_lcd_driver *mipi_lcd_driver = &ea8076_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_EA8076_A30)
+struct dsim_lcd_driver *mipi_lcd_driver = &ea8076_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_HX8279D_WISDOM)
+struct dsim_lcd_driver *mipi_lcd_driver = &hx8279d_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E8FC0_A20)
+struct dsim_lcd_driver *mipi_lcd_driver = &s6e8fc0_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E8FC0_A40)
+struct dsim_lcd_driver *mipi_lcd_driver = &s6e8fc0_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6D7AT0B_A10)
+struct dsim_lcd_driver *mipi_lcd_driver = &s6d7at0b_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_HX83102D_A10E)
+struct dsim_lcd_driver *mipi_lcd_driver = &hx83102d_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_HX83102D_A20E)
+struct dsim_lcd_driver *mipi_lcd_driver = &hx83102d_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6D7AA0_XCOVER4S)
+struct dsim_lcd_driver *mipi_lcd_driver = &s6d7aa0_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E8FC0_A30C)
+struct dsim_lcd_driver *mipi_lcd_driver = &s6e8fc0_mipi_lcd_driver;
 #else
 struct dsim_lcd_driver *mipi_lcd_driver = &s6e3fa3_mipi_lcd_driver;
 #endif
@@ -52,36 +76,37 @@ int register_lcd_driver(struct dsim_lcd_driver *drv)
 
 	node = of_find_node_with_property(NULL, dts_name);
 	if (!node) {
-		pr_info("%s: of_find_node_with_property\n", __func__);
+		dsim_info("%s: of_find_node_with_property\n", __func__);
 		goto exit;
 	}
 
 	count = of_count_phandle_with_args(node, dts_name, NULL);
 	if (!count) {
-		pr_info("%s: of_count_phandle_with_args\n", __func__);
+		dsim_info("%s: of_count_phandle_with_args\n", __func__);
 		goto exit;
 	}
 
 	node = of_parse_phandle(node, dts_name, 0);
 	if (!node) {
-		pr_info("%s: of_parse_phandle\n", __func__);
+		dsim_info("%s: of_parse_phandle\n", __func__);
 		goto exit;
 	}
 
 	if (count != 1) {
-		pr_info("%s: we need only one phandle in lcd_info\n", __func__);
+		dsim_info("%s: we need only one phandle in lcd_info\n", __func__);
 		goto exit;
 	}
 
 	if (IS_ERR_OR_NULL(drv) || IS_ERR_OR_NULL(drv->name)) {
-		pr_info("%s: we need lcd_drv name to compare with device tree name(%s)\n", __func__, node->name);
+		dsim_info("%s: we need lcd_drv name to compare with device tree name(%s)\n", __func__, node->name);
 		goto exit;
 	}
 
 	if (strstarts(node->name, drv->name)) {
 		mipi_lcd_driver = drv;
-		pr_info("%s: %s is registered\n", __func__, mipi_lcd_driver->name);
-	}
+		dsim_info("%s: %s is registered\n", __func__, mipi_lcd_driver->name);
+	} else
+		dsim_info("%s: %s is not with prefix: %s\n", __func__, node->name, drv->name);
 
 exit:
 	return 0;

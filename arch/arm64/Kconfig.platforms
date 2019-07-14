@@ -150,10 +150,22 @@ config SOC_EXYNOS7885
 	select CLKSRC_EXYNOS_MCT
 	select PINCTRL
 
-config SOC_EXYNOS7885_ANDROID_VERION_O
+config SOC_EXYNOS7885_ANDROID_VERSION_O
 	bool "Samsung EXYNOS785 Android version O"
 	help
 	  This enables support for Android version O of EXYNOS7885
+
+config SOC_EXYNOS7885_ANDROID_VERSION_P
+	bool "Samsung EXYNOS7885 Android version P"
+	help
+	  This enables support for Android version P of EXYNOS7885
+
+config SOC_EXYNOS7885_ANDROID_VERSION_P_MR
+	bool "Samsung EXYNOS7885 Android version P maintenance release"
+	default n
+	depends on SOC_EXYNOS7885_ANDROID_VERSION_P
+	help
+	  This enables support for Android version P_MR of EXYNOS7885
 
 config SOC_EXYNOS7884
 	bool "Samsung EXYNOS7884"

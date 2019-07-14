@@ -345,6 +345,17 @@ enum {
 	CCIC_DOCK_NEW		= 200,	/* For New Event */
 };
 
+#if defined(CONFIG_TYPEC)
+typedef enum {
+	TRY_ROLE_SWAP_NONE = 0,
+	TRY_ROLE_SWAP_PR = 1, /* pr_swap */
+	TRY_ROLE_SWAP_DR = 2, /* dr_swap */
+	TRY_ROLE_SWAP_TYPE = 3, /* type */
+} CCIC_ROLE_SWAP_MODE;
+
+#define TRY_ROLE_SWAP_WAIT_MS 5000
+#endif
+
 enum VDM_MSG_IRQ_State {
 	VDM_DISCOVER_ID		=	(1 << 0),
 	VDM_DISCOVER_SVIDS	=	(1 << 1),

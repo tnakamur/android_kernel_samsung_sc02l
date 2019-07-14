@@ -17,6 +17,7 @@
 #include "mifintrbit.h"
 #include "miframman.h"
 #include "mifmboxman.h"
+#include "mxlogger.h"
 #include "srvman.h"
 #include "servman_messages.h"
 #include "mxmgmt_transport.h"
@@ -157,8 +158,13 @@ static int send_sm_msg_start_blocking(struct scsc_service *service, scsc_mifram_
 	/* Send to FW in MM stream */
 	mxmgmt_transport_send(mxmgmt_transport, MMTRANS_CHAN_ID_SERVICE_MANAGEMENT, &message, sizeof(message));
 	r = wait_for_sm_msg_start_cfm(service);
-	if (r)
+	if (r) {
 		SCSC_TAG_ERR(MXMAN, "wait_for_sm_msg_start_cfm() failed: r=%d\n", r);
+
+		/* Report the error in order to get a moredump. Avoid auto-recovering this type of failure */
+		if (mxman_recovery_disabled())
+			scsc_mx_service_service_failed(service, "SM_MSG_START_CFM timeout");
+	}
 	return r;
 }
 
@@ -202,9 +208,9 @@ static void srv_message_handler(const void *message, void *data)
 			break;
 		}
 	}
-	mutex_unlock(&srvman->service_list_mutex);
 	if (!found) {
 		SCSC_TAG_ERR(MXMAN, "No service for msg->service_id=%d", msg->service_id);
+		mutex_unlock(&srvman->service_list_mutex);
 		return;
 	}
 	/* Forward the message to the applicable service to deal with */
@@ -225,6 +231,7 @@ static void srv_message_handler(const void *message, void *data)
 				 service, msg->msg, msg->service_id);
 		break;
 	}
+	mutex_unlock(&srvman->service_list_mutex);
 }
 
 int scsc_mx_service_start(struct scsc_service *service, scsc_mifram_ref ref)
@@ -451,7 +458,7 @@ void scsc_mx_service_service_failed(struct scsc_service *service, const char *re
 	struct srvman  *srvman = scsc_mx_get_srvman(mx);
 	u16 host_panic_code;
 
-	host_panic_code = (SCSC_PANIC_CODE_HOST << 15) | service->id;
+	host_panic_code = (SCSC_PANIC_CODE_HOST << 15) | (service->id << SCSC_SYSERR_HOST_SERVICE_SHIFT);
 
 	srvman_set_error(srvman);
 	switch (service->id) {
@@ -467,9 +474,9 @@ void scsc_mx_service_service_failed(struct scsc_service *service, const char *re
 
 	}
 
-	SCSC_TAG_INFO(MXMAN, "Reporting host panic code 0x%02x\n", host_panic_code);
+	SCSC_TAG_INFO(MXMAN, "Reporting host hang code 0x%02x\n", host_panic_code);
 
-	mxman_fail(scsc_mx_get_mxman(mx), host_panic_code);
+	mxman_fail(scsc_mx_get_mxman(mx), host_panic_code, reason);
 }
 EXPORT_SYMBOL(scsc_mx_service_service_failed);
 
@@ -546,10 +553,9 @@ struct scsc_service *scsc_mx_service_open(struct scsc_mx *mx, enum scsc_service_
 		tval = ns_to_timeval(mxman->last_panic_time);
 		SCSC_TAG_ERR(MXMAN, "error: refused due to previous f/w failure scsc_panic_code=0x%x happened at [%6lu.%06ld]\n",
 				mxman->scsc_panic_code, tval.tv_sec, tval.tv_usec);
-
 		/* Print the last panic record to help track ancient failures */
 		mxman_show_last_panic(mxman);
-
+		wake_unlock(&srvman->sm_wake_lock);
 		mutex_unlock(&srvman->api_access_mutex);
 		*status = -EILSEQ;
 		return NULL;
@@ -621,8 +627,7 @@ int scsc_mx_service_mifram_alloc(struct scsc_service *service, size_t nbytes, sc
 	void                *mem;
 	int                 ret;
 
-	mem = miframman_alloc(scsc_mx_get_ramman(mx), nbytes, align);
-
+	mem = miframman_alloc(scsc_mx_get_ramman(mx), nbytes, align, service->id);
 	if (!mem) {
 		SCSC_TAG_ERR(MXMAN, "miframman_alloc() failed\n");
 		*ref = SCSC_MIFRAM_INVALID_REF;
@@ -877,3 +882,40 @@ int scsc_service_force_panic(struct scsc_service *service)
 	return mxman_force_panic(mxman);
 }
 EXPORT_SYMBOL(scsc_service_force_panic);
+#ifdef CONFIG_SCSC_MXLOGGER
+/* If there is no service/mxman associated, register the observer as global (will affect all the mx instanes)*/
+/* Users of these functions should ensure that the registers/unregister functions are balanced (i.e. if observer is registed as global,
+ * it _has_ to unregister as global) */
+int scsc_service_register_observer(struct scsc_service *service, char *name)
+{
+	struct scsc_mx      *mx;
+
+	if (!service)
+		return mxlogger_register_global_observer(name);
+
+	mx = service->mx;
+
+	if (!mx)
+		return -EIO;
+
+	return mxlogger_register_observer(scsc_mx_get_mxlogger(mx), name);
+}
+EXPORT_SYMBOL(scsc_service_register_observer);
+
+/* If there is no service/mxman associated, unregister the observer as global (will affect all the mx instanes)*/
+int scsc_service_unregister_observer(struct scsc_service *service, char *name)
+{
+	struct scsc_mx      *mx;
+
+	if (!service)
+		return mxlogger_unregister_global_observer(name);
+
+	mx = service->mx;
+
+	if (!mx)
+		return -EIO;
+
+	return mxlogger_unregister_observer(scsc_mx_get_mxlogger(mx), name);
+}
+EXPORT_SYMBOL(scsc_service_unregister_observer);
+#endif

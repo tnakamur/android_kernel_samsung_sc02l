@@ -559,6 +559,10 @@ static inline struct slsi_skb_cb *slsi_skb_cb_init(struct sk_buff *skb)
 #define FAPI_RESULTCODE_AUTH_TIMEOUT                        0x8010
 #define FAPI_RESULTCODE_ASSOC_TIMEOUT                       0x8011
 #define FAPI_RESULTCODE_ASSOC_ABORT                         0x8012
+/*Will remove it once we get latest fapi.xml */
+#define FAPI_RESULTCODE_AUTH_NO_ACK                  0x8013
+#define FAPI_RESULTCODE_ASSOC_NO_ACK                 0x8014
+/*--------------------------------------------------*/
 #define FAPI_RESULTCODE_INVALID_TLV_VALUE                   0x9000
 #define FAPI_RESULTCODE_NAN_PROTOCOL_FAILURE                0x9001
 #define FAPI_RESULTCODE_NAN_INVALID_PUBLISH_SUBSCBE_ID      0x9002
@@ -596,8 +600,8 @@ static inline struct slsi_skb_cb *slsi_skb_cb_init(struct sk_buff *skb)
 #define FAPI_RTTSTATUS_FAIL_INVALID_REQUEST          0x000d
 #define FAPI_RTTSTATUS_FAIL_FTM_PARAMETER_OVERRIDE   0x000f
 
-#define FAPI_RTTTYPE_ONE_SIDED   0x0000
-#define FAPI_RTTTYPE_TWO_SIDED   0x0001
+#define FAPI_RTTTYPE_ONE_SIDED   0x0001
+#define FAPI_RTTTYPE_TWO_SIDED   0x0002
 
 #define FAPI_RXSTARTFLAGS_NONE           0x0000
 #define FAPI_RXSTARTFLAGS_SCAN_CHANNEL   0x0001

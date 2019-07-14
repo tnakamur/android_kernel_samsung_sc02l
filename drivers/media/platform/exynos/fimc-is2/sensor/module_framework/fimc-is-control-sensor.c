@@ -388,8 +388,28 @@ int fimc_is_sensor_ctl_update_gains(struct fimc_is_device_sensor *device,
 		 * It sentents is commented temporary
 		 */
 		sensor_peri->cis.expecting_sensor_dm[dm_index[0]].sensitivity = adj_gain_setting->sensitivity;
+
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].analogGain = adj_gain_setting->long_again;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].digitalGain = adj_gain_setting->long_dgain;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].longAnalogGain = adj_gain_setting->long_again;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].longDigitalGain = adj_gain_setting->long_dgain;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].shortAnalogGain = adj_gain_setting->short_again;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].shortDigitalGain = adj_gain_setting->short_dgain;
 	} else {
 		sensor_peri->cis.expecting_sensor_dm[dm_index[0]].sensitivity = sensor_peri->cis.expecting_sensor_dm[dm_index[1]].sensitivity;
+
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].analogGain =
+			sensor_peri->cis.expecting_sensor_udm[dm_index[1]].analogGain;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].digitalGain =
+			sensor_peri->cis.expecting_sensor_udm[dm_index[1]].digitalGain;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].longAnalogGain =
+			sensor_peri->cis.expecting_sensor_udm[dm_index[1]].longAnalogGain;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].longDigitalGain =
+			sensor_peri->cis.expecting_sensor_udm[dm_index[1]].longDigitalGain;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].shortAnalogGain =
+			sensor_peri->cis.expecting_sensor_udm[dm_index[1]].shortAnalogGain;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].shortDigitalGain =
+			sensor_peri->cis.expecting_sensor_udm[dm_index[1]].shortDigitalGain;
 	}
 
 p_err:
@@ -431,13 +451,23 @@ int fimc_is_sensor_ctl_set_exposure(struct fimc_is_device_sensor *device,
 			sensor_peri->cis.cur_sensor_uctrl.longExposureTime = fimc_is_sensor_convert_us_to_ns(long_exposure);
 			sensor_peri->cis.cur_sensor_uctrl.shortExposureTime = fimc_is_sensor_convert_us_to_ns(short_exposure);
 		} else {
-			sensor_peri->cis.cur_sensor_uctrl.exposureTime = fimc_is_sensor_convert_us_to_ns(long_exposure);
+			sensor_peri->cis.cur_sensor_uctrl.exposureTime = fimc_is_sensor_convert_us_to_ns(short_exposure);
 			sensor_peri->cis.cur_sensor_uctrl.longExposureTime = 0;
 			sensor_peri->cis.cur_sensor_uctrl.shortExposureTime = 0;
 		}
-		sensor_peri->cis.expecting_sensor_dm[dm_index[0]].exposureTime = fimc_is_sensor_convert_us_to_ns(long_exposure);
+		sensor_peri->cis.expecting_sensor_dm[dm_index[0]].exposureTime = fimc_is_sensor_convert_us_to_ns(short_exposure);
+
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].longExposureTime =
+			fimc_is_sensor_convert_us_to_ns(long_exposure);
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].shortExposureTime =
+			fimc_is_sensor_convert_us_to_ns(short_exposure);
 	} else {
 		sensor_peri->cis.expecting_sensor_dm[dm_index[0]].exposureTime = sensor_peri->cis.expecting_sensor_dm[dm_index[1]].exposureTime;
+
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].longExposureTime =
+			sensor_peri->cis.expecting_sensor_udm[dm_index[1]].longExposureTime;
+		sensor_peri->cis.expecting_sensor_udm[dm_index[0]].shortExposureTime =
+			sensor_peri->cis.expecting_sensor_udm[dm_index[1]].shortExposureTime;
 	}
 
 p_err:
@@ -495,12 +525,6 @@ void fimc_is_sensor_ctl_frame_evt(struct fimc_is_device_sensor *device)
 	module_ctl = &sensor_peri->cis.sensor_ctls[uctl_frame_index];
 	cis_data = sensor_peri->cis.cis_data;
 	BUG_ON(!cis_data);
-
-	/* Check valid commpanion udctrl */
-	if (module_ctl->is_valid_companion_udctrl == true) {
-		/* TODO */
-		/* FuncCompanionEnableBlock() */
-	}
 
 	if ((module_ctl->valid_sensor_ctrl == true) ||
 		(module_ctl->force_update) ||
@@ -621,6 +645,27 @@ void fimc_is_sensor_ctl_frame_evt(struct fimc_is_device_sensor *device)
 	if (sensor_peri->subdev_flash != NULL) {
 		/* Pre-Flash on, Torch on/off */
 		ret = fimc_is_sensor_peri_pre_flash_fire(device->subdev_module, &vsync_count);
+	}
+
+	/* Warning! Iris mode should be set before setting ois mode */
+	if (sensor_peri->subdev_iris) {
+		if (CALL_IRISOPS(sensor_peri->iris, check_aperture_value, sensor_peri->subdev_iris,
+			sensor_peri->iris->new_value)) {
+			if (sensor_peri->subdev_ois) {
+				ret = CALL_OISOPS(sensor_peri->ois, ois_set_mode, sensor_peri->subdev_ois,
+					OPTICAL_STABILIZATION_MODE_CENTERING);
+				if (ret < 0)
+					err("v4l2_subdev_call(ois_set_mode) is fail(%d)", ret);
+			}
+
+			ret = CALL_IRISOPS(sensor_peri->iris, set_aperture_value, sensor_peri->subdev_iris,
+				sensor_peri->iris->new_value);
+			if (ret < 0) {
+				err("[SEN:%d] v4l2_subdev_call(iris_set_mode, value:%d) is fail(%d)",
+							module->sensor_id, sensor_peri->iris->new_value, ret);
+				goto p_err;
+			}
+		}
 	}
 
 	if (sensor_peri->subdev_ois) {

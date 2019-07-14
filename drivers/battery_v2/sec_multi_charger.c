@@ -144,7 +144,7 @@ static int sec_multi_chg_set_input_current(struct sec_multi_charger_info *charge
 		}
 	} else {
 		main_input_current = charger->total_current.input_current_limit;
-		sub_input_current = 0;
+		sub_input_current = charger->total_current.input_current_limit;
 	}
 
 	/* set input current */
@@ -178,8 +178,13 @@ static int sec_multi_chg_set_charging_current(struct sec_multi_charger_info *cha
 		main_charging_current = charger->total_current.fast_charging_current / 2;
 		sub_charging_current = charger->total_current.fast_charging_current / 2;
 	} else {
-		main_charging_current = charger->total_current.fast_charging_current;
-		sub_charging_current = 0;
+		if (charger->multi_mode == SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_ON) {
+			main_charging_current = 0;
+			sub_charging_current = charger->total_current.fast_charging_current;
+		} else {
+			main_charging_current = charger->total_current.fast_charging_current;
+			sub_charging_current = 0;
+		}
 	}
 
 	/* set charging current */
@@ -238,6 +243,93 @@ static void sec_multi_chg_set_sub_charger_state(struct sec_multi_charger_info *c
 		POWER_SUPPLY_PROP_CHARGING_ENABLED, value);
 }
 
+static void sec_multi_chg_check_load_switch(
+				struct sec_multi_charger_info *charger,
+				enum power_supply_property psp)
+{
+	union power_supply_propval value = {0, };
+	int new_state = 0, now_state = 0, i;
+
+	if (!charger->pdata->load_switch_control) {
+		return;
+	}
+
+	new_state = now_state = charger->load_switch_state;
+	if (psp == POWER_SUPPLY_PROP_ONLINE &&
+		charger->pdata->load_switch_condition_online_size > 0) {
+		for (i = 0; i < charger->pdata->load_switch_condition_online_size; i++) {
+			if (charger->cable_type == charger->pdata->load_switch_condition_online[i])
+				break;
+		}
+		if (i < charger->pdata->load_switch_condition_online_size) {
+			if (!now_state)
+				pr_info("%s: load switch on by ONLINE(%d)\n", __func__, charger->cable_type);
+			new_state = 1;
+		} else if (now_state) {
+			pr_info("%s: load switch off by ONLINE(%d)\n", __func__, charger->cable_type);
+			new_state = 0;
+		}
+	} else if (psp == POWER_SUPPLY_PROP_CURRENT_MAX) {
+		psy_do_property(charger->pdata->battery_name, get, POWER_SUPPLY_PROP_POWER_NOW, value);
+		if (value.intval < charger->pdata->load_switch_condition_charge_power) {
+			if (!now_state)
+				pr_info("%s: load switch on by CHARGE_POWER(%d)\n", __func__, value.intval);
+			new_state = 1;
+		} else if (now_state) {
+			pr_info("%s: load switch off by CHARGE_POWER(%d)\n", __func__, value.intval);
+			new_state = 0;
+		}
+	}
+
+	charger->load_switch_state = new_state;
+	/* Check Load Switch Charing Mode */
+	switch (charger->multi_mode) {
+	case SEC_MULTI_CHARGER_NORMAL:
+	case SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_ON:
+	case SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_OFF:
+	{
+		int now_multi_mode = SEC_MULTI_CHARGER_NORMAL;
+
+		if (charger->cable_type == SEC_BATTERY_CABLE_NONE ||
+			charger->cable_type == SEC_BATTERY_CABLE_OTG) {
+			now_multi_mode = SEC_MULTI_CHARGER_NORMAL;
+		} else if (new_state) {
+			if (charger->cable_type == SEC_BATTERY_CABLE_USB ||
+				charger->cable_type == SEC_BATTERY_CABLE_USB_CDP)
+				now_multi_mode = SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_OFF;
+			else
+				now_multi_mode = SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_ON;
+		} else {
+			now_multi_mode = SEC_MULTI_CHARGER_NORMAL;
+		}
+
+		if (now_multi_mode != charger->multi_mode) {
+			pr_info("%s: change multi mode(%d) to (%d)\n", __func__, charger->multi_mode, now_multi_mode);
+			charger->multi_mode = now_multi_mode;
+
+			if (charger->sub_is_charging)
+				sec_multi_chg_set_sub_charger_state(charger, false);
+
+			if ((now_multi_mode == SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_OFF) ||
+				(now_multi_mode == SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_ON))
+				value.intval = SEC_BAT_CHG_MODE_BUCK_OFF;
+			else
+				value.intval = charger->chg_mode;
+			psy_do_property(charger->pdata->main_charger_name, set,
+				POWER_SUPPLY_PROP_CHARGING_ENABLED, value);
+
+			value.intval = (now_multi_mode == SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_ON) ?
+				charger->chg_mode : SEC_BAT_CHG_MODE_CHARGING_OFF;
+			psy_do_property(charger->pdata->sub_charger_name, set,
+				POWER_SUPPLY_PROP_CHARGING_ENABLED, value);
+		}
+	}
+		break;
+	default:
+		break;
+	}
+}
+
 static bool sec_multi_chg_check_abnormal_case(struct sec_multi_charger_info *charger)
 {
 	union power_supply_propval value;
@@ -261,7 +353,7 @@ static void sec_multi_chg_check_input_current(struct sec_multi_charger_info *cha
 
 	if (!sub_is_charging || charger->cable_type == SEC_BATTERY_CABLE_NONE) {
 		pr_info("%s: does not need that check input current when sub charger is off.", __func__);
-		return;
+		goto skip_sub_charger_condition;
 	}
 
 	if (charger->pdata->sub_charger_condition &
@@ -284,20 +376,11 @@ static void sec_multi_chg_check_input_current(struct sec_multi_charger_info *cha
 		}
 	}
 
-	if (!sub_is_charging || sec_multi_chg_check_abnormal_case(charger)) {
-		charger->sub_is_charging = sub_is_charging;
+	if (!sub_is_charging || sec_multi_chg_check_abnormal_case(charger))
+		sec_multi_chg_set_sub_charger_state(charger, sub_is_charging);
 
-		if (sub_is_charging)
-			value.intval = SEC_BAT_CHG_MODE_CHARGING;
-		else
-			value.intval = SEC_BAT_CHG_MODE_CHARGING_OFF;
-
-		psy_do_property(charger->pdata->sub_charger_name, set,
-			POWER_SUPPLY_PROP_CHARGING_ENABLED, value);
-
-		sec_multi_chg_set_charging_current(charger);
-		sec_multi_chg_set_topoff_current(charger);
-	}
+skip_sub_charger_condition:
+	sec_multi_chg_set_input_current(charger);
 }
 
 static int sec_multi_chg_check_enable(struct sec_multi_charger_info *charger)
@@ -320,13 +403,11 @@ static int sec_multi_chg_check_enable(struct sec_multi_charger_info *charger)
 	charger->sub_is_charging = sec_multi_chg_check_sub_charging(charger);
 
 	/* set sub charging */
-	if (charger->sub_is_charging != sub_is_charging) {
-		pr_info("%s: change sub_is_charging(%d)\n", __func__, charger->sub_is_charging);
+	if (charger->sub_is_charging != sub_is_charging)
 		sec_multi_chg_set_sub_charger_state(charger, charger->sub_is_charging);
-	} else if (charger->sub_is_charging && sec_multi_chg_check_abnormal_case(charger)) {
-		pr_info("%s: abnormal case, sub charger off\n ", __func__);
+	else if (charger->sub_is_charging && sec_multi_chg_check_abnormal_case(charger))
 		sec_multi_chg_set_sub_charger_state(charger, false);
-	}
+
 	return 0;
 }
 
@@ -368,6 +449,15 @@ static int sec_multi_chg_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		val->intval = charger->total_current.fast_charging_current;
 		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+		val->intval = 0;
+		psy_do_property(charger->pdata->main_charger_name, get, psp, value);
+		val->intval += value.intval;
+		psy_do_property(charger->pdata->sub_charger_name, get, psp, value);
+		val->intval += value.intval;
+		pr_info("%s: check charging current(set:%d, value:%d)\n",
+			__func__, charger->total_current.fast_charging_current, val->intval);
+		break;
 	case POWER_SUPPLY_PROP_TEMP:
 		break;
 	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
@@ -386,6 +476,12 @@ static int sec_multi_chg_get_property(struct power_supply *psy,
 					break;
 				case SEC_MULTI_CHARGER_ALL_ENABLE:
 					val->strval = "dual";
+					break;
+				case SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_OFF:
+					val->strval = "single-off";
+					break;
+				case SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_ON:
+					val->strval = "single-on";
 					break;
 				case SEC_MULTI_CHARGER_NORMAL:
 					if (!charger->sub_is_charging)
@@ -426,11 +522,22 @@ static int sec_multi_chg_set_property(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
 		charger->chg_mode = val->intval;
-		psy_do_property(charger->pdata->main_charger_name, set,
-			psp, value);
 
-		if (charger->sub_is_charging && val->intval != SEC_BAT_CHG_MODE_CHARGING)
-			sec_multi_chg_set_sub_charger_state(charger, false);
+		if (charger->multi_mode == SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_OFF) {
+			break;
+		} else if (charger->multi_mode == SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_ON) {
+			value.intval = (charger->chg_mode == SEC_BAT_CHG_MODE_BUCK_OFF) ?
+				SEC_BAT_CHG_MODE_CHARGING_OFF : charger->chg_mode;
+			
+			psy_do_property(charger->pdata->sub_charger_name, set,
+				psp, value);
+		} else {
+			psy_do_property(charger->pdata->main_charger_name, set,
+				psp, value);
+			
+			if (charger->sub_is_charging && val->intval != SEC_BAT_CHG_MODE_CHARGING)
+				sec_multi_chg_set_sub_charger_state(charger, false);
+		}
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
 		psy_do_property(charger->pdata->main_charger_name, set,
@@ -447,6 +554,9 @@ static int sec_multi_chg_set_property(struct power_supply *psy,
 			sec_multi_chg_set_sub_charger_state(charger, false);
 		}
 
+		charger->cable_type = val->intval;
+		sec_multi_chg_check_load_switch(charger, psp);
+
 		if (val->intval == SEC_BATTERY_CABLE_NONE) {
 			charger->sub_is_charging = false;
 			charger->main_current.input_current_limit = 0;
@@ -455,13 +565,18 @@ static int sec_multi_chg_set_property(struct power_supply *psy,
 			charger->sub_current.fast_charging_current = 0;
 			charger->multi_mode = SEC_MULTI_CHARGER_NORMAL;
 		}
-		charger->cable_type = val->intval;
 		break;
 	case POWER_SUPPLY_PROP_STATUS:
 		charger->status = val->intval;
 	case POWER_SUPPLY_PROP_HEALTH:
 	case POWER_SUPPLY_PROP_PRESENT:
+		psy_do_property(charger->pdata->main_charger_name, set, psp, value);
+		psy_do_property(charger->pdata->sub_charger_name, set, psp, value);
+		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		charger->float_voltage = (value.intval > 10000) ? 
+			(value.intval / 10) : value.intval;
+		pr_info("%s: check float voltage(%d, %d)\n", __func__, charger->float_voltage, value.intval);
 		psy_do_property(charger->pdata->main_charger_name, set, psp, value);
 		psy_do_property(charger->pdata->sub_charger_name, set, psp, value);
 		break;
@@ -471,11 +586,12 @@ static int sec_multi_chg_set_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		charger->total_current.input_current_limit = val->intval;
+		sec_multi_chg_check_load_switch(charger, psp);
 		sec_multi_chg_check_input_current(charger);
-		sec_multi_chg_set_input_current(charger);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		charger->total_current.fast_charging_current = val->intval;
+		sec_multi_chg_check_load_switch(charger, psp);
 		sec_multi_chg_set_charging_current(charger);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
@@ -493,6 +609,10 @@ static int sec_multi_chg_set_property(struct power_supply *psy,
 		psy_do_property(charger->pdata->main_charger_name, set, psp, value);
 		break;
 #endif
+	case POWER_SUPPLY_PROP_ENERGY_NOW:
+		psy_do_property(charger->pdata->main_charger_name, set, psp, value);
+		psy_do_property(charger->pdata->sub_charger_name, set, psp, value);
+		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX:
 		/* AICL Enable */
 		if(!charger->pdata->aicl_disable)
@@ -559,6 +679,10 @@ static int sec_multi_chg_set_property(struct power_supply *psy,
 			}
 			pr_info("%s: set Multi Charger Mode (%d)\n", __func__, charger->multi_mode);
 			break;
+		case POWER_SUPPLY_EXT_PROP_AICL_CURRENT:
+			charger->total_current.input_current_limit = val->intval;
+			sec_multi_chg_check_load_switch(charger, POWER_SUPPLY_PROP_CURRENT_MAX);
+			break;
 		default:
 			return -EINVAL;
 		}
@@ -585,17 +709,17 @@ static int sec_multi_charger_parse_dt(struct device *dev,
 		return 1;
 	} else {
 		ret = of_property_read_string(np, "charger,battery_name",
-				(char const **)&charger->pdata->battery_name);
+				(char const **)&pdata->battery_name);
 		if (ret)
 			pr_err("%s: battery_name is Empty\n", __func__);
 
 		ret = of_property_read_string(np, "charger,main_charger",
-				(char const **)&charger->pdata->main_charger_name);
+				(char const **)&pdata->main_charger_name);
 		if (ret)
 			pr_err("%s: main_charger is Empty\n", __func__);
 
 		ret = of_property_read_string(np, "charger,sub_charger",
-				(char const **)&charger->pdata->sub_charger_name);
+				(char const **)&pdata->sub_charger_name);
 		if (ret)
 			pr_err("%s: sub_charger is Empty\n", __func__);
 
@@ -661,6 +785,37 @@ static int sec_multi_charger_parse_dt(struct device *dev,
 
 			pr_info("%s: sub_charger_condition(0x%x)\n", __func__, pdata->sub_charger_condition);
 		}
+
+		ret = of_property_read_u32(np, "charger,load_switch_control",
+						&pdata->load_switch_control);
+		if (ret < 0) {
+			pr_err("%s: load_switch_control is Empty\n", __func__);
+			pdata->load_switch_control = 0;
+		} else if (pdata->load_switch_control) {
+			ret = of_property_read_u32(np, "charger,load_switch_condition_charge_power",
+					&pdata->load_switch_condition_charge_power);
+			if (ret) {
+				pr_err("%s: load_switch_condition_charge_power is Empty\n", __func__);
+				pdata->load_switch_condition_charge_power = 7500;
+			}
+			
+			p = of_get_property(np, "charger,load_switch_condition_online", &len);
+			if (p) {
+				len = len / sizeof(u32);
+			
+				pdata->load_switch_condition_online
+					= kzalloc(sizeof(unsigned int) * len, GFP_KERNEL);
+				ret = of_property_read_u32_array(np, "charger,load_switch_condition_online",
+						 pdata->load_switch_condition_online, len);
+			
+				pdata->load_switch_condition_online_size = len;
+			} else {
+				pr_err("%s: load_switch_condition_online is Empty\n", __func__);
+				pdata->load_switch_condition_online = NULL;
+				pdata->load_switch_condition_online_size = 0;
+			}
+			charger->load_switch_state = 0;
+		}
 	}
 	return 0;
 }
@@ -713,6 +868,7 @@ static int sec_multi_charger_probe(struct platform_device *pdev)
 
 	charger->sub_is_charging = false;
 	charger->multi_mode = SEC_MULTI_CHARGER_NORMAL;
+	charger->float_voltage = 0;
 
 	platform_set_drvdata(pdev, charger);
 	charger->dev = &pdev->dev;
@@ -761,7 +917,7 @@ static int sec_multi_charger_resume(struct device *dev)
 	return 0;
 }
 
-static void sec_multi_charger_shutdown(struct device *dev)
+static void sec_multi_charger_shutdown(struct platform_device *pdev)
 {
 }
 
@@ -783,13 +939,13 @@ static struct platform_driver sec_multi_charger_driver = {
 		.name = "sec-multi-charger",
 		.owner = THIS_MODULE,
 		.pm = &sec_multi_charger_pm_ops,
-		.shutdown = sec_multi_charger_shutdown,
 #ifdef CONFIG_OF
 		.of_match_table = sec_multi_charger_dt_ids,
 #endif
 	},
 	.probe = sec_multi_charger_probe,
 	.remove = sec_multi_charger_remove,
+	.shutdown = sec_multi_charger_shutdown,
 };
 
 static int __init sec_multi_charger_init(void)

@@ -47,6 +47,10 @@
 
 static const struct v4l2_subdev_ops subdev_ops;
 
+#if defined(CONFIG_VENDER_MCD_V2)
+extern const struct fimc_is_vender_rom_addr *vender_rom_addr[SENSOR_POSITION_MAX];
+#endif
+
 static const u32 *sensor_5e9_global;
 static u32 sensor_5e9_global_size;
 static const u32 **sensor_5e9_setfiles;
@@ -170,6 +174,11 @@ int sensor_5e9_cis_init(struct v4l2_subdev *subdev)
 	bool skip_cal_write = false;
 #endif
 
+#ifdef USE_CAMERA_HW_BIG_DATA
+	struct cam_hw_param *hw_param = NULL;
+	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
+#endif
+
 	setinfo.param = NULL;
 	setinfo.return_value = 0;
 
@@ -195,11 +204,19 @@ int sensor_5e9_cis_init(struct v4l2_subdev *subdev)
 	memset(cis->cis_data, 0, sizeof(cis_shared_data));
 	cis->rev_flag = false;
 
+	info("[%s] start\n", __func__);
 	ret = sensor_cis_check_rev(cis);
 	if (ret < 0) {
+#ifdef USE_CAMERA_HW_BIG_DATA
+		sensor_peri = container_of(cis, struct fimc_is_device_sensor_peri, cis);
+		if (sensor_peri)
+			fimc_is_sec_get_hw_param(&hw_param, sensor_peri->module->position);
+		if (hw_param)
+			hw_param->i2c_sensor_err_cnt++;
+#endif
 		warn("sensor_5e9_check_rev is fail when cis init");
 		cis->rev_flag = true;
-		ret = 0;
+		goto p_err;
 	}
 
 	cis->cis_data->cur_width = SENSOR_5E9_MAX_WIDTH;
@@ -445,11 +462,13 @@ int sensor_5e9_cis_group_param_hold(struct v4l2_subdev *subdev, bool hold)
 	BUG_ON(!cis);
 	BUG_ON(!cis->cis_data);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	ret = sensor_5e9_cis_group_param_hold_func(subdev, hold);
 	if (ret < 0)
 		goto p_err;
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -463,6 +482,7 @@ int sensor_5e9_cis_set_global_setting(struct v4l2_subdev *subdev)
 	cis = (struct fimc_is_cis *)v4l2_get_subdevdata(subdev);
 	BUG_ON(!cis);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	/* setfile global setting is at camera entrance */
 	ret = sensor_cis_set_registers(subdev, sensor_5e9_global, sensor_5e9_global_size);
 	if (ret < 0) {
@@ -473,6 +493,7 @@ int sensor_5e9_cis_set_global_setting(struct v4l2_subdev *subdev)
 	dbg_sensor(1, "[%s] global setting done\n", __func__);
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -503,6 +524,7 @@ int sensor_5e9_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 		}
 	}
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	sensor_5e9_cis_data_calculation(sensor_5e9_pllinfos[mode], cis->cis_data);
 
 	ret = sensor_cis_set_registers(subdev, sensor_5e9_setfiles[mode], sensor_5e9_setfile_sizes[mode]);
@@ -519,6 +541,7 @@ int sensor_5e9_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 	dbg_sensor(1, "[%s] mode changed(%d)\n", __func__, mode);
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -583,11 +606,7 @@ int sensor_5e9_cis_set_size(struct v4l2_subdev *subdev, cis_shared_data *cis_dat
 		goto p_err;
 	}
 
-	/* 1. page_select */
-	ret = fimc_is_sensor_write16(client, 0x6028, 0x2000);
-	if (ret < 0)
-		 goto p_err;
-
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	/* 2. pixel address region setting */
 	start_x = ((SENSOR_5E9_MAX_WIDTH - cis_data->cur_width * ratio_w) / 2) & (~0x1);
 	start_y = ((SENSOR_5E9_MAX_HEIGHT - cis_data->cur_height * ratio_h) / 2) & (~0x1);
@@ -676,13 +695,14 @@ int sensor_5e9_cis_set_size(struct v4l2_subdev *subdev, cis_shared_data *cis_dat
 #endif
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
 int sensor_5e9_cis_stream_on(struct v4l2_subdev *subdev)
 {
 	int ret = 0;
-	int fsync_mode = 0;
+	struct fimc_is_core *core = NULL;
 	struct fimc_is_cis *cis;
 	struct i2c_client *client;
 	cis_shared_data *cis_data;
@@ -710,34 +730,35 @@ int sensor_5e9_cis_stream_on(struct v4l2_subdev *subdev)
 
 	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	ret = sensor_5e9_cis_group_param_hold_func(subdev, 0x00);
+
+	core = (struct fimc_is_core *)dev_get_drvdata(fimc_is_dev);
+	if (!core) {
+		err("The core device is null");
+		ret = -EINVAL;
+		goto p_err;
+	}
+
+	/* Sensor fsync on/off */
 	if (ret < 0)
 		err("[%s] sensor_5e9_cis_group_param_hold_func fail\n", __func__);
 
-	fsync_mode = fimc_is_vender_fsync_mode_on(cis_data);
-	
-	dbg_sensor(1, "[MOD:D:%d] %s fsync mode : %d\n", cis->id, __func__, fsync_mode);
-	
-	/* Sensor fsync on/off */
-	switch (fsync_mode) {
-	case AA_CAMERATYPE_TELE:
-		info("[%s]slave mode\n", __func__);
+	if(test_bit(FIMC_IS_SENSOR_OPEN, &(core->sensor[0].state))){
+		info("[%s]dual sync slave mode\n", __func__);
 		ret = sensor_cis_set_registers(subdev, sensor_5e9_fsync_slave, sensor_5e9_fsync_slave_size);
+
 		if (ret < 0)
 			err("[%s] sensor_5e9_fsync_slave fail\n", __func__);
-		break;
-	default:
-		warn("%s fsync mode(%d) use normal mode\n", __func__,  fsync_mode);
+	}else{
+		info("[%s] master mode\n", __func__);
 		ret = sensor_cis_set_registers(subdev, sensor_5e9_fsync_master, sensor_5e9_fsync_master_size);
+
 		if (ret < 0)
 			err("[%s] sensor_5e9_fsync_master fail\n", __func__);
-		break;
 	}
-	
+
 	/* Sensor stream on */
-	ret = fimc_is_sensor_write16(client, 0x6028, 0x4000);
-	if (unlikely(ret))
-		err("i2c treansfer fail addr(%x), val(%x), ret(%d)\n", 0x6028, 0x4000, ret);
 	ret = fimc_is_sensor_write8(client, 0x0100, 0x01);
 	if (unlikely(ret))
 		err("i2c treansfer fail addr(%x), val(%x), ret(%d)\n", 0x0100, 0x01, ret);
@@ -759,6 +780,7 @@ int sensor_5e9_cis_stream_on(struct v4l2_subdev *subdev)
 #endif
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -792,14 +814,12 @@ int sensor_5e9_cis_stream_off(struct v4l2_subdev *subdev)
 
 	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	ret = sensor_5e9_cis_group_param_hold_func(subdev, 0x00);
 	if (ret < 0)
 		err("[%s] sensor_5e9_cis_group_param_hold_func fail\n", __func__);
 
 	/* Sensor stream off */
-	ret = fimc_is_sensor_write16(client, 0x6028, 0x4000);
-	if (unlikely(ret))
-		err("i2c treansfer fail addr(%x), val(%x), ret(%d)\n", 0x6028, 0x4000, ret);
 	ret = fimc_is_sensor_write8(client, 0x0100, 0x00);
 	if (unlikely(ret))
 		err("i2c treansfer fail addr(%x), val(%x), ret(%d)\n", 0x0100, 0x00, ret);
@@ -812,6 +832,7 @@ int sensor_5e9_cis_stream_off(struct v4l2_subdev *subdev)
 #endif
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -898,6 +919,7 @@ int sensor_5e9_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_param
 	dbg_sensor(1, "[MOD:D:%d] %s, frame_length_lines(%#x), long_coarse_int %#x, short_coarse_int %#x\n",
 		cis->id, __func__, cis_data->frame_length_lines, long_coarse_int, short_coarse_int);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	hold = sensor_5e9_cis_group_param_hold_func(subdev, 0x01);
 	if (hold < 0) {
 		ret = hold;
@@ -927,7 +949,7 @@ p_err:
 		if (hold < 0)
 			ret = hold;
 	}
-
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -1139,6 +1161,7 @@ int sensor_5e9_cis_set_frame_duration(struct v4l2_subdev *subdev, u32 frame_dura
 		KERN_CONT "(line_length_pck%#x), frame_length_lines(%#x)\n",
 		cis->id, __func__, vt_pic_clk_freq_mhz, frame_duration, line_length_pck, frame_length_lines);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	hold = sensor_5e9_cis_group_param_hold_func(subdev, 0x01);
 	if (hold < 0) {
 		ret = hold;
@@ -1164,7 +1187,7 @@ p_err:
 		if (hold < 0)
 			ret = hold;
 	}
-
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -1317,6 +1340,7 @@ int sensor_5e9_cis_set_analog_gain(struct v4l2_subdev *subdev, struct ae_param *
 	dbg_sensor(1, "[MOD:D:%d] %s, input_again = %d us, analog_gain(%#x)\n",
 			cis->id, __func__, again->val, analog_gain);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	hold = sensor_5e9_cis_group_param_hold_func(subdev, 0x01);
 	if (hold < 0) {
 		ret = hold;
@@ -1338,7 +1362,7 @@ p_err:
 		if (hold < 0)
 			ret = hold;
 	}
-
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -1370,6 +1394,7 @@ int sensor_5e9_cis_get_analog_gain(struct v4l2_subdev *subdev, u32 *again)
 		goto p_err;
 	}
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	hold = sensor_5e9_cis_group_param_hold_func(subdev, 0x01);
 	if (hold < 0) {
 		ret = hold;
@@ -1396,7 +1421,7 @@ p_err:
 		if (hold < 0)
 			ret = hold;
 	}
-
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -1545,6 +1570,11 @@ int sensor_5e9_cis_set_digital_gain(struct v4l2_subdev *subdev, struct ae_param 
 		goto p_err;
 	}
 
+	/*skip to set dgain when use_dgain is false */
+	if (cis->use_dgain == false) {
+		return 0;
+	};
+
 	cis_data = cis->cis_data;
 
 	long_gain = (u16)sensor_cis_calc_dgain_code(dgain->long_val);
@@ -1567,6 +1597,7 @@ int sensor_5e9_cis_set_digital_gain(struct v4l2_subdev *subdev, struct ae_param 
 	dbg_sensor(1, "[MOD:D:%d] %s, input_dgain = %d/%d us, long_gain(%#x), short_gain(%#x)\n",
 			cis->id, __func__, dgain->long_val, dgain->short_val, long_gain, short_gain);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	hold = sensor_5e9_cis_group_param_hold_func(subdev, 0x01);
 	if (hold < 0) {
 		ret = hold;
@@ -1597,7 +1628,7 @@ p_err:
 		if (hold < 0)
 			ret = hold;
 	}
-
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 #endif
@@ -1630,6 +1661,7 @@ int sensor_5e9_cis_get_digital_gain(struct v4l2_subdev *subdev, u32 *dgain)
 		goto p_err;
 	}
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	hold = sensor_5e9_cis_group_param_hold_func(subdev, 0x01);
 	if (hold < 0) {
 		ret = hold;
@@ -1656,7 +1688,7 @@ p_err:
 		if (hold < 0)
 			ret = hold;
 	}
-
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -1666,7 +1698,6 @@ int sensor_5e9_cis_get_min_digital_gain(struct v4l2_subdev *subdev, u32 *min_dga
 	struct fimc_is_cis *cis;
 	struct i2c_client *client;
 	cis_shared_data *cis_data;
-
 	u16 read_value = 0;
 
 #ifdef DEBUG_SENSOR_TIME
@@ -1792,7 +1823,7 @@ static struct fimc_is_cis_ops cis_ops = {
 	.cis_get_max_digital_gain = sensor_5e9_cis_get_max_digital_gain,
 	.cis_compensate_gain_for_extremely_br = sensor_cis_compensate_gain_for_extremely_br,
 	.cis_wait_streamoff = sensor_cis_wait_streamoff,
-	.cis_wait_streamon = sensor_cis_wait_streamon,
+	.cis_set_initial_exposure = sensor_cis_set_initial_exposure,
 };
 
 int cis_5e9_probe(struct i2c_client *client,
@@ -1804,13 +1835,14 @@ int cis_5e9_probe(struct i2c_client *client,
 	struct fimc_is_cis *cis = NULL;
 	struct fimc_is_device_sensor *device = NULL;
 	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
-	u32 sensor_id = 0;
-	char const *setfile;
 	struct device *dev;
 	struct device_node *dnode;
-#if defined(CONFIG_USE_DIRECT_IS_CONTROL) \
-	&& (defined(CONFIG_CAMERA_OTPROM_SUPPORT_FRONT) || defined(CONFIG_CAMERA_OTPROM_SUPPORT_REAR))
+	u32 sensor_id = 0;
+	char const *setfile;
+
+#if defined(CONFIG_VENDER_MCD) || defined(CONFIG_VENDER_MCD_V2)
 	struct fimc_is_vender_specific *specific = NULL;
+	u32 rom_position;
 #endif
 
 	BUG_ON(!client);
@@ -1861,15 +1893,40 @@ int cis_5e9_probe(struct i2c_client *client,
 	cis->device = 0;
 	cis->client = client;
 	sensor_peri->module->client = cis->client;
-	cis->ctrl_delay = N_PLUS_ONE_FRAME;
-#if defined(CONFIG_USE_DIRECT_IS_CONTROL) && defined(CONFIG_CAMERA_OTPROM_SUPPORT_FRONT)
+
+#if defined(CONFIG_VENDER_MCD_V2)
+	if (of_property_read_bool(dnode, "use_sensor_otp")) {
+		ret = of_property_read_u32(dnode, "rom_position", &rom_position);
+		if (ret) {
+			err("sensor_id read is fail(%d)", ret);
+		} else {
+			specific = core->vender.private_data;
+			specific->rom_client[rom_position] = cis->client;
+			specific->rom_data[rom_position].rom_type = ROM_TYPE_OTPROM;
+			specific->rom_data[rom_position].rom_valid = true;
+
+			if (vender_rom_addr[rom_position]) {
+				specific->rom_cal_map_addr[rom_position] = vender_rom_addr[rom_position];
+				probe_info("%s: rom_id=%d, OTP Registered\n", __func__, rom_position);
+			} else {
+				probe_info("%s: S5K5E9 OTP addrress not defined!\n", __func__);
+			}
+		}
+	}
+#else
+#if defined(CONFIG_VENDER_MCD) && defined(CONFIG_CAMERA_OTPROM_SUPPORT_FRONT)
+	rom_position = 0;
 	specific = core->vender.private_data;
 	specific->front_cis_client = client;
 #endif
-#if defined(CONFIG_USE_DIRECT_IS_CONTROL) && defined(CONFIG_CAMERA_OTPROM_SUPPORT_REAR)
+#if defined(CONFIG_VENDER_MCD) && defined(CONFIG_CAMERA_OTPROM_SUPPORT_REAR)
+	rom_position = 0;
 	specific = core->vender.private_data;
 	specific->rear_cis_client = client;
 #endif
+#endif
+
+	cis->ctrl_delay = N_PLUS_TWO_FRAME;
 
 	cis->cis_data = kzalloc(sizeof(cis_shared_data), GFP_KERNEL);
 	if (!cis->cis_data) {
@@ -1877,6 +1934,7 @@ int cis_5e9_probe(struct i2c_client *client,
 		ret = -ENOMEM;
 		goto p_err;
 	}
+
 	cis->cis_ops = &cis_ops;
 
 	/* belows are depend on sensor cis. MUST check sensor spec */
@@ -1896,14 +1954,16 @@ int cis_5e9_probe(struct i2c_client *client,
 	cis->use_dgain = true;
 	cis->hdr_ctrl_by_again = false;
 
+	cis->use_initial_ae = of_property_read_bool(dnode, "use_initial_ae");
+	probe_info("%s use_initial_ae(%d)\n", __func__, cis->use_initial_ae);
+
 	ret = of_property_read_string(dnode, "setfile", &setfile);
 	if (ret) {
 		err("setfile index read fail(%d), take default setfile!!", ret);
 		setfile = "default";
 	}
 
-	if (strcmp(setfile, "default") == 0 ||
-			strcmp(setfile, "setA") == 0) {
+	if (strcmp(setfile, "default") == 0 || strcmp(setfile, "setA") == 0) {
 		probe_info("%s setfile_A\n", __func__);
 		sensor_5e9_global = sensor_5e9_setfile_A_Global;
 		sensor_5e9_global_size = sizeof(sensor_5e9_setfile_A_Global) / sizeof(sensor_5e9_setfile_A_Global[0]);

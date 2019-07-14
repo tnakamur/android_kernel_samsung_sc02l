@@ -1095,7 +1095,7 @@ static int fts_wait_for_ready(struct fts_ts_info *info)
 
 			break;
 		}
-		fts_delay(20);
+		fts_delay(50);
 	}
 
 	input_info(true, &info->client->dev,
@@ -1139,6 +1139,9 @@ int fts_get_version_info(struct fts_ts_info *info)
 	unsigned char data[FTS_EVENT_SIZE] = { 0 };
 	int retry = 0;
 
+	fts_interrupt_set(info, INT_DISABLE);
+	fts_delay(10); 
+
 	fts_command(info, FTS_CMD_RELEASEINFO);
 	fts_delay(5);
 
@@ -1168,7 +1171,7 @@ int fts_get_version_info(struct fts_ts_info *info)
 			input_err(true, &info->client->dev, "%s: Time Over\n", __func__);
 			break;
 		}
-		fts_delay(50);
+		fts_delay(80);
 	}
 
 	input_info(true, &info->client->dev,
@@ -1176,6 +1179,7 @@ int fts_get_version_info(struct fts_ts_info *info)
 		info->ic_product_id, info->fw_version_of_ic,
 		info->config_version_of_ic, info->fw_main_version_of_ic);
 
+	fts_interrupt_set(info, INT_ENABLE); 
 	return rc;
 }
 
@@ -1434,7 +1438,7 @@ static int fts_init(struct fts_ts_info *info)
 		info->lowpower_flag |= FTS_MODE_PRESSURE;
 	else
 		info->lowpower_flag = 0x00;
-	info->external_factory = false;
+	info->tdata->external_factory = false;
 
 #ifdef FTS_SUPPORT_TOUCH_KEY
 	info->tsp_keystatus = 0x00;
@@ -2112,23 +2116,25 @@ static unsigned char fts_event_handler_type_b(struct fts_ts_info *info,
 		else if (EventID == EVENTID_LEAVE_POINTER) {
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 			input_info(true, &info->client->dev,
-				"%s[R] tID:%d mc:%d tc:%d lx:%d ly:%d Ver[%02X%04X|%01X] P%02XT%04X[%02X] F%02X%02X C%02X\n",
+					"%s[R] tID:%d mc:%d tc:%d lx:%d ly:%d Ver[%02X%04X|%01X] C%02XT%04X.%4s%s\n",
 				info->dex_name,
 				TouchID, info->finger[TouchID].mcount, info->touch_count,
 				info->finger[TouchID].lx, info->finger[TouchID].ly,
 				info->panel_revision, info->fw_main_version_of_ic,
-				info->flip_enable, info->cal_count, info->tune_fix_ver,
-				info->test_result.data[0], info->pressure_cal_base,
-				info->pressure_cal_delta, info->nv_crc_fail_count);
+					info->flip_enable,
+					info->tdata->nvdata.cal_count, info->tdata->nvdata.tune_fix_ver,
+					info->tdata->tclm_string[info->tdata->nvdata.cal_position].f_name,
+					(info->tdata->tclm_level == TCLM_LEVEL_LOCKDOWN) ? ".L" : " ");
 #else
 			input_info(true, &info->client->dev,
-				"%s[R] tID:%d mc:%d tc:%d Ver[%02X%04X|%01X] P%02XT%04X[%02X] F%02X%02X, C%02X\n",
+					"%s[R] tID:%d mc:%d tc:%d Ver[%02X%04X|%01X] C%02XT%04X.%4s%s\n",
 				info->dex_name,
 				TouchID, info->finger[TouchID].mcount, info->touch_count,
 				info->panel_revision, info->fw_main_version_of_ic,
-				info->flip_enable, info->cal_count, info->tune_fix_ver,
-				info->test_result.data[0], info->pressure_cal_base,
-				info->pressure_cal_delta, info->nv_crc_fail_count);
+					info->flip_enable,
+					info->tdata->nvdata.cal_count, info->tdata->nvdata.tune_fix_ver,
+					info->tdata->tclm_string[info->tdata->nvdata.cal_position].f_name,
+					(info->tdata->tclm_level == TCLM_LEVEL_LOCKDOWN) ? ".L" : " ");
 #endif
 			info->finger[TouchID].mcount = 0;
 		}
@@ -2413,7 +2419,9 @@ static int fts_parse_dt(struct i2c_client *client)
 	u32 coords[2];
 	u32 ic_match_value;
 	int retval = 0;
+#if !defined(CONFIG_EXYNOS_DECON_LCD)
 	int lcdtype = 0;
+#endif
 #if defined(CONFIG_EXYNOS_DECON_FB)
 	int connected;
 #endif
@@ -2547,21 +2555,16 @@ static int fts_parse_dt(struct i2c_client *client)
 	if (of_property_read_u32(np, "stm,device_num", &pdata->device_num))
 		input_err(true, dev, "%s: Failed to get device_num property\n", __func__);
 
-#ifdef PAT_CONTROL
-	if (of_property_read_u32(np, "stm,pat_function", &pdata->pat_function) < 0){
-		pdata->pat_function = PAT_CONTROL_NONE;
-		input_err(true, dev, "%s: Failed to get pat_function property\n", __func__);
-	}
-
-	if (of_property_read_u32(np, "stm,afe_base", &pdata->afe_base) < 0){
-		pdata->afe_base = 0;
-		input_err(true, dev, "%s: Failed to get afe_base property\n", __func__);
-	}
-#endif
-
 #if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
 	lcdtype = get_lcd_attached("GET");
 	if (lcdtype == 0xFFFFFF) {
+		input_err(true, &client->dev, "%s: lcd is not attached\n", __func__);
+		return -ENODEV;
+	}
+#endif
+
+#if defined(CONFIG_EXYNOS_DECON_LCD)
+	if (lcdtype == 0) {
 		input_err(true, &client->dev, "%s: lcd is not attached\n", __func__);
 		return -ENODEV;
 	}
@@ -2593,9 +2596,9 @@ static int fts_parse_dt(struct i2c_client *client)
 	pdata->panel_revision = ((lcdtype >> 8) & 0xFF) >> 4;
 
 	input_err(true, dev,
-		"%s: irq :%d, irq_type: 0x%04x, max[x,y]: [%d,%d], project/model_name: %s/%s, pat_function(%d), panel_revision: %d, gesture: %d, device_num: %d, dex: %d\n",
+		"%s: irq :%d, irq_type: 0x%04x, max[x,y]: [%d,%d], project/model_name: %s/%s, panel_revision: %d, gesture: %d, device_num: %d, dex: %d\n",
 		__func__, pdata->irq_gpio, pdata->irq_type, pdata->max_x, pdata->max_y,
-		pdata->project_name, pdata->model_name, pdata->pat_function, pdata->panel_revision,
+		pdata->project_name, pdata->model_name, pdata->panel_revision,
 		pdata->support_sidegesture, pdata->device_num, pdata->support_dex);
 
 	return retval;
@@ -2608,11 +2611,34 @@ extern struct tsp_dump_callbacks dump_callbacks;
 void tsp_dump(void);
 #endif
 
+#ifdef TCLM_CONCEPT
+static void sec_tclm_parse_dt(struct i2c_client *client, struct sec_tclm_data *tdata)
+{
+	struct device *dev = &client->dev;
+	struct device_node *np = dev->of_node;
+
+	if (of_property_read_u32(np, "stm,tclm_level", &tdata->tclm_level) < 0) {
+		tdata->tclm_level = 0;
+		input_err(true, dev, "%s: Failed to get tclm_level property\n", __func__);
+	}
+
+	if (of_property_read_u32(np, "stm,afe_base", &tdata->afe_base) < 0) {
+		tdata->afe_base = 0;
+		input_err(true, dev, "%s: Failed to get afe_base property\n", __func__);
+	}
+
+	input_err(true, &client->dev, "%s: tclm_level %d, sec_afe_base %d\n", __func__, tdata->tclm_level, tdata->afe_base);
+}
+#endif
+
 static int fts_setup_drv_data(struct i2c_client *client)
 {
 	int retval = 0;
 	struct fts_i2c_platform_data *pdata;
 	struct fts_ts_info *info;
+#ifdef TCLM_CONCEPT
+	struct sec_tclm_data *tdata = NULL;
+#endif
 
 	/* parse dt */
 	if (client->dev.of_node) {
@@ -2630,6 +2656,14 @@ static int fts_setup_drv_data(struct i2c_client *client)
 			input_err(true, &client->dev, "%s: Failed to parse dt\n", __func__);
 			return retval;
 		}
+#ifdef TCLM_CONCEPT
+		tdata = devm_kzalloc(&client->dev,
+				sizeof(struct sec_tclm_data), GFP_KERNEL);
+		if (!tdata)
+			return -ENOMEM;
+		
+		sec_tclm_parse_dt(client, tdata);
+#endif
 	} else {
 		pdata = client->dev.platform_data;
 	}
@@ -2689,7 +2723,20 @@ static int fts_setup_drv_data(struct i2c_client *client)
 #ifdef FTS_SUPPORT_NOISE_PARAM
 	info->fts_get_noise_param_address = fts_get_noise_param_address;
 #endif
+#ifdef TCLM_CONCEPT
+	info->tdata = tdata;
+	if (!info->tdata) {
+		input_err(true, &client->dev, "%s: No tclm data found\n", __func__);
+		kfree(info);
+		return -EINVAL;
+	}
 
+	sec_tclm_initialize(info->tdata);
+	info->tdata->client = info->client;
+	info->tdata->tclm_read = sec_tclm_data_read;
+	info->tdata->tclm_write = sec_tclm_data_write;
+	info->tdata->tclm_execute_force_calibration = sec_tclm_execute_force_calibration;
+#endif
 #ifdef USE_OPEN_DWORK
 	INIT_DELAYED_WORK(&info->open_work, fts_open_work);
 #endif
@@ -2780,6 +2827,15 @@ static void fts_set_input_prop(struct fts_ts_info *info, struct input_dev *dev, 
 	input_set_drvdata(dev, info);
 }
 
+unsigned int bootmode;
+static int __init get_bootmode(char *arg)
+{
+	get_option(&arg, &bootmode);
+
+	return 0;
+}
+early_param("bootmode", get_bootmode);
+
 static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 {
 	int retval;
@@ -2793,6 +2849,13 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 		input_err(true, &client->dev, "%s: FTS err = EIO!\n", __func__);
 		return -EIO;
 	}
+
+	if (bootmode == 2) {
+		input_err(true, &client->dev, "%s : Do not load driver due to : device entered recovery mode %d\n",
+			__func__, bootmode);
+		return -ENODEV;
+	}
+
 #ifdef CONFIG_BATTERY_SAMSUNG
 	if (lpcharge == 1) {
 		input_err(true, &client->dev, "%s: Do not load driver due to : lpm %d\n",
@@ -2991,7 +3054,7 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 #ifdef FTS_SUPPORT_STRINGLIB
 	fts_check_custom_library(info);
 #endif
-	//schedule_delayed_work(&info->work_read_info, msecs_to_jiffies(5 * MSEC_PER_SEC));
+	schedule_delayed_work(&info->work_read_info, msecs_to_jiffies(5 * MSEC_PER_SEC));
 
 #if defined(CONFIG_TOUCHSCREEN_DUMP_MODE)
 	dump_callbacks.inform_dump = tsp_dump;
@@ -3000,7 +3063,7 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 #endif
 
 	input_err(true, &info->client->dev, "%s: done\n", __func__);
-	//input_log_fix();
+	input_log_fix();
 	return 0;
 
 #ifdef SEC_TSP_FACTORY_TEST
@@ -3048,7 +3111,7 @@ err_input_allocate_device:
 err_get_drv_data:
 err_setup_drv_data:
 	input_err(true, &client->dev, "%s: failed(%d)\n", __func__, retval);
-//	input_log_fix();
+	input_log_fix();
 	return retval;
 }
 
@@ -3157,6 +3220,11 @@ static int fts_input_open(struct input_dev *dev)
 		goto out;
 	}
 
+	if (!info->info_work_done) {
+		input_err(true, &info->client->dev, "%s not finished info work\n", __func__);
+		goto out;
+	}
+
 	input_dbg(false, &info->client->dev, "%s\n", __func__);
 	
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
@@ -3195,6 +3263,11 @@ static void fts_input_close(struct input_dev *dev)
 
 	if (!info->probe_done || info->shutdown_is_on_going) {
 		input_dbg(false, &info->client->dev, "%s: not probe\n", __func__);
+		return;
+	}
+
+	if (!info->info_work_done) {
+		input_err(true, &info->client->dev, "%s not finished info work\n", __func__);
 		return;
 	}
 
@@ -3515,28 +3588,23 @@ static void fts_read_info_work(struct work_struct *work)
 	short minval = 0x7FFF;
 	short maxval = 0x8000;
 	int ret;
-	
-#ifdef PAT_CONTROL
-	fts_get_calibration_information(info);
-#endif
-	fts_get_factory_debug_information(info);
-	if (info->boot_crc_check_fail == FTS_BOOT_CRC_FAIL) {
 
+	input_info(true, &info->client->dev, "%s\n", __func__);
+
+#ifdef TCLM_CONCEPT
+	ret = sec_tclm_check_cal_case(info->tdata);
+	input_info(true, &info->client->dev, "%s: sec_tclm_check_cal_case ret: %d \n", __func__, ret);
+#endif
+	if (info->boot_crc_check_fail == FTS_BOOT_CRC_FAIL) {
 		info->nv_crc_fail_count++;
 		if (info->nv_crc_fail_count > 0xFE)
 			info->nv_crc_fail_count = 0xFE;
-
-		fts_set_factory_debug_information(info, info->pressure_cal_base,
-				info->pressure_cal_delta, info->nv_crc_fail_count);
 	}
 
 	ret = fts_get_tsp_test_result(info);
 	if (ret < 0)
 		input_err(true, &info->client->dev, "%s: failed to get result\n",
 			__func__);
-
-	input_raw_info(true, &info->client->dev, "%s: test result:%02X, cal: %02X, fix ver:%04X\n",
-		__func__, info->test_result.data[0], info->cal_count, info->tune_fix_ver);
 
 #ifdef FTS_SUPPORT_PRESSURE_SENSOR
 	ret = get_nvm_data(info, GROUP_INDEX, &index);
@@ -3578,7 +3646,8 @@ static void fts_read_info_work(struct work_struct *work)
 
 	kfree(data);
 
-//	input_log_fix();
+	input_log_fix();
+	info->info_work_done = true;
 
 	return;
 
@@ -3586,12 +3655,14 @@ err_data:
 	kfree(data);
 err_no_mem:
 	input_info(true, &info->client->dev, "%s: failed\n", __func__);
-//	input_log_fix();
+	input_log_fix();
+	info->info_work_done = true;
 
 	return;
 #else
 	fts_read_frame(info, TYPE_BASELINE_DATA, &minval, &maxval);
-
+	info->info_work_done = true;
+	
 	return;
 #endif
 }
@@ -3604,6 +3675,10 @@ static int fts_stop_device(struct fts_ts_info *info, bool lpmode)
 	fts_secure_touch_stop(info, 1);
 #endif
 	mutex_lock(&info->device_mutex);
+
+#ifdef TCLM_CONCEPT
+	sec_tclm_debug_info(info->tdata);
+#endif
 
 	if (info->touch_stopped) {
 		input_err(true, &info->client->dev, "%s: already power off\n", __func__);

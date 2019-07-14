@@ -39,6 +39,11 @@
 #include "ext4_extents.h"
 #include "xattr.h"
 
+#ifdef CONFIG_EXT4CRYPT_SDP
+#include "sdp/fscrypto_sdp_private.h"
+#include "sdp/fscrypto_sdp_dek_private.h"
+#endif
+
 /* Encryption added and removed here! (L: */
 
 static unsigned int num_prealloc_crypto_pages = 32;
@@ -167,6 +172,9 @@ void ext4_exit_crypto(void)
 	if (ext4_crypt_info_cachep)
 		kmem_cache_destroy(ext4_crypt_info_cachep);
 	ext4_crypt_info_cachep = NULL;
+#ifdef CONFIG_EXT4CRYPT_SDP
+	fscrypt_sdp_release_sdp_info_cachep();
+#endif
 }
 
 /**
@@ -197,6 +205,11 @@ int ext4_init_crypto(void)
 					    SLAB_RECLAIM_ACCOUNT);
 	if (!ext4_crypt_info_cachep)
 		goto fail;
+
+#ifdef CONFIG_EXT4CRYPT_SDP
+	if (!fscrypt_sdp_init_sdp_info_cachep())
+		goto fail;
+#endif
 
 	for (i = 0; i < num_prealloc_crypto_ctxs; i++) {
 		struct ext4_crypto_ctx *ctx;
@@ -470,7 +483,8 @@ bool ext4_valid_contents_enc_mode(uint32_t mode)
 {
 #ifdef CONFIG_EXT4_PRIVATE_ENCRYPTION
 	return (mode == EXT4_ENCRYPTION_MODE_AES_256_XTS) || \
-		      (mode == EXT4_PRIVATE_ENCRYPTION_MODE_AES_256_XTS);
+		      (mode == EXT4_PRIVATE_ENCRYPTION_MODE_AES_256_XTS) || \
+		      (mode == EXT4_ENCRYPTION_MODE_PRIVATE);
 #else
 	return (mode == EXT4_ENCRYPTION_MODE_AES_256_XTS);
 #endif /* CONFIG_EXT4_PRIVATE_ENCRYPTION */
@@ -510,11 +524,11 @@ static int ext4_d_revalidate(struct dentry *dentry, unsigned int flags)
 		return 0;
 	}
 	ci = EXT4_I(d_inode(dir))->i_crypt_info;
-	if (ci && ci->ci_keyring_key &&
-	    (ci->ci_keyring_key->flags & ((1 << KEY_FLAG_INVALIDATED) |
-					  (1 << KEY_FLAG_REVOKED) |
-					  (1 << KEY_FLAG_DEAD))))
-		ci = NULL;
+//	if (ci && ci->ci_keyring_key &&
+//	    (ci->ci_keyring_key->flags & ((1 << KEY_FLAG_INVALIDATED) |
+//					  (1 << KEY_FLAG_REVOKED) |
+//					  (1 << KEY_FLAG_DEAD))))
+//		ci = NULL;
 
 	/* this should eventually be an flag in d_flags */
 	cached_with_key = dentry->d_fsdata != NULL;
@@ -549,6 +563,16 @@ static int ext4_d_revalidate(struct dentry *dentry, unsigned int flags)
 	return 1;
 }
 
+#ifdef CONFIG_EXT4CRYPT_SDP
+static int ext4_sdp_d_delete(const struct dentry *dentry)
+{
+	return ext4_sdp_d_delete_wrapper(dentry);
+}
+#endif
+
 const struct dentry_operations ext4_encrypted_d_ops = {
 	.d_revalidate = ext4_d_revalidate,
+#ifdef CONFIG_EXT4CRYPT_SDP
+	.d_delete     = ext4_sdp_d_delete,
+#endif
 };

@@ -98,6 +98,7 @@ struct a96t3x6_data {
 	u8 checksum_l_bin;
 	bool enabled;
 	bool skip_event;
+	bool resume_called;
 
 	int ldo_en;			/* ldo_en pin gpio */
 	int grip_int;			/* irq pin gpio */
@@ -432,6 +433,12 @@ static void a96t3x6_debug_work_func(struct work_struct *work)
 	static int hall_prev_state;
 	int hall_state;
 
+	if (data->resume_called == true) {
+		data->resume_called = false;
+		a96t3x6_sar_only_mode(data, 0);
+		schedule_delayed_work(&data->debug_work, msecs_to_jiffies(1000));
+		return;
+	}
 	hall_state = a96t3x6_get_hallic_state(data);
 	if (hall_state == HALL_CLOSE_STATE && hall_prev_state != hall_state) {
 		SENSOR_INFO("%s - hall is closed\n", __func__);
@@ -1482,7 +1489,7 @@ static ssize_t grip_reg_show(struct device *dev,
 	int offset = 0, i = 0;
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
 
-	for (i = 0; i < 255; i++) {
+	for (i = 0; i < 128; i++) {
 		a96t3x6_i2c_read(data->client, i, &val, 1);
 		SENSOR_INFO("%s: reg=%02X val=%02X\n", __func__, i, val);
 		
@@ -1794,19 +1801,19 @@ static int a96t3x6_ccic_handle_notification(struct notifier_block *nb,
 		container_of(nb, struct a96t3x6_data, cpuidle_ccic_nb);
 	u8 cmd = CMD_ON;
 
-	SENSOR_INFO("%s: (%ld) %01x, %01x, %02x, %04x, %04x, %04x\n",
-		__func__, action, usb_typec_info.src, usb_typec_info.dest, 
-		usb_typec_info.id, usb_typec_info.attach, usb_typec_info.rprd,
-		usb_typec_info.cable_type);
-
-	if (usb_typec_info.cable_type == 0)
-		return 0;
-
 	switch (usb_typec_info.cable_type) {
-	case NOTIFY_CABLE_TA:
-	case NOTIFY_CABLE_USB:
-	case NOTIFY_CABLE_TA_FAC:
-	case NOTIFY_CABLE_OTG:
+	case ATTACHED_DEV_JIG_UART_OFF_MUIC:
+	case ATTACHED_DEV_JIG_UART_OFF_VB_MUIC:	/* VBUS enabled */
+	case ATTACHED_DEV_JIG_UART_OFF_VB_OTG_MUIC:	/* for otg test */
+	case ATTACHED_DEV_JIG_UART_OFF_VB_FG_MUIC:	/* for fuelgauge test */
+	case ATTACHED_DEV_JIG_UART_ON_MUIC:
+	case ATTACHED_DEV_JIG_UART_ON_VB_MUIC:	/* VBUS enabled */
+	case ATTACHED_DEV_JIG_USB_OFF_MUIC:
+	case ATTACHED_DEV_JIG_USB_ON_MUIC:
+		SENSOR_INFO("skip cable = %u, attach = %u\n",
+			usb_typec_info.cable_type, usb_typec_info.attach);
+		break;
+	default:
 		if (usb_typec_info.attach == MUIC_NOTIFY_CMD_ATTACH) {
 			cmd = CMD_OFF;
 			a96t3x6_i2c_write(grip_data->client, REG_TSPTA, &cmd);
@@ -1816,9 +1823,6 @@ static int a96t3x6_ccic_handle_notification(struct notifier_block *nb,
 			a96t3x6_i2c_write(grip_data->client, REG_TSPTA, &cmd);
 			SENSOR_INFO("TA/USB is removed\n");
 		}
-		break;
-	default:
-		SENSOR_INFO("unsupported\n");
 		break;
 	}
 
@@ -1991,6 +1995,7 @@ static int a96t3x6_probe(struct i2c_client *client,
 #endif
 	SENSOR_INFO("done\n");
 	data->probe_done = true;
+	data->resume_called = false;
 	return 0;
 
 err_req_irq:
@@ -2046,6 +2051,7 @@ static int a96t3x6_suspend(struct device *dev)
 {
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
 
+	data->resume_called = false;
 	SENSOR_INFO("%s\n", __func__);
 	a96t3x6_sar_only_mode(data, 1);
 	a96t3x6_set_debug_work(data, 0, 1000);
@@ -2058,8 +2064,8 @@ static int a96t3x6_resume(struct device *dev)
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
 
 	SENSOR_INFO("%s\n", __func__);
-	a96t3x6_sar_only_mode(data, 0);
-	a96t3x6_set_debug_work(data, 1, 1000);
+	data->resume_called = true;
+	a96t3x6_set_debug_work(data, 1, 0);
 
 	return 0;
 }

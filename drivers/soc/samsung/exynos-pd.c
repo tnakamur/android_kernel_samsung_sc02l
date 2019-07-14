@@ -106,7 +106,6 @@ static void exynos_pd_power_off_pre(struct exynos_pm_domain *pd)
 			pr_err(EXYNOS_PD_PREFIX "%s: %s peri_restore "
 			"funciton returns 0x%x\n", __func__, pd->name, ret);
 	}
-
 	if (!strcmp(pd->name, "pd-dispaud"))
 		abox_disable_callback();
 

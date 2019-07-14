@@ -1136,10 +1136,14 @@ config TOUCHSCREEN_DUMP_MODE
 
 source "drivers/input/touchscreen/zinitix/Kconfig"
 source "drivers/input/touchscreen/sec_ts/Kconfig"
-source "drivers/input/touchscreen/sec_ts/a7y18/Kconfig"
 source "drivers/input/touchscreen/sec_incell_ts/Kconfig"
 source "drivers/input/touchscreen/synaptics_td4x00/Kconfig"
 source "drivers/input/touchscreen/melfas_mms400/Kconfig"
+source "drivers/input/touchscreen/melfas_mss100/Kconfig"
 source "drivers/input/touchscreen/stm/Kconfig"
+source "drivers/input/touchscreen/stm_fts1ba90a/Kconfig"
+source "drivers/input/touchscreen/imagis_30xxh/Kconfig"
 source "drivers/input/touchscreen/imagis_40xx/Kconfig"
+source "drivers/input/touchscreen/novatek_nt36xx/Kconfig"
+source "drivers/input/touchscreen/himax_83xxx/Kconfig"
 endif

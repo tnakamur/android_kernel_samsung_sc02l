@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (c) 2014 - 2016 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2014 - 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
 
@@ -67,6 +67,8 @@ struct scsc_service_client {
 	int (*suspend)(struct scsc_service_client *client);
 	/* called when AP processor has resumed */
 	int (*resume)(struct scsc_service_client *client);
+	/* called when log collection has been triggered */
+	void (*log)(struct scsc_service_client *client, u16 reason);
 };
 
 
@@ -168,6 +170,25 @@ struct device *scsc_service_get_device(struct scsc_service *service);
 
 int scsc_service_force_panic(struct scsc_service *service);
 
+/*
+ * API to share /sys/wifi kobject between core and wifi driver modules.
+ * Depending upon the order of loading respective drivers, a kobject is
+ * created and shared with the other driver. This convoluted implementation
+ * is required as we need the common kobject associated with "/sys/wifi" directory
+ * when creating a file underneth. core driver (mxman.c) need to create "memdump"
+ * and wifi driver (dev.c,mgt.c) needs to create "mac_addr" files respectively.
+ */
+struct kobject *mxman_wifi_kobject_ref_get(void);
+void mxman_wifi_kobject_ref_put(void);
+
+/* MXLOGGER API */
+/* If there is no service/mxman associated, register the observer as global (will affect all the mx instanes)*/
+/* Users of these functions should ensure that the registers/unregister functions are balanced (i.e. if observer is registed as global,
+ * it _has_ to unregister as global) */
+int scsc_service_register_observer(struct scsc_service *service, char *name);
+/* Unregister an observer */
+int scsc_service_unregister_observer(struct scsc_service *service, char *name);
+
 /* Reads a configuration file into memory.
  *
  * Path is relative to the currently selected firmware configuration
@@ -175,7 +196,7 @@ int scsc_service_force_panic(struct scsc_service *service);
  * Returns pointer to data or NULL if file not found.
  * Call mx140_file_release_conf()to release the memory.
  */
-int mx140_file_request_conf(struct scsc_mx *mx, const struct firmware **conf, const char *config_path);
+int mx140_file_request_conf(struct scsc_mx *mx, const struct firmware **conf, const char *config_path, const char *filename);
 
 /* Reads a debug configuration file into memory.
  *
@@ -294,5 +315,29 @@ int mxman_register_firmware_notifier(struct notifier_block *nb);
 int mxman_unregister_firmware_notifier(struct notifier_block *nb);
 void mxman_get_fw_version(char *version, size_t ver_sz);
 void mxman_get_driver_version(char *version, size_t ver_sz);
+
+/* Status of WLBT autorecovery on the platform
+ *
+ * Returns:
+ *  false - enabled, true disabled
+ */
+bool mxman_recovery_disabled(void);
+
+/* function to provide string representation of uint8 trigger code */
+static inline const char *scsc_get_trigger_str(int code)
+{
+	switch (code) {
+	case 1:	return "scsc_log_fw_panic";
+	case 2:	return "scsc_log_user";
+	case 3:	return "scsc_log_fw";
+	case 4:	return "scsc_log_dumpstate";
+	case 5:	return "scsc_log_host_wlan";
+	case 6:	return "scsc_log_host_bt";
+	case 7:	return "scsc_log_host_common";
+	case 0:
+	default:
+		return "unknown";
+	}
+};
 
 #endif

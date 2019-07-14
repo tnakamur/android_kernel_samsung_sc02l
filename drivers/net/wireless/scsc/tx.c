@@ -22,14 +22,37 @@
 
 #include <linux/spinlock.h>
 
+int slsi_get_dwell_time_for_wps(struct slsi_dev *sdev, struct netdev_vif *ndev_vif, u8 *eapol, u16 eap_length)
+{
+	/* Note that Message should not be M8.This check is to identify only WSC_START message or M1-M7 */
+	/*Return 100ms If opcode type WSC msg and Msg Type M1-M7 or if opcode is WSC start.*/
+	if (eapol[SLSI_EAP_CODE_POS] == SLSI_EAP_PACKET_REQUEST ||
+	    eapol[SLSI_EAP_CODE_POS] == SLSI_EAP_PACKET_RESPONSE) {
+		if (eapol[SLSI_EAP_TYPE_POS] == SLSI_EAP_TYPE_EXPANDED && eap_length >= SLSI_EAP_OPCODE_POS - 3 &&
+		    ((eapol[SLSI_EAP_OPCODE_POS] == SLSI_EAP_OPCODE_WSC_MSG && eap_length >= SLSI_EAP_MSGTYPE_POS - 3 &&
+		    eapol[SLSI_EAP_MSGTYPE_POS] != SLSI_EAP_MSGTYPE_M8) ||
+		    eapol[SLSI_EAP_OPCODE_POS] == SLSI_EAP_OPCODE_WSC_START))
+			return SLSI_EAP_WPS_DWELL_TIME;
+		/* This is to check if a frame is EAP request identity and on P2P vif.If yes then set dwell time to 100ms */
+		if (SLSI_IS_VIF_INDEX_P2P_GROUP(sdev, ndev_vif) &&
+		    eapol[SLSI_EAP_CODE_POS] == SLSI_EAP_PACKET_REQUEST &&
+		    eapol[SLSI_EAP_TYPE_POS] == SLSI_EAP_TYPE_IDENTITY)
+			return SLSI_EAP_WPS_DWELL_TIME;
+	}
+	return 0;
+}
+
 static int slsi_tx_eapol(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *skb)
 {
 	struct netdev_vif	*ndev_vif = netdev_priv(dev);
 	struct slsi_peer	*peer;
-	u8			*eapol;
+	u8			*eapol = NULL;
 	u16			msg_type = 0;
 	u16			proto = ntohs(skb->protocol);
 	int			ret = 0;
+	u32              dwell_time = sdev->fw_dwell_time;
+	u64			tx_bytes_tmp = 0;
+	u16                 eap_length = 0;
 
 	slsi_spinlock_lock(&ndev_vif->peer_lock);
 	peer = slsi_get_peer_from_mac(sdev, dev, eth_hdr(skb)->h_dest);
@@ -48,8 +71,9 @@ static int slsi_tx_eapol(struct slsi_dev *sdev, struct net_device *dev, struct s
 		 *   - Key type bit set in key info (pairwise=1, Group=0)
 		 *   - Key Data Length would be 0
 		 */
-		eapol = skb->data + sizeof(struct ethhdr);
-		if (eapol[SLSI_EAPOL_IEEE8021X_TYPE_POS] == SLSI_IEEE8021X_TYPE_EAPOL_KEY) {
+		if ((skb->len - sizeof(struct ethhdr)) >= 99)
+			eapol = skb->data + sizeof(struct ethhdr);
+		if (eapol && eapol[SLSI_EAPOL_IEEE8021X_TYPE_POS] == SLSI_IEEE8021X_TYPE_EAPOL_KEY) {
 			msg_type = FAPI_MESSAGETYPE_EAPOL_KEY_M123;
 
 			if ((eapol[SLSI_EAPOL_TYPE_POS] == SLSI_EAPOL_TYPE_RSN_KEY || eapol[SLSI_EAPOL_TYPE_POS] == SLSI_EAPOL_TYPE_WPA_KEY) &&
@@ -57,16 +81,35 @@ static int slsi_tx_eapol(struct slsi_dev *sdev, struct net_device *dev, struct s
 			    (eapol[SLSI_EAPOL_KEY_INFO_HIGHER_BYTE_POS] & SLSI_EAPOL_KEY_INFO_MIC_BIT_IN_HIGHER_BYTE) &&
 			    (eapol[SLSI_EAPOL_KEY_DATA_LENGTH_HIGHER_BYTE_POS] == 0) &&
 			    (eapol[SLSI_EAPOL_KEY_DATA_LENGTH_LOWER_BYTE_POS] == 0)) {
-				SLSI_NET_DBG1(dev, SLSI_MLME, "message M4\n");
 				msg_type = FAPI_MESSAGETYPE_EAPOL_KEY_M4;
+				dwell_time = 0;
 			}
 		} else {
 			msg_type = FAPI_MESSAGETYPE_EAP_MESSAGE;
+			if ((skb->len - sizeof(struct ethhdr)) >= 9)
+				eapol = skb->data + sizeof(struct ethhdr);
+
+			dwell_time = 0;
+			if (eapol && eapol[SLSI_EAPOL_IEEE8021X_TYPE_POS] == SLSI_IEEE8021X_TYPE_EAP_PACKET) {
+				eap_length = (skb->len - sizeof(struct ethhdr)) - 4;
+				if (eapol[SLSI_EAP_CODE_POS] == SLSI_EAP_PACKET_REQUEST)
+					SLSI_INFO(sdev, "Send EAP-Request (%d)\n", eap_length);
+				else if (eapol[SLSI_EAP_CODE_POS] == SLSI_EAP_PACKET_RESPONSE)
+					SLSI_INFO(sdev, "Send EAP-Response (%d)\n", eap_length);
+				else if (eapol[SLSI_EAP_CODE_POS] == SLSI_EAP_PACKET_SUCCESS)
+					SLSI_INFO(sdev, "Send EAP-Success (%d)\n", eap_length);
+				else if (eapol[SLSI_EAP_CODE_POS] == SLSI_EAP_PACKET_FAILURE)
+					SLSI_INFO(sdev, "Send EAP-Failure (%d)\n", eap_length);
+				/* Need to set dwell time for wps exchange and EAP identity frame for P2P */
+				dwell_time = slsi_get_dwell_time_for_wps(sdev, ndev_vif, eapol, eap_length);
+			}
 		}
 	break;
 	case ETH_P_WAI:
 		SLSI_NET_DBG1(dev, SLSI_MLME, "WAI protocol frame\n");
 		msg_type = FAPI_MESSAGETYPE_WAI_MESSAGE;
+		if ((skb->data[17]) != 9) /*subtype 9 refers to unicast negotiation response*/
+			dwell_time = 0;
 	break;
 	default:
 		SLSI_NET_DBG1(dev, SLSI_MLME, "unsupported protocol\n");
@@ -75,11 +118,11 @@ static int slsi_tx_eapol(struct slsi_dev *sdev, struct net_device *dev, struct s
 	}
 
 	/* EAPOL/WAI frames are send via the MLME */
-	ret = slsi_mlme_send_frame_data(sdev, dev, skb, 0, msg_type, 0);
-	if (!ret) {
-		peer->sinfo.tx_packets++;
-		peer->sinfo.tx_bytes += skb->len;
-	}
+	tx_bytes_tmp = skb->len; /*len copy to avoid null pointer of skb*/
+	ret = slsi_mlme_send_frame_data(sdev, dev, skb, msg_type, 0, dwell_time, 0);
+	if (!ret)
+		peer->sinfo.tx_bytes += tx_bytes_tmp; //skb->len;
+
 	slsi_spinlock_unlock(&ndev_vif->peer_lock);
 	return ret;
 }
@@ -104,6 +147,10 @@ int slsi_tx_data(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *
 	u16                 len = skb->len;
 	int                 ret = 0;
 	enum slsi_traffic_q tq;
+	u32 dwell_time = 0;
+	u8 *frame;
+	u32 arp_opcode;
+	u32 dhcp_message_type = SLSI_DHCP_MESSAGE_TYPE_INVALID;
 
 	if (slsi_is_test_mode_enabled()) {
 		/* This signals is in XML file because parts of the Firmware need the symbols defined by them
@@ -142,11 +189,40 @@ int slsi_tx_data(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *
 			return slsi_tx_eapol(sdev, dev, skb);
 		case ETH_P_ARP:
 			SLSI_NET_DBG2(dev, SLSI_MLME, "transmit ARP frame from SLSI_NETIF_Q_PRIORITY\n");
-			return slsi_mlme_send_frame_data(sdev, dev, skb, 0, FAPI_MESSAGETYPE_ARP, 0);
+			frame = skb->data + sizeof(struct ethhdr);
+			arp_opcode = frame[6] << 8 | frame[7];
+			if ((arp_opcode == 1) &&
+			    memcmp(&frame[14], &frame[24], 4)) { /*opcode 1: ARP request(except gratuitous ARP)*/
+				dwell_time = sdev->fw_dwell_time;
+			}
+			return slsi_mlme_send_frame_data(sdev, dev, skb, FAPI_MESSAGETYPE_ARP, 0, dwell_time, 0);
 		case ETH_P_IP:
-			if (slsi_is_dhcp_packet(skb->data) != SLSI_TX_IS_NOT_DHCP) {
-				SLSI_NET_DBG2(dev, SLSI_MLME, "transmit DHCP packet from SLSI_NETIF_Q_PRIORITY\n");
-				return slsi_mlme_send_frame_data(sdev, dev, skb, 0, FAPI_MESSAGETYPE_DHCP, 0);
+			if (skb->len >= 285 && slsi_is_dhcp_packet(skb->data) != SLSI_TX_IS_NOT_DHCP) {
+				if (skb->data[42] == 1)  /*opcode 1 refers to DHCP discover/request*/
+					dwell_time = sdev->fw_dwell_time;
+				dhcp_message_type = skb->data[284];
+				if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_DISCOVER)
+					SLSI_INFO(sdev, "Send DHCP [DISCOVER]\n");
+				else if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_OFFER)
+					SLSI_INFO(sdev, "Send DHCP [OFFER]\n");
+				else if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_REQUEST)
+					SLSI_INFO(sdev, "Send DHCP [REQUEST]\n");
+				else if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_DECLINE)
+					SLSI_INFO(sdev, "Send DHCP [DECLINE]\n");
+				else if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_ACK)
+					SLSI_INFO(sdev, "Send DHCP [ACK]\n");
+				else if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_NAK)
+					SLSI_INFO(sdev, "Send DHCP [NAK]\n");
+				else if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_RELEASE)
+					SLSI_INFO(sdev, "Send DHCP [RELEASE]\n");
+				else if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_INFORM)
+					SLSI_INFO(sdev, "Send DHCP [INFORM]\n");
+				else if (dhcp_message_type == SLSI_DHCP_MESSAGE_TYPE_FORCERENEW)
+					SLSI_INFO(sdev, "Send DHCP [FORCERENEW]\n");
+				else
+					SLSI_INFO(sdev, "Send DHCP [INVALID]\n");
+				return slsi_mlme_send_frame_data(sdev, dev, skb, FAPI_MESSAGETYPE_DHCP, 0, dwell_time,
+								 0);
 			}
 			/* IP frame can have only DHCP packet in SLSI_NETIF_Q_PRIORITY */
 			SLSI_NET_ERR(dev, "Bad IP frame in SLSI_NETIF_Q_PRIORITY\n");
@@ -214,7 +290,7 @@ int slsi_tx_data(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *
 
 	/* Log only the linear skb chunk ... unidata anywya will be truncated to 100.*/
 	SCSC_WLOG_PKTFATE_LOG_TX_DATA_FRAME(fapi_get_u16(skb, u.ma_unitdata_req.host_tag),
-					    skb_mac_header(skb), skb_headlen(skb));
+					    skb->data, skb_headlen(skb));
 
 	/* ACCESS POINT MODE */
 	if (ndev_vif->vif_type == FAPI_VIFTYPE_AP) {
@@ -324,7 +400,6 @@ int slsi_tx_data(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *
 	/* What about the original if we passed in a copy ? */
 	if (original_skb)
 		slsi_kfree_skb(original_skb);
-	peer->sinfo.tx_packets++;
 	peer->sinfo.tx_bytes += len;
 	slsi_offline_dbg_printf(sdev, 4, false, "%llu : %-8s : ucast_tx", ktime_to_ns(ktime_get()), "HIP TX");
 	return ret;
@@ -498,22 +573,20 @@ int slsi_tx_control(struct slsi_dev *sdev, struct net_device *dev, struct sk_buf
 
 	/* Log only the linear skb  chunk */
 	SCSC_WLOG_PKTFATE_LOG_TX_CTRL_FRAME(fapi_get_u16(skb, u.mlme_frame_transmission_ind.host_tag),
-					    skb_mac_header(skb), skb_headlen(skb));
+					    skb->data, skb_headlen(skb));
 
 	res = scsc_wifi_transmit_frame(&sdev->hip4_inst, true, skb);
 	if (res != NETDEV_TX_OK) {
-		SLSI_NET_DBG1(dev, SLSI_TX, "%s (signal %d)\n", res == -ENOSPC ? "Queue is full. Flow control" : "Failed to transmit", fapi_get_sigid(skb));
+		char reason[80];
 
-		/* In the control plane, the skb will just be freed - also if
-		 * the failure was due to flow control. The transmitter is
-		 * responsible for schedule a transmit later.
-		 */
-		if (res == -ENOSPC)
-			SLSI_NET_DBG1(dev, SLSI_TX,
-				      "Queue Full...BUT CTRL Packet Dropped anyway\n");
-		res = -EIO;
-	} else {
-		slsi_offline_dbg_printf(sdev, 4, false, "%llu : %-8s : ctrl", ktime_to_ns(ktime_get()), "HIP TX");
+		SLSI_NET_ERR(dev, "%s (signal %d)\n", res == -ENOSPC ? "Queue is full. Flow control" : "Failed to transmit", fapi_get_sigid(skb));
+
+		if (!in_interrupt()) {
+			snprintf(reason, sizeof(reason), "Failed to transmit signal 0x%04X (err:%d)", fapi_get_sigid(skb), res);
+			slsi_sm_service_failed(sdev, reason);
+
+			res = -EIO;
+		}
 	}
 exit:
 	return res;

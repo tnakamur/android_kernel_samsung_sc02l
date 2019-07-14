@@ -103,6 +103,8 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_SGTL5000 if I2C
 	select SND_SOC_SI476X if MFD_SI476X_CORE
 	select SND_SOC_SIRF_AUDIO_CODEC
+	select SND_SOC_SMA1301 if I2C
+	select SND_SOC_SMA1301_DUAL if I2C
 	select SND_SOC_SN95031 if INTEL_SCU_IPC
 	select SND_SOC_SPDIF
 	select SND_SOC_SSM2518 if I2C
@@ -120,6 +122,8 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_TFA9872 if I2C
 	select SND_SOC_TFA9879 if I2C
 	select SND_SOC_TFA9896 if I2C
+	select SND_SOC_TFA9896_DUAL if I2C
+	select SND_SOC_TFA9896_QUAD if I2C
 	select SND_SOC_TLV320AIC23_I2C if I2C
 	select SND_SOC_TLV320AIC23_SPI if SPI_MASTER
 	select SND_SOC_TLV320AIC26 if SPI_MASTER
@@ -653,6 +657,15 @@ config SND_SOC_SIRF_AUDIO_CODEC
 	tristate "SiRF SoC internal audio codec"
 	select REGMAP_MMIO
 
+config SND_SOC_SMA1301
+	tristate "Silicon mitus SMA1301 Audio Amplifier"
+	depends on I2C
+
+config SND_SOC_SMA1301_DUAL
+	tristate "Silicon mitus SMA1301 Audio Amplifier"
+	depends on I2C
+	select SND_SOC_SMA1301
+
 config SND_SOC_SN95031
 	tristate
 
@@ -722,6 +735,16 @@ config SND_SOC_TFA9879
 config SND_SOC_TFA9896
 	tristate "NXP Semiconductors TFA9896 amplifier"
 	depends on I2C
+
+config SND_SOC_TFA9896_DUAL
+	tristate "NXP Semiconductors TFA9896 amplifier"
+	depends on I2C
+	select SND_SOC_TFA9896
+
+config SND_SOC_TFA9896_QUAD
+	tristate "NXP Semiconductors TFA9896 amplifier"
+	depends on I2C
+	select SND_SOC_TFA9896
 
 config SND_SOC_TLV320AIC23
 	tristate

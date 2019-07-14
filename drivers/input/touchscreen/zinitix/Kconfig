@@ -41,3 +41,11 @@ config TOUCHSCREEN_ZINITIX_ZT75XX_O7
 	help
 	  Say Y here if you have a ZINITIX ZT75XX touchscreen.
 	  If unsure, say N.
+
+config TOUCHSCREEN_ZINITIX_ZT75XX_WISDOM
+	bool "ZINITIX ZT75XX touchscreen driver for wisdom model"
+	depends on I2C
+	default n
+	help
+	  Say Y here if you have a ZINITIX ZT75XX touchscreen.
+	  If unsure, say N.

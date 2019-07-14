@@ -34,6 +34,34 @@ enum type_of_ddi {
 	TYPE_OF_NORMAL_DDI,
 };
 
+#if defined(CONFIG_DPU_20)
+#define MAX_RES_NUMBER		5
+#define HDR_CAPA_NUM		4
+
+struct lcd_res_info {
+	unsigned int width;
+	unsigned int height;
+	unsigned int dsc_en;
+	unsigned int dsc_width;
+	unsigned int dsc_height;
+};
+
+/* multi-resolution */
+struct lcd_mres_info {
+	unsigned int mres_en;
+	unsigned int mres_number;
+	struct lcd_res_info res_info[MAX_RES_NUMBER];
+};
+
+struct lcd_hdr_info {
+	unsigned int hdr_num;
+	unsigned int hdr_type[HDR_CAPA_NUM];
+	unsigned int hdr_max_luma;
+	unsigned int hdr_max_avg_luma;
+	unsigned int hdr_min_luma;
+};
+#endif
+
 struct stdphy_pms {
 	unsigned int p;
 	unsigned int m;
@@ -56,6 +84,9 @@ struct decon_lcd {
 	unsigned int width;
 	unsigned int height;
 
+	unsigned int update_min_w;
+	unsigned int update_min_h;
+
 	unsigned int hs_clk;
 	struct stdphy_pms dphy_pms;
 	unsigned int esc_clk;
@@ -73,7 +104,14 @@ struct decon_lcd {
 	unsigned int cmd_underrun_lp_ref;
 	unsigned int vt_compensation;
 
+#if defined(CONFIG_DPU_20)
+	unsigned int mres_mode;
+	struct lcd_mres_info dt_lcd_mres;
+	struct lcd_hdr_info dt_lcd_hdr;
+#endif
+
 	unsigned int clklane_onoff;
+	unsigned int eotp_disabled;
 };
 
 struct decon_dsc {

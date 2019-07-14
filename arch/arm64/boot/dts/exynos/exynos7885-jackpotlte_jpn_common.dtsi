@@ -16,6 +16,7 @@
 #include "battery_data_jackpotlte_common.dtsi"
 #include "exynos7885-jackpotlte_motor.dtsi"
 #include "battery_data_jackpotlte_jpn_dcm.dtsi"
+#include "exynos7885-mali.dtsi"
 
 / {
 	model = "Samsung Universal7885 board based on EXYNOS7885";
@@ -890,10 +891,6 @@
 		};
 	};
 
-	idma_g0: dpp@0x148B1000 {
-		memory-region = <&fb_handover>;
-	};
-
 	dsim_0: dsim@0x14870000 {
 		lcd_info = <&s6e8aa5>;
 		decon_board = <&decon_board>;
@@ -1528,11 +1525,12 @@
 		pinctrl-0 = <&hs_i2c0_bus>;
 
 		fimc-is-3p8sp@2D {
-		     compatible = "samsung,exynos5-fimc-is-cis-3p8sp";
-		     reg = <0x10>; /* 1 bit right shift */
-		     id = <1>; /* matching sensor id */
-		     sensor_f_number = <190>; /* f number 1.9 */
-		     setfile = "setB";
+			compatible = "samsung,exynos5-fimc-is-cis-3p8sp";
+			reg = <0x10>; /* 1 bit right shift */
+			id = <1>; /* matching sensor id */
+			sensor_f_number = <190>; /* f number 1.9 */
+			setfile = "setB";
+			use_initial_ae; /* for initial AE of face unlock */
 		};
 	};
 
@@ -2157,10 +2155,10 @@
 			net_boost,node="rmnet0 rmnet1 rmnet2 rmnet3 rmnet4 rmnet5 rmnet6 rmnet7 umts_dm0";
 			net_boost,table_size = <4>;
 			net_boost,table= <
-				100 0 0 1066000 0 845000 0 0 1 0
-				150 0 0 1170000 0 1144000 0 0 1 0
-				200 0 0 1378000 0 1539000 0 0 1 0
-				300 0 0 1586000 0 1794000 0 0 1 0
+				1   0 0 0 0 0 0 0 1 0
+				50  0 0 1170000 0 1144000 0 0 1 0
+				100 0 0 1378000 0 1539000 0 0 1 0
+				150 0 0 1586000 0 1794000 0 0 1 0
 				>;
 		};
 
@@ -2169,9 +2167,9 @@
 			net_boost,node="clat clat4 v4-rmnet0 v4-rmnet1 v4-rmnet2 v4-rmnet3 v4-rmnet4 v4-rmnet5 v4-rmnet6 v4-rmnet7";
 			net_boost,table_size = <3>;
 			net_boost,table= <
-				120 0 0 1378000 0 1144000 0 0 0 0
-				130 0 0 1378000 0 1539000 0 0 0 0
-				150 0 0 1586000 0 1794000 0 0 0 0
+				20  0 0 1170000 0 1539000 0 0 0 0
+				50  0 0 1378000 0 1539000 0 0 0 0
+				100 0 0 1586000 0 1794000 0 0 0 0
 				>;
 		};
 

@@ -147,6 +147,7 @@ static int mfc_init_dec_ctx(struct s5p_mfc_ctx *ctx)
 	dec->is_dts_mode = 0;
 	dec->tiled_buf_cnt = 0;
 	dec->err_reuse_flag = 0;
+	dec->dec_only_release_flag = 0;
 
 	dec->is_dynamic_dpb = 1;
 	dec->dynamic_used = 0;
@@ -458,10 +459,20 @@ static int s5p_mfc_open(struct file *file)
 
 		ret = s5p_mfc_alloc_common_context(dev);
 		if (ret)
-			goto err_fw_load;
+			goto err_context_alloc;
 
 		if (dbg_enable)
 			s5p_mfc_alloc_dbg_info_buffer(dev);
+
+		MFC_TRACE_DEV_HWLOCK("**open\n");
+		ret = s5p_mfc_get_hwlock_dev(dev);
+		if (ret < 0) {
+			mfc_err_dev("Failed to get hwlock.\n");
+			mfc_err_dev("dev.hwlock.dev = 0x%lx, bits = 0x%lx, owned_by_irq = %d, wl_count = %d, transfer_owner = %d\n",
+			dev->hwlock.dev, dev->hwlock.bits, dev->hwlock.owned_by_irq,
+			dev->hwlock.wl_count, dev->hwlock.transfer_owner);
+			goto err_hw_lock;
+		}
 
 		mfc_debug(2, "power on\n");
 		ret = s5p_mfc_pm_power_on(dev);
@@ -474,25 +485,13 @@ static int s5p_mfc_open(struct file *file)
 		dev->preempt_ctx = MFC_NO_INSTANCE_SET;
 		dev->curr_ctx_is_drm = ctx->is_drm;
 
-		MFC_TRACE_DEV_HWLOCK("**open\n");
-		/* Init the FW */
-		ret = s5p_mfc_get_hwlock_dev(dev);
-		if (ret < 0) {
-			mfc_err_dev("Failed to get hwlock.\n");
-			mfc_err_dev("dev.hwlock.dev = 0x%lx, bits = 0x%lx, owned_by_irq = %d, wl_count = %d, transfer_owner = %d\n",
-					dev->hwlock.dev, dev->hwlock.bits, dev->hwlock.owned_by_irq,
-					dev->hwlock.wl_count, dev->hwlock.transfer_owner);
-			goto err_hw_init;
-		}
-
 		ret = s5p_mfc_init_hw(dev);
-
-		s5p_mfc_release_hwlock_dev(dev);
-
 		if (ret) {
 			mfc_err_ctx("Failed to init mfc h/w\n");
 			goto err_hw_init;
 		}
+
+		s5p_mfc_release_hwlock_dev(dev);
 
 #ifdef NAL_Q_ENABLE
 		dev->nal_q_handle = s5p_mfc_nal_q_create(dev);
@@ -502,8 +501,8 @@ static int s5p_mfc_open(struct file *file)
 	}
 
 	trace_mfc_node_open(ctx->num, dev->num_inst, ctx->type, ctx->is_drm);
-	mfc_info_ctx("MFC open completed [%d:%d] dev = %p, ctx = %p, version = %d\n",
-			dev->num_drm_inst, dev->num_inst, dev, ctx, MFC_DRIVER_INFO);
+	mfc_info_ctx("MFC open completed [%d:%d] version = %d\n",
+			dev->num_drm_inst, dev->num_inst, MFC_DRIVER_INFO);
 	mutex_unlock(&dev->mfc_mutex);
 	return ret;
 
@@ -512,9 +511,12 @@ err_hw_init:
 	s5p_mfc_pm_power_off(dev);
 
 err_pwr_enable:
+	s5p_mfc_release_hwlock_dev(dev);
+
+err_hw_lock:
 	s5p_mfc_release_common_context(dev);
 
-err_fw_load:
+err_context_alloc:
 #ifdef CONFIG_EXYNOS_CONTENT_PATH_PROTECTION
 	if (dev->fw.drm_status) {
 		int smc_ret = 0;
@@ -526,9 +528,8 @@ err_fw_load:
 			mfc_err_ctx("failed MFC DRM F/W unprot(%#x)\n", smc_ret);
 	}
 #endif
-	s5p_mfc_release_firmware(dev);
-	dev->fw.status = 0;
 
+err_fw_load:
 err_fw_alloc:
 	del_timer_sync(&dev->watchdog_timer);
 #ifdef CONFIG_EXYNOS_CONTENT_PATH_PROTECTION
@@ -734,8 +735,7 @@ static int s5p_mfc_release(struct file *file)
 	dev->ctx[ctx->num] = 0;
 	kfree(ctx);
 
-	mfc_info_dev("mfc driver release finished [%d:%d], dev = %p\n",
-			dev->num_drm_inst, dev->num_inst, dev);
+	mfc_info_dev("mfc driver release finished [%d:%d]\n", dev->num_drm_inst, dev->num_inst);
 
 	if (s5p_mfc_is_work_to_do(dev))
 		queue_work(dev->butler_wq, &dev->butler_work);

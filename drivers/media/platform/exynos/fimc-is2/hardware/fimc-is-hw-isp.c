@@ -342,10 +342,22 @@ static int fimc_is_hw_isp_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 		lindex = frame->shot->ctl.vendor_entry.lowIndexParam;
 		hindex = frame->shot->ctl.vendor_entry.highIndexParam;
 
+		/* if internal -> normat shot case
+		 * lindex/hindex set for update param forcely
+		 */
 		if (hw_ip->internal_fcount != 0) {
 			hw_ip->internal_fcount = 0;
-			param_set->dma_output_chunk.cmd = param->vdma4_output.cmd;
-			param_set->dma_output_yuv.cmd  = param->vdma5_output.cmd;
+			lindex |= LOWBIT_OF(PARAM_ISP_OTF_INPUT);
+			lindex |= LOWBIT_OF(PARAM_ISP_VDMA1_INPUT);
+			lindex |= LOWBIT_OF(PARAM_ISP_OTF_OUTPUT);
+			lindex |= LOWBIT_OF(PARAM_ISP_VDMA4_OUTPUT);
+			lindex |= LOWBIT_OF(PARAM_ISP_VDMA5_OUTPUT);
+
+			hindex |= HIGHBIT_OF(PARAM_ISP_OTF_INPUT);
+			hindex |= HIGHBIT_OF(PARAM_ISP_VDMA1_INPUT);
+			hindex |= HIGHBIT_OF(PARAM_ISP_OTF_OUTPUT);
+			hindex |= HIGHBIT_OF(PARAM_ISP_VDMA4_OUTPUT);
+			hindex |= HIGHBIT_OF(PARAM_ISP_VDMA5_OUTPUT);
 		}
 	}
 
@@ -366,8 +378,8 @@ static int fimc_is_hw_isp_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 
 	if (param_set->dma_output_chunk.cmd != DMA_OUTPUT_COMMAND_DISABLE) {
 		for (i = 0; i < frame->num_buffers; i++) {
-			param_set->output_dva_chunk[i] = frame->shot->uctl.scalerUd.ixpTargetAddress[frame->cur_buf_index + i];
-			if (frame->shot->uctl.scalerUd.ixpTargetAddress[i] == 0) {
+			param_set->output_dva_chunk[i] = frame->ixpTargetAddress[frame->cur_buf_index + i];
+			if (frame->ixpTargetAddress[i] == 0) {
 				msinfo_hw("[F:%d]ixpTargetAddress[%d] is zero",
 					frame->instance, hw_ip, frame->fcount, i);
 				param_set->dma_output_chunk.cmd = DMA_OUTPUT_COMMAND_DISABLE;
@@ -377,8 +389,8 @@ static int fimc_is_hw_isp_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 
 	if (param_set->dma_output_yuv.cmd != DMA_OUTPUT_COMMAND_DISABLE) {
 		for (i = 0; i < frame->num_buffers; i++) {
-			param_set->output_dva_yuv[i] = frame->shot->uctl.scalerUd.ixcTargetAddress[frame->cur_buf_index + i];
-			if (frame->shot->uctl.scalerUd.ixcTargetAddress[i] == 0) {
+			param_set->output_dva_yuv[i] = frame->ixcTargetAddress[frame->cur_buf_index + i];
+			if (frame->ixcTargetAddress[i] == 0) {
 				msinfo_hw("[F:%d]ixcTargetAddress[%d] is zero",
 					frame->instance, hw_ip, frame->fcount, i);
 				param_set->dma_output_yuv.cmd = DMA_OUTPUT_COMMAND_DISABLE;
@@ -537,7 +549,6 @@ static int fimc_is_hw_isp_frame_ndone(struct fimc_is_hw_ip *hw_ip, struct fimc_i
 {
 	int ret = 0;
 	int wq_id_ixc, wq_id_ixp, output_id;
-	bool flag_get_meta = true;
 	struct fimc_is_group *head;
 
 	BUG_ON(!hw_ip);
@@ -561,22 +572,19 @@ static int fimc_is_hw_isp_frame_ndone(struct fimc_is_hw_ip *hw_ip, struct fimc_i
 	output_id = ENTRY_IXC;
 	if (test_bit(output_id, &frame->out_flag)) {
 		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id_ixc,
-				output_id, done_type, flag_get_meta);
-		flag_get_meta = false;
+				output_id, done_type, false);
 	}
 
 	output_id = ENTRY_IXP;
 	if (test_bit(output_id, &frame->out_flag)) {
 		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id_ixp,
-				output_id, done_type, flag_get_meta);
-		flag_get_meta = false;
+				output_id, done_type, false);
 	}
 
 	output_id = FIMC_IS_HW_CORE_END;
 	if (test_bit(hw_ip->id, &frame->core_flag)) {
 		ret = fimc_is_hardware_frame_done(hw_ip, frame, -1,
-				output_id, done_type, flag_get_meta);
-		flag_get_meta = false;
+				output_id, done_type, false);
 	}
 
 	head = GET_HEAD_GROUP_IN_DEVICE(FIMC_IS_DEVICE_ISCHAIN, hw_ip->group[instance]);

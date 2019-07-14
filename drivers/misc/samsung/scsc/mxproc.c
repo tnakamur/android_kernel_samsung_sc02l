@@ -11,6 +11,9 @@
 #include <scsc/scsc_logring.h>
 #include "mxman.h"
 #include "mxproc.h"
+#ifdef CONFIG_SCSC_WLBTD
+#include "scsc_wlbtd.h"
+#endif
 
 #ifndef AID_MXPROC
 #define AID_MXPROC 0
@@ -111,7 +114,7 @@ static ssize_t mx_procfs_mx_fail_write(struct file *file, const char __user *use
 	OS_UNUSED_PARAMETER(ppos);
 
 	if (mxproc)
-		mxman_fail(mxproc->mxman, SCSC_PANIC_CODE_HOST << 15);
+		mxman_fail(mxproc->mxman, SCSC_PANIC_CODE_HOST << 15, __func__);
 	SCSC_TAG_DEBUG(MX_PROC, "OK\n");
 
 	return count;
@@ -470,15 +473,11 @@ static ssize_t mx_procfs_mx_release_read(struct file *file, char __user *user_bu
 		build_id = mxproc->mxman->fw_build_id;
 
 	memset(buf, '\0', sizeof(buf));
-#ifdef CONFIG_SCSC_BUILD_TYPE
-	bytes = snprintf(buf, sizeof(buf), "Release: %d.%d.%d.%d (build type: %s) (f/w: %s)\n",
-		SCSC_RELEASE_PRODUCT, SCSC_RELEASE_ITERATION, SCSC_RELEASE_CANDIDATE, SCSC_RELEASE_POINT, CONFIG_SCSC_BUILD_TYPE,
-		build_id ? build_id : "unknown");
-#else
+
 	bytes = snprintf(buf, sizeof(buf), "Release: %d.%d.%d.%d (f/w: %s)\n",
 		SCSC_RELEASE_PRODUCT, SCSC_RELEASE_ITERATION, SCSC_RELEASE_CANDIDATE, SCSC_RELEASE_POINT,
 		build_id ? build_id : "unknown");
-#endif
+
 	if (bytes > sizeof(buf))
 		bytes = sizeof(buf);
 

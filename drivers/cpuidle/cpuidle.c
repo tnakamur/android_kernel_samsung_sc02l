@@ -35,6 +35,7 @@ LIST_HEAD(cpuidle_detected_devices);
 static int enabled_devices;
 static int off __read_mostly;
 static int initialized __read_mostly;
+static int priv_disable;
 
 int cpuidle_disabled(void)
 {
@@ -45,10 +46,20 @@ void disable_cpuidle(void)
 	off = 1;
 }
 
+void disable_priv_cpuidle(void)
+{
+	priv_disable = 1;
+}
+
+void enable_priv_cpuidle(void)
+{
+	priv_disable = 0;
+}
+
 bool cpuidle_not_available(struct cpuidle_driver *drv,
 			   struct cpuidle_device *dev)
 {
-	return off || !initialized || !drv || !dev || !dev->enabled;
+	return priv_disable || off || !initialized || !drv || !dev || !dev->enabled;
 }
 
 /**
@@ -190,6 +201,7 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 			return -EBUSY;
 		}
 		target_state = &drv->states[index];
+		broadcast = false;
 	}
 
 	/* Take note of the planned idle state. */
@@ -664,5 +676,5 @@ static int __init cpuidle_init(void)
 	return 0;
 }
 
-module_param(off, int, 0444);
+module_param(off, int, 0644);
 core_initcall(cpuidle_init);

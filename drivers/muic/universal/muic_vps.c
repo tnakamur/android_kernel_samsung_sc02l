@@ -457,12 +457,19 @@ int vps_find_attached_dev(muic_data_t *pmuic, muic_attached_dev_t *pdev, int *pi
 	int intr = MUIC_INTR_ATTACH;
 	int chgdet_dev = 0;
 
-	pr_debug("%s\n",__func__);
-
-
 	if (pmuic->discard_interrupt) {
 		pr_info("%s:%s Under ADC mode change.\n", MUIC_DEV_NAME, __func__);
 		return -1;
+	}
+
+	if (pmuic->afc_water_disable) {
+		if (pmsr->t.vbvolt == VB_HIGH) {
+			pr_info("%s water\n", __func__);
+			pmuic->is_hiccup_mode = true;
+			*pintr = intr = MUIC_INTR_ATTACH;
+			*pdev = new_dev = ATTACHED_DEV_UNDEFINED_RANGE_MUIC;
+			return 0;
+		}
 	}
 
 	if ((pmsr->t.vbvolt == VB_HIGH) && pmsr->t.chgdetrun &&

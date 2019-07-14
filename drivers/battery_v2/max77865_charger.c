@@ -616,25 +616,37 @@ static void max77865_set_otg(struct max77865_charger_data *charger, int enable)
 
 		/* Update CHG_CNFG_11 to 0x16(5.020V) */
 		max77865_write_reg(charger->i2c,
-				   MAX77865_CHG_REG_CNFG_11, 0x16);
-		/* OTG off, boost on */
-		max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
-				   CHG_CNFG_00_BOOST_MASK, CHG_CNFG_00_OTG_CTRL);
-
-		msleep(100);
-
-		/* OTG on, boost on */
-		max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
-				   CHG_CNFG_00_OTG_CTRL, CHG_CNFG_00_OTG_CTRL);
-
+			MAX77865_CHG_REG_CNFG_11, 0x16);
+		if (charger->enable_boost_mode_wa) {
+			/* OTG off, boost on */
+			max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
+				(CHG_CNFG_00_BOOST_MASK | CHG_CNFG_00_CHG_MASK), CHG_CNFG_00_MODE_MASK);
+			msleep(100);
+			/* OTG on, boost on */
+			max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
+				(CHG_CNFG_00_BOOST_MASK | CHG_CNFG_00_OTG_MASK), CHG_CNFG_00_MODE_MASK);
+		} else {
+			/* OTG off, boost on */
+			max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
+				CHG_CNFG_00_BOOST_MASK, CHG_CNFG_00_OTG_CTRL);
+			msleep(100);
+			/* OTG on, boost on */
+			max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
+				CHG_CNFG_00_OTG_CTRL, CHG_CNFG_00_OTG_CTRL);
+		}
 	} else {
 		/* OTG off(UNO on), boost off */
-		max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
-			0, CHG_CNFG_00_OTG_CTRL);
+		if (charger->enable_boost_mode_wa) {
+			max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
+				CHG_CNFG_00_BUCK_MASK, CHG_CNFG_00_MODE_MASK);
+		} else {
+			max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00,
+				0, CHG_CNFG_00_OTG_CTRL);
+		}
 
 		/* Update CHG_CNFG_11 to 0x00(3.485V) */
 		max77865_write_reg(charger->i2c,
-				   MAX77865_CHG_REG_CNFG_11, 0x00);
+			MAX77865_CHG_REG_CNFG_11, 0x00);
 		mdelay(50);
 
 		/* enable charger interrupt */
@@ -660,7 +672,7 @@ static void max77865_check_slow_charging(struct max77865_charger_data *charger,
 	int input_current)
 {
 	/* under 400mA considered as slow charging concept for VZW */
-	if (input_current <= SLOW_CHARGING_CURRENT_STANDARD &&
+	if (input_current <= charger->slow_charging_current &&
 		charger->cable_type != SEC_BATTERY_CABLE_NONE) {
 		union power_supply_propval value;
 
@@ -1001,6 +1013,15 @@ static int max77865_chg_set_property(struct power_supply *psy,
 		charger->status = val->intval;
 		break;
 	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
+		/* check boost mode bit */
+		if ((charger->enable_boost_mode_wa) &&
+			(max77865_read_reg(charger->i2c, MAX77865_CHG_REG_CNFG_00, &reg) == 0) &&
+			(reg & CHG_CNFG_00_BOOST_MASK)) {
+			pr_info("%s: prevent charging mode when boost mode is on(reg:0x%x).\n",
+				__func__, reg);
+			break;
+		}
+
 		charger->charge_mode = val->intval;
 		switch (charger->charge_mode) {
 		case SEC_BAT_CHG_MODE_BUCK_OFF:
@@ -1185,6 +1206,11 @@ static int max77865_chg_set_property(struct power_supply *psy,
 			max77865_read_reg(charger->i2c, MAX77865_CHG_REG_CNFG_07, &reg);
 			pr_info("%s: POWER_SUPPLY_EXT_PROP_INBAT_VOLTAGE_FGSRC_SWITCHING: reg(0x%x) val(0x%x)\n",
 				__func__, MAX77865_CHG_REG_CNFG_07, reg);
+			break;
+		case POWER_SUPPLY_EXT_PROP_WD_QBATTOFF:
+			max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_07,
+				((!!(val->intval)) << CHG_CNFG_07_REG_WD_QBATTOFF_SHIFT),
+				CHG_CNFG_07_REG_WD_QBATTOFF_MASK);
 			break;
 		default:
 			return -EINVAL;
@@ -1775,6 +1801,22 @@ static irqreturn_t max77865_systm_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t max77865_chg_irq(int irq, void *data)
+{
+	struct max77865_charger_data *charger = data;
+	u8 chg_dtls;
+
+	max77865_read_reg(charger->i2c, MAX77865_CHG_REG_DETAILS_01, &chg_dtls);
+	chg_dtls = chg_dtls & 0x0F;
+	pr_info("%s: chg dtls(0x%x)\n", __func__, chg_dtls);
+	if (chg_dtls == 0x0B) {
+		pr_info("%s: watchdog timer expiration\n", __func__);
+		max77865_test_read(charger);
+	}
+
+	return IRQ_HANDLED;
+}
+
 #ifdef CONFIG_OF
 static int max77865_charger_parse_dt(struct max77865_charger_data *charger)
 {
@@ -1816,11 +1858,21 @@ static int max77865_charger_parse_dt(struct max77865_charger_data *charger)
 	if (!np) {
 		pr_err("%s: np(max77865-charger) is NULL\n", __func__);
 	} else {
+		charger->enable_boost_mode_wa =
+			of_property_read_bool(np, "charger,enable_boost_mode_wa");
+
 		ret = of_property_read_u8(np, "charger,vsys_ocp",
 					   &charger->vsys_ocp);
 		if (ret) {
 			pr_info("%s : default vsys ocp\n", __func__);
 			charger->vsys_ocp = 0x04;
+		}
+
+		ret = of_property_read_u32(np, "charger,slow_charging_current",
+					   &charger->slow_charging_current);
+		if (ret) {
+			pr_info("%s : slow_charging_current is Empty\n", __func__);
+			charger->slow_charging_current = SLOW_CHARGING_CURRENT_STANDARD;
 		}
 	}
 
@@ -2053,6 +2105,14 @@ static int max77865_charger_probe(struct platform_device *pdev)
 		pr_err("%s: fail to request tm IRQ: %d: %d\n",
 			   __func__, charger->irq_tm, ret);
 
+	charger->irq_chg = pdata->irq_base + MAX77865_CHG_IRQ_CHG_I;
+	ret = request_threaded_irq(charger->irq_chg, NULL,
+				   max77865_chg_irq, 0,
+				   "chg-ok", charger);
+	if (ret < 0)
+		pr_err("%s: fail to request chg IRQ: %d: %d\n",
+			   __func__, charger->irq_chg, ret);
+
 	ret = max77865_chg_create_attrs(&charger->psy_chg->dev);
 	if (ret) {
 		dev_err(charger->dev,
@@ -2142,6 +2202,10 @@ static void max77865_charger_shutdown(struct platform_device *pdev)
 	reg_data = 0x60;
 	max77865_write_reg(charger->i2c,
 			   MAX77865_CHG_REG_CNFG_12, reg_data);
+	/* Disable WD_QBATTOFF */
+	reg_data = 0x00;
+	max77865_update_reg(charger->i2c, MAX77865_CHG_REG_CNFG_07,
+		reg_data, CHG_CNFG_07_REG_WD_QBATTOFF_MASK);
 	pr_info("func:%s \n", __func__);
 }
 

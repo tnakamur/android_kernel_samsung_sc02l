@@ -17,8 +17,9 @@ obj-$(CONFIG_CAL_IF)		+= cal-if/
 obj-$(CONFIG_EXYNOS_PMU)	+= exynos-pmu.o
 obj-$(CONFIG_EXYNOS_CHIPID)	+= exynos-chipid.o
 obj-$(CONFIG_EXYNOS_REBOOT)	+= exynos-reboot.o
-obj-$(CONFIG_EXYNOS_PD)        += exynos-pd.o exynos-pd-dbg.o
+obj-$(CONFIG_EXYNOS_PD)		+= exynos-pd.o exynos-pd-dbg.o
 obj-$(CONFIG_EXYNOS_RGT)        += exynos-rgt.o
+obj-$(CONFIG_EPX)		+= epx.o
 
 obj-$(CONFIG_ECT)		+= ect_parser.o
 obj-$(CONFIG_EXYNOS_BCM)	+= exynos-bcm.o

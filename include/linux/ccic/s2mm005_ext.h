@@ -51,6 +51,7 @@ extern void s2mm005_set_upsm_mode(void);
 ////////////////////////////////////////////////////////////////////////////////
 extern void process_cc_attach(void * data, u8 *plug_attach_done);
 extern void process_cc_detach(void * data);
+extern void process_message_role(void *data);
 extern void process_cc_get_int_status(void *data, uint32_t *pPRT_MSG, MSG_IRQ_STATUS_Type *MSG_IRQ_State);
 extern void process_cc_rid(void * data);
 extern void ccic_event_work(void *data, int dest, int id, int attach, int event,
@@ -66,8 +67,15 @@ extern int dual_role_set_prop(struct dual_role_phy_instance *dual_role,
 			      const unsigned int *val);
 extern int dual_role_is_writeable(struct dual_role_phy_instance *drp,
 				  enum dual_role_property prop);
-extern void dp_detach(void *data);
+#elif defined(CONFIG_TYPEC)
+extern void typec_role_swap_check(struct work_struct *wk);
+extern int s2mm005_port_type_set(const struct typec_capability *cap,
+					enum typec_port_type port_type);
+extern int s2mm005_get_pd_support(struct s2mm005_data *usbpd_data);
+extern int s2mm005_pr_set(const struct typec_capability *cap, enum typec_role role);
+extern int s2mm005_dr_set(const struct typec_capability *cap, enum typec_data_role role);
 #endif
+extern void dp_detach(void *data);
 ////////////////////////////////////////////////////////////////////////////////
 // external functions in ccic_alternate.c
 ////////////////////////////////////////////////////////////////////////////////

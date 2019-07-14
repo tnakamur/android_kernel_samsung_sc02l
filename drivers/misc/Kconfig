@@ -559,6 +559,12 @@ config KNOX_KAP
 	help
 	  Knox Active Protection mode
 
+config MEMORY_STATE_TIME
+	tristate "Memory freq/bandwidth time statistics"
+	depends on PROFILING
+	help
+	  Memory time statistics exported to /sys/kernel/memory_state_time
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -577,4 +583,6 @@ source "drivers/misc/modem_v1/Kconfig"
 source "drivers/misc/gnss_if/Kconfig"
 source "drivers/misc/samsung/Kconfig"
 source "drivers/misc/tzdev/Kconfig"
+source "drivers/misc/tzdev/3.0/Kconfig"
+source "drivers/misc/tui/Kconfig"
 endmenu

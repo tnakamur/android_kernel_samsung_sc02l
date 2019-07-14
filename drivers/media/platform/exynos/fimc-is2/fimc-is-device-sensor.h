@@ -166,6 +166,14 @@ enum fimc_is_module_state {
 	FIMC_IS_MODULE_STANDBY_ON
 };
 
+/* refer to EXTEND_SENSOR_MODE on HAL side*/
+enum fimc_is_ex_mode {
+	EX_NONE = 0,
+	EX_DRAMTEST = 1,
+	EX_LIVEFOCUS = 2,
+	EX_DUALFPS = 3,
+};
+
 struct fimc_is_sensor_cfg {
 	u32 width;
 	u32 height;
@@ -179,6 +187,8 @@ struct fimc_is_sensor_cfg {
 
 
 struct fimc_is_sensor_vc_max_size {
+	int stat_type;
+	int sensor_mode;
 	u32 width;
 	u32 height;
 	u32 element_size;
@@ -346,7 +356,6 @@ struct fimc_is_device_sensor {
 	bool						dtp_check;
 	struct timer_list				dtp_timer;
 	unsigned long					force_stop;
-	u32						dtp_del_flag;
 
 	/* for early buffer done */
 	u32						early_buf_done_mode;
@@ -364,6 +373,8 @@ struct fimc_is_device_sensor {
 	struct fimc_is_flash				*flash;
 	struct v4l2_subdev				*subdev_ois;
 	struct fimc_is_ois				*ois;
+	struct v4l2_subdev				*subdev_iris;
+	struct fimc_is_iris				*iris;
 	void						*private_data;
 	struct fimc_is_group				group_sensor;
 	struct fimc_is_path_info			path;
@@ -376,6 +387,14 @@ struct fimc_is_device_sensor {
 
 #ifdef ENABLE_REMOSAIC_CAPTURE_WITH_ROTATION
 	struct fimc_is_frame				*mode_chg_frame;
+#endif
+
+#ifdef ENABLE_INIT_AWB
+	/* backup AWB gains for use initial gain */
+	float						init_wb[WB_GAIN_COUNT];
+	float						last_wb[WB_GAIN_COUNT];
+	float						chk_wb[WB_GAIN_COUNT];
+	u32						init_wb_cnt;
 #endif
 };
 
@@ -394,6 +413,8 @@ int fimc_is_sensor_s_input(struct fimc_is_device_sensor *device,
 #endif
 int fimc_is_sensor_s_ctrl(struct fimc_is_device_sensor *device,
 	struct v4l2_control *ctrl);
+int fimc_is_sensor_s_ext_ctrls(struct fimc_is_device_sensor *device,
+	struct v4l2_ext_controls *ctrls);
 int fimc_is_sensor_subdev_buffer_queue(struct fimc_is_device_sensor *device,
 	enum fimc_is_subdev_id subdev_id,
 	u32 index);
@@ -433,6 +454,7 @@ void fimc_is_sensor_dump(struct fimc_is_device_sensor *device);
 int fimc_is_sensor_g_ctrl(struct fimc_is_device_sensor *device,
 	struct v4l2_control *ctrl);
 int fimc_is_sensor_g_instance(struct fimc_is_device_sensor *device);
+int fimc_is_sensor_g_ex_mode(struct fimc_is_device_sensor *device);
 int fimc_is_sensor_g_framerate(struct fimc_is_device_sensor *device);
 int fimc_is_sensor_g_fcount(struct fimc_is_device_sensor *device);
 int fimc_is_sensor_g_width(struct fimc_is_device_sensor *device);

@@ -116,7 +116,8 @@ static int muic_manager_switch_path(struct muic_interface_t *muic_if, int path)
 {
 	switch (path) {
 	case MUIC_PATH_OPEN:
-		muic_if->set_com_to_open_with_vbus(muic_if->muic_data);
+		if (muic_if->set_com_to_open)
+			muic_if->set_com_to_open(muic_if->muic_data);
 		break;
 
 	case MUIC_PATH_USB_AP:
@@ -140,7 +141,8 @@ static int muic_manager_get_vbus(struct muic_interface_t *muic_if)
 {
 	int ret = 0;
 
-	ret = muic_if->get_vbus(muic_if->muic_data);
+	if (muic_if->get_vbus)
+		ret = muic_if->get_vbus(muic_if->muic_data);
 
 	return ret;
 }
@@ -188,9 +190,11 @@ int muic_manager_is_ccic_supported_dev(muic_attached_dev_t new_dev)
 
 void muic_manager_handle_ccic_detach_always(struct muic_interface_t *muic_if)
 {
-	pr_info("%s\n", __func__);
-
-#if defined(CONFIG_HV_MUIC_S2MU004_AFC)
+#if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
+	if (muic_if->set_chg_det)
+		muic_if->set_chg_det(muic_if->muic_data, true);
+#endif
+#if defined(CONFIG_HV_MUIC_S2MU004_AFC) || defined(CONFIG_MUIC_HV)
 	muic_if->is_afc_pdic_ready = false;
 #endif
 }
@@ -208,14 +212,15 @@ void muic_manager_handle_ccic_detach(struct muic_interface_t *muic_if)
 		* pvendor->enable_chgdet(muic_if->regmaccic, 1);
 		*/
 	}
+
+	if (muic_if->set_cable_state)
+		muic_if->set_cable_state(muic_if->muic_data, ATTACHED_DEV_NONE_MUIC);
+
 	muic_manager_switch_path(muic_if, MUIC_PATH_OPEN);
 	if (muic_manager_is_supported_dev(ccic->attached_dev))
 		MUIC_SEND_NOTI_DETACH(ccic->attached_dev);
 	else if (muic_if->legacy_dev != ATTACHED_DEV_NONE_MUIC)
 		MUIC_SEND_NOTI_DETACH(muic_if->legacy_dev);
-
-	if (muic_core_get_ccic_cable_state(pdata))
-		muic_if->set_cable_state(muic_if->muic_data, ATTACHED_DEV_NONE_MUIC);
 
 	if (pdata->jig_uart_cb)
 		pdata->jig_uart_cb(0);
@@ -231,7 +236,36 @@ void muic_manager_handle_ccic_detach(struct muic_interface_t *muic_if)
 	muic_if->legacy_dev = 0;
 	muic_if->attached_dev = 0;
 	muic_if->is_dcdtmr_intr = false;
+#if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
+	muic_if->prswap_status = MUIC_PRSWAP_UNDIFINED;
+#endif
 }
+
+#ifndef CONFIG_SEC_FACTORY
+void muic_manager_handle_ccic_rid_open(struct muic_interface_t *muic_if)
+{
+	struct ccic_desc_t *ccic = muic_if->ccic;
+	struct muic_platform_data *pdata = muic_if->pdata;
+
+	pr_info("%s\n", __func__);
+
+	if (muic_if->set_cable_state)
+		muic_if->set_cable_state(muic_if->muic_data, ATTACHED_DEV_NONE_MUIC);
+
+	muic_manager_switch_path(muic_if, MUIC_PATH_OPEN);
+	if (muic_manager_is_supported_dev(ccic->attached_dev))
+		MUIC_SEND_NOTI_DETACH(ccic->attached_dev);
+	else if (muic_if->legacy_dev != ATTACHED_DEV_NONE_MUIC)
+		MUIC_SEND_NOTI_DETACH(muic_if->legacy_dev);
+
+	if (pdata->jig_uart_cb)
+		pdata->jig_uart_cb(0);
+
+	muic_if->legacy_dev = 0;
+	muic_if->attached_dev = 0;
+	muic_if->is_dcdtmr_intr = false;
+}
+#endif
 
 void muic_manager_set_legacy_dev(struct muic_interface_t *muic_if, int new_dev)
 {
@@ -246,6 +280,7 @@ int muic_manager_get_legacy_dev(struct muic_interface_t *muic_if)
 	return muic_if->legacy_dev;
 }
 
+#if defined(CONFIG_CCIC_NOTIFIER)
 static void muic_manager_show_status(struct muic_interface_t *muic_if)
 {
 	struct ccic_desc_t *ccic = muic_if->ccic;
@@ -254,6 +289,7 @@ static void muic_manager_show_status(struct muic_interface_t *muic_if)
 			ccic->attached_dev, ccic->ccic_evt_rid, ccic->ccic_evt_rprd,
 			ccic->ccic_evt_attached, muic_if->legacy_dev);
 }
+#endif
 
 int muic_manager_dcd_rescan(struct muic_interface_t *muic_if)
 {
@@ -283,6 +319,7 @@ SKIP_RESCAN:
 	return 1;
 }
 
+#if defined(CONFIG_CCIC_NOTIFIER)
 static int muic_manager_handle_legacy_dev(struct muic_interface_t *muic_if)
 {
 	struct ccic_desc_t *ccic = muic_if->ccic;
@@ -317,6 +354,7 @@ static int muic_manager_handle_legacy_dev(struct muic_interface_t *muic_if)
 
 	return 0;
 }
+#endif
 
 void muic_manager_init_dev_desc(struct muic_interface_t *muic_if)
 {
@@ -331,7 +369,7 @@ void muic_manager_init_dev_desc(struct muic_interface_t *muic_if)
 	ccic->ccic_evt_attached = MUIC_CCIC_NOTI_UNDEFINED;
 }
 
-
+#if defined(CONFIG_CCIC_NOTIFIER)
 static int muic_manager_conv_rid_to_dev(struct muic_interface_t *muic_if, int rid, int vbus)
 {
 	int attached_dev = 0;
@@ -392,7 +430,8 @@ static int muic_manager_handle_ccic_attach(struct muic_interface_t *muic_if, voi
 			ccic->ccic_evt_roleswap = 0;
 			if (muic_manager_get_vbus(muic_if)) {
 				ccic->attached_dev = ATTACHED_DEV_USB_MUIC;
-				muic_if->set_cable_state(muic_if->muic_data, ccic->attached_dev);
+				if (muic_if->set_cable_state)
+					muic_if->set_cable_state(muic_if->muic_data, ccic->attached_dev);
 				muic_manager_switch_path(muic_if, MUIC_PATH_USB_AP);
 				MUIC_SEND_NOTI_ATTACH(ccic->attached_dev);
 			}
@@ -403,7 +442,12 @@ static int muic_manager_handle_ccic_attach(struct muic_interface_t *muic_if, voi
 			pr_info("%s: RPRD\n", __func__);
 			ccic->ccic_evt_rprd = 1;
 			ccic->attached_dev = ATTACHED_DEV_OTG_MUIC;
-			muic_if->set_cable_state(muic_if->muic_data, ccic->attached_dev);
+#if defined(CONFIG_MUIC_HV)
+			if (muic_if->hv_reset)
+				muic_if->hv_reset(muic_if->muic_data);
+#endif
+			if (muic_if->set_cable_state)
+				muic_if->set_cable_state(muic_if->muic_data, ccic->attached_dev);
 			muic_manager_switch_path(muic_if, MUIC_PATH_USB_AP);
 			return 0;
 		}
@@ -441,8 +485,8 @@ static int muic_manager_handle_ccic_attach(struct muic_interface_t *muic_if, voi
 			if (muic_if->set_dcd_rescan != NULL)
 				muic_if->set_dcd_rescan(muic_if->muic_data);
 		}
-
 	} else {
+		muic_manager_handle_ccic_detach_always(muic_if);
 		if (pnoti->rprd) {
 			/* Role swap detach: attached=0, rprd=1 */
 			pr_info("%s: role swap event\n", __func__);
@@ -450,8 +494,9 @@ static int muic_manager_handle_ccic_attach(struct muic_interface_t *muic_if, voi
 		} else if (vbus && !muic_core_get_ccic_cable_state(pdata)) {
 				if (muic_if->is_dcp_charger) {
 					pr_info("%s: reset afc\n", __func__);
-#if defined(CONFIG_HV_MUIC_S2MU004_AFC)
-				muic_if->set_afc_reset(muic_if->muic_data);
+#if defined(CONFIG_HV_MUIC_S2MU004_AFC) || defined(CONFIG_MUIC_HV)
+				if (muic_if->set_afc_reset)
+					muic_if->set_afc_reset(muic_if->muic_data);
 #endif
 			}
 			pr_info("%s: Valid VBUS, return\n", __func__);
@@ -459,8 +504,6 @@ static int muic_manager_handle_ccic_attach(struct muic_interface_t *muic_if, voi
 			/* Detached */
 			muic_manager_handle_ccic_detach(muic_if);
 		}
-
-		muic_manager_handle_ccic_detach_always(muic_if);
 	}
 
 	return 0;
@@ -504,7 +547,12 @@ static int muic_manager_handle_ccic_factory_jig(struct muic_interface_t *muic_if
 		}
 
 		ccic->attached_dev = attached_dev;
-		muic_if->set_cable_state(muic_if->muic_data, ccic->attached_dev);
+#if defined(CONFIG_MUIC_HV)
+		if (muic_if->hv_reset)
+			muic_if->hv_reset(muic_if->muic_data);
+#endif
+		if (muic_if->set_cable_state)
+			muic_if->set_cable_state(muic_if->muic_data, ccic->attached_dev);
 		MUIC_SEND_NOTI_ATTACH(attached_dev);
 	}
 
@@ -554,7 +602,8 @@ static int muic_manager_handle_ccic_rid(struct muic_interface_t *muic_if, void *
 	case CCIC_RID_523K:
 	case CCIC_RID_619K:
 		vbus = muic_manager_get_vbus(muic_if);
-		muic_if->set_jig_state(muic_if->muic_data, true);
+		if (muic_if->set_jig_state)
+			muic_if->set_jig_state(muic_if->muic_data, true);
 		muic_manager_handle_ccic_factory_jig(muic_if, rid, vbus);
 		break;
 	case CCIC_RID_OPEN:
@@ -572,9 +621,14 @@ static int muic_manager_handle_ccic_rid(struct muic_interface_t *muic_if, void *
 			muic_manager_handle_legacy_dev(muic_if);
 		} else {
 			/* RID OPEN + No VBUS = Assume detach */
+#ifndef CONFIG_SEC_FACTORY
+			muic_manager_handle_ccic_rid_open(muic_if);
+#else
 			muic_manager_handle_ccic_detach(muic_if);
+#endif
 		}
-		muic_if->set_jig_state(muic_if->muic_data, false);
+		if (muic_if->set_jig_state)
+			muic_if->set_jig_state(muic_if->muic_data, false);
 		break;
 	default:
 		pr_err("%s:Undefined RID\n", __func__);
@@ -596,7 +650,8 @@ static int muic_manager_handle_ccic_water(struct muic_interface_t *muic_if, void
 		pnoti->src, pnoti->dest, pnoti->id, pnoti->attach, pnoti->cable_type, pnoti->rprd);
 
 	muic_if->afc_water_disable = pnoti->attach ? true:false;
-	muic_if->set_water_detect(muic_if->muic_data, muic_if->afc_water_disable);
+	if (muic_if->set_water_detect)
+		muic_if->set_water_detect(muic_if->muic_data, muic_if->afc_water_disable);
 
 	pr_info("%s: Water detect : %s\n", __func__, pnoti->attach ? "en":"dis");
 
@@ -619,9 +674,8 @@ static int muic_manager_handle_ccic_water_from_boot(struct muic_interface_t *mui
 		muic_if->set_water_detect_from_boot(muic_if->muic_data, true);
 	return 0;
 }
-#endif
 
-#if defined(CONFIG_HV_MUIC_S2MU004_AFC)
+#if defined(CONFIG_HV_MUIC_S2MU004_AFC) || defined(CONFIG_MUIC_HV)
 static int muic_manager_handle_ccic_TA(struct muic_interface_t *muic_if, void *data)
 {
 #ifdef CONFIG_IFCONN_NOTIFIER
@@ -634,7 +688,33 @@ static int muic_manager_handle_ccic_TA(struct muic_interface_t *muic_if, void *d
 		pnoti->src, pnoti->dest, pnoti->id, pnoti->attach, pnoti->cable_type, pnoti->rprd);
 
 	muic_if->is_afc_pdic_ready = true;
-	muic_if->set_afc_ready(muic_if->muic_data, muic_if->is_afc_pdic_ready);
+	if (muic_if->set_afc_ready)
+		muic_if->set_afc_ready(muic_if->muic_data, muic_if->is_afc_pdic_ready);
+
+	return 0;
+}
+#endif
+#endif
+
+#if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
+static int muic_manager_handle_ccic_role_swap(struct muic_interface_t *muic_if, void *data)
+{
+	CC_NOTI_TYPEDEF *pnoti = (CC_NOTI_TYPEDEF *)data;
+	struct ccic_desc_t *ccic = muic_if->ccic;
+
+	if (ccic->ccic_evt_attached != MUIC_CCIC_NOTI_ATTACH)
+		return 0;
+
+	pr_info("%s: src:%d dest:%d sub1:%d\n", __func__, pnoti->src, pnoti->dest,
+		pnoti->sub1);
+
+	if (pnoti->sub1 == true) {
+		/* sink -> src */
+		muic_if->prswap_status = MUIC_PRSWAP_TO_SRC;
+	} else {
+		/* src -> sink */
+		muic_if->prswap_status = MUIC_PRSWAP_TO_SINK;
+	}
 
 	return 0;
 }
@@ -659,20 +739,17 @@ static int muic_manager_handle_otg(struct muic_interface_t *muic_if, void *data)
 			ret = muic_if->check_usb_killer(muic_if->muic_data);
 			if (ret == MUIC_NORMAL_OTG) {
 				MUIC_SEND_NOTI_TO_CCIC_ATTACH(ATTACHED_DEV_OTG_MUIC);
+				MUIC_SEND_NOTI_ATTACH(ATTACHED_DEV_OTG_MUIC);
 				ccic->ccic_evt_rprd = 1;
 				ccic->attached_dev = ATTACHED_DEV_OTG_MUIC;
-				muic_if->set_cable_state(muic_if->muic_data, ccic->attached_dev);
+				if (muic_if->set_cable_state)
+					muic_if->set_cable_state(muic_if->muic_data, ccic->attached_dev);
 				muic_manager_switch_path(muic_if, MUIC_PATH_USB_AP);
 			} else
 				pr_info("[MUIC] %s USB Killer Detected!!!\n", __func__);
 		} else
 			pr_err("%s: err. no killer api.\n", __func__);
 	}
-
-#if 0
-	muic_if->set_otg_detect_en(muic_if->muic_data, pnoti->sub2 ? true:false);
-	pr_info("%s: set_otg_detect_en : %s\n", __func__, pnoti->sub2 ? "en":"dis");
-#endif
 
 	return 0;
 }
@@ -701,6 +778,9 @@ static int muic_manager_handle_notification(struct notifier_block *nb,
 	int water = CCIC_NOTIFY_ID_WATER;
 	int otg = CCIC_NOTIFY_ID_OTG;
 	int ta = CCIC_NOTIFY_ID_TA;
+#if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
+	int role_swap = CCIC_NOTIFY_ID_ROLE_SWAP;
+#endif
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 	if (pnoti->dest != CCIC_NOTIFY_DEV_MUIC) {
 		pr_info("%s destination id is invalid\n", __func__);
@@ -738,8 +818,14 @@ static int muic_manager_handle_notification(struct notifier_block *nb,
 		muic_manager_handle_otg(muic_if, data);
 	} else if (pnoti->id == ta) {
 		pr_info("%s: NOTIFY_ID_TA\n", __func__);
-#if defined(CONFIG_HV_MUIC_S2MU004_AFC)
+#ifndef CONFIG_SEC_FACTORY
+#if defined(CONFIG_HV_MUIC_S2MU004_AFC) || defined(CONFIG_MUIC_HV)
 		muic_manager_handle_ccic_TA(muic_if, data);
+#endif
+#endif
+#if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
+	} else if (pnoti->id == role_swap) {
+		muic_manager_handle_ccic_role_swap(muic_if, data);
 #endif
 	} else {
 		pr_info("%s: Undefined Noti. ID\n", __func__);
@@ -803,6 +889,7 @@ void muic_manager_register_notifier(struct muic_interface_t *muic_if)
 	pr_info("%s: done.\n", __func__);
 }
 #endif
+#endif
 
 struct muic_interface_t *muic_manager_init(void *pdata, void *drv_data)
 {
@@ -834,6 +921,10 @@ struct muic_interface_t *muic_manager_init(void *pdata, void *drv_data)
 	muic_if->is_dcp_charger = false;
 	muic_if->opmode = get_ccic_info() & 0xF;
 	muic_if->is_dcdtmr_intr = false;
+#if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
+	muic_if->prswap_status = MUIC_PRSWAP_UNDIFINED;
+#endif
+#if defined(CONFIG_CCIC_NOTIFIER)
 	muic_if->is_afc_pdic_ready = false;
 #ifdef CONFIG_IFCONN_NOTIFIER
 	ret = ifconn_notifier_register(&muic_if->nb,
@@ -850,6 +941,7 @@ struct muic_interface_t *muic_manager_init(void *pdata, void *drv_data)
 	else
 		pr_info("OPMODE_MUIC CCIC NOTIFIER is not used\n");
 #endif
+#endif
 	return muic_if;
 #ifdef CONFIG_IFCONN_NOTIFIER
 err_reg_noti:
@@ -860,7 +952,81 @@ err_ccic_alloc:
 	return NULL;
 }
 
+#if defined(CONFIG_MUIC_SUPPORT_POWERMETER)
+static enum power_supply_property muic_props[] = {
+};
+
+static char *muic_supplied_to[] = {
+	"battery",
+};
+
+static int muic_manager_get_property(struct power_supply *psy,
+		enum power_supply_property psp,
+		union power_supply_propval *val)
+{
+	switch (psp) {
+	case POWER_SUPPLY_PROP_AFC_CHARGER_MODE:
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int muic_manager_set_property(struct power_supply *psy,
+		enum power_supply_property psp,
+		const union power_supply_propval *val)
+{
+	struct muic_interface_t *muic_if =
+		power_supply_get_drvdata(psy);
+	int ret;
+
+	switch (psp) {
+		case POWER_SUPPLY_PROP_AFC_CHARGER_MODE:
+			MUIC_PDATA_FUNC_MULTI_PARAM(muic_if->pm_chgin_irq,
+				muic_if->muic_data, val->intval, &ret);
+			break;
+		default:
+			return -EINVAL;
+	}
+	return 0;
+}
+
+int muic_manager_psy_init(struct muic_interface_t *muic_if, struct device *parent)
+{
+	struct power_supply_config psy_cfg = {};
+	int ret = 0;
+
+	if (muic_if == NULL || parent == NULL) {
+		pr_err("%s NULL data\n", __func__);
+		return -1;
+	}
+
+	muic_if->psy_muic_desc.name           = "muic-manager";
+	muic_if->psy_muic_desc.type           = POWER_SUPPLY_TYPE_UNKNOWN;
+	muic_if->psy_muic_desc.get_property   = muic_manager_get_property;
+	muic_if->psy_muic_desc.set_property   = muic_manager_set_property;
+	muic_if->psy_muic_desc.properties     = muic_props;
+	muic_if->psy_muic_desc.num_properties = ARRAY_SIZE(muic_props);
+
+	psy_cfg.drv_data = muic_if;
+	psy_cfg.supplied_to = muic_supplied_to;
+	psy_cfg.num_supplicants = ARRAY_SIZE(muic_supplied_to);
+
+	muic_if->psy_muic = power_supply_register(parent, &muic_if->psy_muic_desc, &psy_cfg);
+	if (IS_ERR(muic_if->psy_muic)) {
+		ret = (int)PTR_ERR(muic_if->psy_muic);
+		pr_err("%s: Failed to Register psy_muic, ret : %d\n", __func__, ret);
+	}
+	return ret;
+}
+#endif
+
 void muic_manager_exit(struct muic_interface_t *muic_if)
 {
+#if defined(CONFIG_MUIC_SUPPORT_POWERMETER)
+	power_supply_unregister(muic_if->psy_muic);
+#endif
 	kfree(muic_if);
 }

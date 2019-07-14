@@ -16,6 +16,9 @@
 
 #include "../scsc/scsc_mx_impl.h" /* TODO */
 #include <scsc/scsc_mx.h>
+#ifdef CONFIG_SCSC_LOG_COLLECTION
+#include <scsc/scsc_log_collector.h>
+#endif
 
 static bool EnableTestMode;
 module_param(EnableTestMode, bool, S_IRUGO | S_IWUSR);
@@ -31,7 +34,6 @@ static struct mutex slsi_start_mutex;
 static int recovery_in_progress;
 static u16 latest_scsc_panic_code;
 
-#define SLSI_SM_WLAN_SERVICE_STOP_RECOVERY_TIMEOUT 20000
 
 /* TODO: Would be good to get this removed - use module_client? */
 struct slsi_cm_ctx {
@@ -117,7 +119,11 @@ static void wlan_failure_reset(struct scsc_service_client *client, u16 scsc_pani
 int slsi_check_rf_test_mode(void)
 {
 	struct file *fp = NULL;
+#if defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000
+ 	char *filepath = "/data/vendor/conn/.psm.info";
+#else
 	char *filepath = "/data/misc/conn/.psm.info";
+#endif
 	char power_val = 0;
 
 	fp = filp_open(filepath, O_RDONLY, 0);
@@ -151,6 +157,9 @@ void slsi_wlan_service_probe(struct scsc_mx_module_client *module_client, struct
 	struct slsi_dev            *sdev;
 	struct device              *dev;
 	struct scsc_service_client mx_wlan_client;
+#ifdef CONFIG_SCSC_LOG_COLLECTION
+	char buf[SCSC_LOG_FAPI_VERSION_SIZE];
+#endif
 
 	SLSI_UNUSED_PARAMETER(module_client);
 
@@ -198,6 +207,20 @@ void slsi_wlan_service_probe(struct scsc_mx_module_client *module_client, struct
 
 #ifdef CONFIG_SCSC_WLAN_HIP4_PROFILING
 		hip4_sampler_create(mx);
+#endif
+#ifdef CONFIG_SCSC_LOG_COLLECTION
+		memset(buf, 0, SCSC_LOG_FAPI_VERSION_SIZE);
+		/* Write FAPI VERSION to collector header */
+		/* IMPORTANT - Do not change the formatting as User space tooling is parsing the string
+		 * to read SAP fapi versions.
+		 */
+		snprintf(buf, SCSC_LOG_FAPI_VERSION_SIZE, "ma:%u.%u, mlme:%u.%u, debug:%u.%u, test:%u.%u",
+			 FAPI_MAJOR_VERSION(FAPI_DATA_SAP_VERSION), FAPI_MINOR_VERSION(FAPI_DATA_SAP_VERSION),
+			 FAPI_MAJOR_VERSION(FAPI_CONTROL_SAP_VERSION), FAPI_MINOR_VERSION(FAPI_CONTROL_SAP_VERSION),
+			 FAPI_MAJOR_VERSION(FAPI_DEBUG_SAP_VERSION), FAPI_MINOR_VERSION(FAPI_DEBUG_SAP_VERSION),
+			 FAPI_MAJOR_VERSION(FAPI_TEST_SAP_VERSION), FAPI_MINOR_VERSION(FAPI_TEST_SAP_VERSION));
+
+		scsc_log_collector_write_fapi(buf, SCSC_LOG_FAPI_VERSION_SIZE);
 #endif
 	}
 
@@ -283,7 +306,7 @@ static void slsi_wlan_service_remove(struct scsc_mx_module_client *module_client
 
 		mutex_unlock(&slsi_start_mutex);
 		r = wait_for_completion_timeout(&sdev->recovery_stop_completion,
-						msecs_to_jiffies(SLSI_SM_WLAN_SERVICE_STOP_RECOVERY_TIMEOUT));
+						msecs_to_jiffies(sdev->recovery_timeout));
 		if (r == 0)
 			SLSI_INFO(sdev, "recovery_stop_completion timeout\n");
 
@@ -392,6 +415,9 @@ bool slsi_is_rf_test_mode_enabled(void)
 	return EnableRfTestMode;
 }
 
+#define SLSI_SM_WLAN_SERVICE_RECOVERY_COMPLETED_TIMEOUT 20000
+#define SLSI_SM_WLAN_SERVICE_RECOVERY_DISABLED_TIMEOUT 2000
+
 int slsi_sm_wlan_service_open(struct slsi_dev *sdev)
 {
 	int err = 0;
@@ -405,6 +431,8 @@ int slsi_sm_wlan_service_open(struct slsi_dev *sdev)
 		err = -EINVAL;
 		goto exit;
 	}
+
+	sdev->recovery_timeout = mxman_recovery_disabled() ? SLSI_SM_WLAN_SERVICE_RECOVERY_DISABLED_TIMEOUT : SLSI_SM_WLAN_SERVICE_RECOVERY_COMPLETED_TIMEOUT;
 
 	/* Open service - will download FW - will set MBOX0 with Starting address */
 	SLSI_INFO(sdev, "Open WLAN service\n");
@@ -527,7 +555,7 @@ static void __slsi_sm_wlan_service_stop_wait_locked(struct slsi_dev *sdev)
 
 	mutex_unlock(&slsi_start_mutex);
 	r = wait_for_completion_timeout(&sdev->recovery_remove_completion,
-					msecs_to_jiffies(SLSI_SM_WLAN_SERVICE_STOP_RECOVERY_TIMEOUT));
+					msecs_to_jiffies(sdev->recovery_timeout));
 	if (r == 0)
 		SLSI_INFO(sdev, "recovery_remove_completion timeout\n");
 

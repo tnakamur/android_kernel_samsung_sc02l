@@ -170,7 +170,6 @@ struct stk3013_data {
 	unsigned int cal_result;
 	struct mutex io_lock;
 	struct input_dev *ps_input_dev;
-	int32_t ps_distance_last;
 	bool ps_enabled;
 	bool re_enable_ps;
 	struct wake_lock ps_wakelock;
@@ -671,7 +670,6 @@ static int32_t stk3013_enable_ps(struct device *dev,
 		ps_data->ps_enabled = true;
 #ifdef STK_CHK_REG
 		if (!validate_reg) {
-			ps_data->ps_distance_last = 1;
 			input_report_abs(ps_data->ps_input_dev,
 					ABS_DISTANCE, 1);
 			input_sync(ps_data->ps_input_dev);
@@ -687,9 +685,8 @@ static int32_t stk3013_enable_ps(struct device *dev,
 			if (ret < 0)
 				return ret;
 			near_far_state = ret & STK_FLG_NF_MASK;
-			ps_data->ps_distance_last = near_far_state;
 			input_report_abs(ps_data->ps_input_dev,
-					ABS_DISTANCE, enable);
+					ABS_DISTANCE, near_far_state);
 			input_sync(ps_data->ps_input_dev);
 			wake_lock_timeout(&ps_data->ps_wakelock, 3*HZ);
 			read_value = stk3013_get_ps_reading(ps_data);
@@ -1286,7 +1283,6 @@ static void stk_work_func(struct work_struct *work)
 #endif
 
 #if ((STK_INT_PS_MODE == 0x03) || (STK_INT_PS_MODE == 0x02))
-	ps_data->ps_distance_last = near_far_state;
 	input_report_abs(ps_data->ps_input_dev, ABS_DISTANCE, near_far_state);
 	input_sync(ps_data->ps_input_dev);
 	wake_lock_timeout(&ps_data->ps_wakelock, 3 * HZ);
@@ -1301,7 +1297,6 @@ static void stk_work_func(struct work_struct *work)
 	if (org_flag_reg & STK_FLG_PSINT_MASK) {
 		disable_flag |= STK_FLG_PSINT_MASK;
 		near_far_state = (org_flag_reg & STK_FLG_NF_MASK) ? 1 : 0;
-		ps_data->ps_distance_last = near_far_state;
 		read_value = stk3013_get_ps_reading(ps_data);
 
 #ifdef CONFIG_SEC_FACTORY
@@ -1369,7 +1364,6 @@ static int32_t stk3013_init_all_setting(struct i2c_client *client,
 	ps_data->first_boot = true;
 
 	atomic_set(&ps_data->recv_reg, 0);
-	ps_data->ps_distance_last = 1;
 	return 0;
 }
 

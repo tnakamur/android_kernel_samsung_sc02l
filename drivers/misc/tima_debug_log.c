@@ -9,6 +9,8 @@
 #include <linux/io.h>
 #include <linux/types.h>
 
+extern int tima_debug_modify_kernel(const char *val, struct kernel_param *kp);
+
 #define	DEBUG_LOG_SIZE	(1<<20)
 #define TIMA_DEBUG_LOGGING_START	(0xB8000000)
 #define TIMA_SECURE_LOGGING_START (TIMA_DEBUG_LOGGING_START + DEBUG_LOG_SIZE)
@@ -35,6 +37,9 @@ typedef struct debug_log_header_s {
 unsigned long *tima_log_addr;
 unsigned long *tima_debug_log_addr;
 unsigned long *tima_secure_log_addr;
+
+/* leave the following definithion of module param call here for the compatibility with other models */
+module_param_call(force_modify, tima_debug_modify_kernel, NULL, NULL, 0644);
 
 ssize_t	tima_read(struct file *filep, char __user *buf, size_t size, loff_t *offset)
 {

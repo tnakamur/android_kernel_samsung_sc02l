@@ -887,7 +887,8 @@ void dpp_reg_set_csc_coef(u32 id, u32 csc_std, u32 csc_rng)
 	else if (csc_std == CSC_DCI_P3)
 		csc_id = DPP_CSC_ID_DCI_P3 + csc_rng;
 	else
-		dpp_err("Undefined CSC Type!!!\n");
+		dpp_err("Undefined CSC Type: dpp:%d, csc_std:%d, csc_rng:%d\n",
+			id, csc_std, csc_rng);
 
 	c00 = csc_3x3_t[csc_id][0][0];
 	c01 = csc_3x3_t[csc_id][0][1];
@@ -924,7 +925,6 @@ void dpp_reg_set_csc_coef(u32 id, u32 csc_std, u32 csc_rng)
 	dpp_dbg("0x%3x  0x%3x  0x%3x\n", c00, c01, c02);
 	dpp_dbg("0x%3x  0x%3x  0x%3x\n", c10, c11, c12);
 	dpp_dbg("0x%3x  0x%3x  0x%3x\n", c20, c21, c22);
-
 }
 
 void dpp_reg_set_csc_config(u32 id, u32 type)

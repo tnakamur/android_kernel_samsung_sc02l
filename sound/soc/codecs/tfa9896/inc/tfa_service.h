@@ -1052,6 +1052,11 @@ enum tfa98xx_error tfa_run_coldstartup(tfa98xx_handle_t handle, int profile);
  */
 enum tfa98xx_error tfa_run_start_dsp(tfa98xx_handle_t handle);
 
+/*
+ * load register in dev / prof earlier, to save time in cold start
+ */
+enum tfa98xx_error tfa_load_cnt_regs(tfa98xx_handle_t handle, int profile);
+
 /**
  * start the clocks and wait until the AMP is switching
  * on return the DSP sub system will be ready for loading

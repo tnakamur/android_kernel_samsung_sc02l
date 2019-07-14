@@ -1,6 +1,6 @@
 /*****************************************************************************
  *
- * Copyright (c) 2012 - 2017 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2012 - 2018 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
 
@@ -172,12 +172,16 @@ static int slsi_net_open(struct net_device *dev)
 		SLSI_ETHER_COPY(sdev->netdev_addresses[SLSI_NET_INDEX_P2PX_SWLAN], sdev->hw_addr);
 		sdev->netdev_addresses[SLSI_NET_INDEX_P2PX_SWLAN][0] |= 0x02; /* Set the local bit */
 		sdev->netdev_addresses[SLSI_NET_INDEX_P2PX_SWLAN][4] ^= 0x80; /* EXOR 5th byte with 0x80 */
-
+#if CONFIG_SCSC_WLAN_MAX_INTERFACES >= 4
+		SLSI_ETHER_COPY(sdev->netdev_addresses[SLSI_NET_INDEX_NAN], sdev->hw_addr);
+		sdev->netdev_addresses[SLSI_NET_INDEX_NAN][0] |= 0x02; /* Set the local bit */
+		sdev->netdev_addresses[SLSI_NET_INDEX_NAN][3] ^= 0x80; /* EXOR 4th byte with 0x80 */
+#endif
 		sdev->initial_scan = true;
 	}
 
 #ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
-	if (SLSI_IS_INTERFACE_WIFI_SHARING_AP(ndev_vif))
+	if (SLSI_IS_VIF_INDEX_MHS(sdev, ndev_vif))
 		SLSI_ETHER_COPY(dev->dev_addr, sdev->netdev_addresses[SLSI_NET_INDEX_P2P]);
 	else
 		SLSI_ETHER_COPY(dev->dev_addr, sdev->netdev_addresses[ndev_vif->ifnum]);
@@ -204,8 +208,6 @@ static int slsi_net_open(struct net_device *dev)
 	/* 2511 measn unifiForceActive and 1 means active */
 	if (slsi_is_rf_test_mode_enabled()) {
 		SLSI_NET_ERR(dev, "*#rf# rf test mode set is enabled.\n");
-		slsi_set_mib_roam(sdev, NULL, SLSI_PSID_UNIFI_ROAMING_ENABLED, 0);
-		slsi_set_mib_roam(sdev, NULL, SLSI_PSID_UNIFI_ROAM_MODE, 0);
 		slsi_set_mib_roam(sdev, NULL, 2511, 1);
 		slsi_set_mib_roam(sdev, NULL, SLSI_PSID_UNIFI_TPC_MAX_POWER_RSSI_THRESHOLD, 0);
 	}
@@ -247,6 +249,7 @@ static int slsi_net_stop(struct net_device *dev)
 
 	sdev->allow_switch_40_mhz = true;
 	sdev->allow_switch_80_mhz = true;
+	sdev->acs_channel_switched = false;
 	slsi_wakeunlock(&sdev->wlan_wl);
 	return 0;
 }
@@ -254,8 +257,6 @@ static int slsi_net_stop(struct net_device *dev)
 /* This is called after the WE handlers */
 static int slsi_net_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
-	SLSI_NET_DBG1(dev, SLSI_NETDEV, "ioctl cmd:0x%.4x\n", cmd);
-
 	if (cmd == SIOCDEVPRIVATE + 2) { /* 0x89f0 + 2 from wpa_supplicant */
 		return slsi_ioctl(dev, rq, cmd);
 	}
@@ -1003,6 +1004,12 @@ exit:
 	ndev_vif->sta.regd_mc_addr_count = i;
 }
 
+static int  slsi_set_mac_address(struct net_device *dev, void *addr)
+{
+	SLSI_NET_DBG1(dev, SLSI_NETDEV, "slsi_set_mac_address\n");
+	return 0;
+}
+
 static const struct net_device_ops slsi_netdev_ops = {
 	.ndo_open         = slsi_net_open,
 	.ndo_stop         = slsi_net_stop,
@@ -1012,6 +1019,7 @@ static const struct net_device_ops slsi_netdev_ops = {
 	.ndo_select_queue = slsi_net_select_queue,
 	.ndo_fix_features = slsi_net_fix_features,
 	.ndo_set_rx_mode = slsi_set_multicast_list,
+	.ndo_set_mac_address = slsi_set_mac_address,
 };
 
 static void slsi_if_setup(struct net_device *dev)
@@ -1021,12 +1029,12 @@ static void slsi_if_setup(struct net_device *dev)
 	dev->destructor = free_netdev;
 }
 
-static int slsi_netif_add_locked(struct slsi_dev *sdev, const char *name, int ifnum)
+int slsi_netif_add_locked(struct slsi_dev *sdev, const char *name, int ifnum)
 {
 	struct net_device   *dev = NULL;
 	struct netdev_vif   *ndev_vif;
 	struct wireless_dev *wdev;
-	int                 alloc_size, txq_count, ret;
+	int                 alloc_size, txq_count = 0, ret;
 
 	WARN_ON(!SLSI_MUTEX_IS_LOCKED(sdev->netdev_add_remove_mutex));
 
@@ -1071,8 +1079,8 @@ static int slsi_netif_add_locked(struct slsi_dev *sdev, const char *name, int if
 	slsi_spinlock_create(&ndev_vif->peer_lock);
 	atomic_set(&ndev_vif->ba_flush, 0);
 
-	/* Reserve memory for the peer database - Not required for p2p0 interface */
-	if (!SLSI_IS_VIF_INDEX_P2P(ndev_vif)) {
+	/* Reserve memory for the peer database - Not required for p2p0/nan interface */
+	if (!(SLSI_IS_VIF_INDEX_P2P(ndev_vif) || SLSI_IS_VIF_INDEX_NAN(ndev_vif))) {
 		int queueset;
 
 		for (queueset = 0; queueset < SLSI_ADHOC_PEER_CONNECTIONS_MAX; queueset++) {
@@ -1108,7 +1116,7 @@ static int slsi_netif_add_locked(struct slsi_dev *sdev, const char *name, int if
 
 	/* For HS2 interface */
 	if (SLSI_IS_VIF_INDEX_WLAN(ndev_vif))
-		sdev->hs2_state = HS2_NO_VIF;
+		sdev->wlan_unsync_vif_state = WLAN_UNSYNC_NO_VIF;
 
 	/* For p2p0 interface */
 	else if (SLSI_IS_VIF_INDEX_P2P(ndev_vif)) {
@@ -1141,7 +1149,7 @@ static int slsi_netif_add_locked(struct slsi_dev *sdev, const char *name, int if
 	netif_carrier_off(dev);
 
 #ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
-	if (strcmp(name, "swlan0") == 0)
+	if (strcmp(name, CONFIG_SCSC_AP_INTERFACE_NAME) == 0)
 		SLSI_ETHER_COPY(dev->dev_addr, sdev->netdev_addresses[SLSI_NET_INDEX_P2P]);
 	else
 		SLSI_ETHER_COPY(dev->dev_addr, sdev->netdev_addresses[ifnum]);
@@ -1167,31 +1175,30 @@ static int slsi_netif_add_locked(struct slsi_dev *sdev, const char *name, int if
 	return 0;
 
 exit_with_error:
-    SLSI_MUTEX_LOCK(sdev->netdev_remove_mutex);
+	SLSI_MUTEX_LOCK(sdev->netdev_remove_mutex);
 	free_netdev(dev);
-    SLSI_MUTEX_UNLOCK(sdev->netdev_remove_mutex);
+	SLSI_MUTEX_UNLOCK(sdev->netdev_remove_mutex);
 	return ret;
 }
 
-int slsi_netif_add(struct slsi_dev *sdev, const char *name)
+int slsi_netif_dynamic_iface_add(struct slsi_dev *sdev, const char *name)
 {
 	int index = -EINVAL;
-	int i;
 	int err;
 
 	SLSI_MUTEX_LOCK(sdev->netdev_add_remove_mutex);
 
-	for (i = 1; i <= CONFIG_SCSC_WLAN_MAX_INTERFACES; i++)
-		if (!sdev->netdev[i]) {
-			index = i;
-			break;
-		}
-
-	if (index > 0) {
-		err = slsi_netif_add_locked(sdev, name, index);
-		if (err != 0)
-			index = err;
+#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000)
+	if (sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN] == sdev->netdev_ap) {
+		rcu_assign_pointer(sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN], NULL);
+		err = slsi_netif_add_locked(sdev, name, SLSI_NET_INDEX_P2PX_SWLAN);
+		index = err ? err : SLSI_NET_INDEX_P2PX_SWLAN;
 	}
+#else
+	err = slsi_netif_add_locked(sdev, name, SLSI_NET_INDEX_P2PX_SWLAN);
+	index = err ? err : SLSI_NET_INDEX_P2PX_SWLAN;
+#endif
+
 	SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
 	return index;
 }
@@ -1222,7 +1229,33 @@ int slsi_netif_init(struct slsi_dev *sdev)
 		SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
 		return -EINVAL;
 	}
-
+#ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
+#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000)
+	if (slsi_netif_add_locked(sdev, CONFIG_SCSC_AP_INTERFACE_NAME, SLSI_NET_INDEX_P2PX_SWLAN) != 0) {
+		rtnl_lock();
+		slsi_netif_remove_locked(sdev, sdev->netdev[SLSI_NET_INDEX_WLAN]);
+		slsi_netif_remove_locked(sdev, sdev->netdev[SLSI_NET_INDEX_P2P]);
+		rtnl_unlock();
+		SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
+		return -EINVAL;
+	}
+#endif
+#endif
+#if CONFIG_SCSC_WLAN_MAX_INTERFACES >= 4
+	if (slsi_netif_add_locked(sdev, "nan%d", SLSI_NET_INDEX_NAN) != 0) {
+		rtnl_lock();
+		slsi_netif_remove_locked(sdev, sdev->netdev[SLSI_NET_INDEX_WLAN]);
+		slsi_netif_remove_locked(sdev, sdev->netdev[SLSI_NET_INDEX_P2P]);
+#ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
+#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000)
+		slsi_netif_remove_locked(sdev, sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN]);
+#endif
+#endif
+		rtnl_unlock();
+		SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
+		return -EINVAL;
+	}
+#endif
 	SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
 	return 0;
 }
@@ -1303,7 +1336,7 @@ static void slsi_netif_remove_locked(struct slsi_dev *sdev, struct net_device *d
 	if (SLSI_IS_VIF_INDEX_P2P(ndev_vif)) {
 		slsi_p2p_deinit(sdev, ndev_vif);
 	} else if (SLSI_IS_VIF_INDEX_WLAN(ndev_vif)) {
-		sdev->hs2_state = HS2_NO_VIF;
+		sdev->wlan_unsync_vif_state = WLAN_UNSYNC_NO_VIF;
 		ndev_vif->vif_type = SLSI_VIFTYPE_UNSPECIFIED;
 	}
 
@@ -1327,9 +1360,9 @@ static void slsi_netif_remove_locked(struct slsi_dev *sdev, struct net_device *d
 		atomic_set(&ndev_vif->is_registered, 0);
 		unregister_netdevice(dev);
 	} else {
-        SLSI_MUTEX_LOCK(sdev->netdev_remove_mutex);
+		SLSI_MUTEX_LOCK(sdev->netdev_remove_mutex);
 		free_netdev(dev);
-        SLSI_MUTEX_UNLOCK(sdev->netdev_remove_mutex);
+		SLSI_MUTEX_UNLOCK(sdev->netdev_remove_mutex);
 	}
 }
 
@@ -1359,6 +1392,7 @@ void slsi_netif_remove_all(struct slsi_dev *sdev)
 	for (i = 1; i <= CONFIG_SCSC_WLAN_MAX_INTERFACES; i++)
 		if (sdev->netdev[i])
 			slsi_netif_remove_locked(sdev, sdev->netdev[i]);
+	rcu_assign_pointer(sdev->netdev_ap, NULL);
 	SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
 	rtnl_unlock();
 }
@@ -1482,9 +1516,11 @@ static void slsi_netif_tcp_ack_suppression_timeout(unsigned long data)
 static int slsi_netif_tcp_ack_suppression_option(struct sk_buff *skb, u32 option)
 {
 	unsigned char *options;
-	u32 optlen, len;
+	u32 optlen = 0, len = 0;
 
-	optlen = tcp_optlen(skb);
+	if (tcp_hdr(skb)->doff > 5)
+		optlen = (tcp_hdr(skb)->doff - 5) * 4;
+
 	options = ((u8 *)tcp_hdr(skb)) + TCP_ACK_SUPPRESSION_OPTIONS_OFFSET;
 
 	while (optlen > 0) {
@@ -1513,8 +1549,10 @@ static int slsi_netif_tcp_ack_suppression_option(struct sk_buff *skb, u32 option
 			len = options[1];
 			break;
 		}
-		/* if length field in TCP options is 0, then options are bogus; return here */
-		if (len == 0) {
+		/* if length field in TCP options is 0, or greater than
+		 * total options length, then options are incorrect; return here
+		 */
+		if ((len == 0) || (len > optlen)) {
 			SLSI_DBG_HEX_NODEV(SLSI_TX, skb->data, skb->len < 128 ? skb->len : 128, "SKB:\n");
 			return 0;
 		}

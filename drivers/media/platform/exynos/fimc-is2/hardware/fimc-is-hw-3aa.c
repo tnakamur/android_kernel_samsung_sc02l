@@ -173,6 +173,8 @@ int fimc_is_hw_3aa_mode_change(struct fimc_is_hw_ip *hw_ip, u32 instance, ulong 
 
 	BUG_ON(!hw_ip->group[instance]);
 
+	set_bit(FIMC_IS_ISCHAIN_MODE_CHANGED, &hw_ip->group[instance]->device->state);
+
 	if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &hw_ip->group[instance]->state)) {
 		/* For sensor info initialize for mode change */
 		framemgr = hw_ip->framemgr;
@@ -339,10 +341,22 @@ static int fimc_is_hw_3aa_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 		lindex = frame->shot->ctl.vendor_entry.lowIndexParam;
 		hindex = frame->shot->ctl.vendor_entry.highIndexParam;
 
+		/* if internal -> normat shot case
+		 * lindex/hindex set for update param forcely
+		 */
 		if (hw_ip->internal_fcount != 0) {
 			hw_ip->internal_fcount = 0;
-			param_set->dma_output_before_bds.cmd  = param->vdma4_output.cmd;
-			param_set->dma_output_after_bds.cmd  = param->vdma2_output.cmd;
+			lindex |= LOWBIT_OF(PARAM_3AA_OTF_INPUT);
+			lindex |= LOWBIT_OF(PARAM_3AA_VDMA1_INPUT);
+			lindex |= LOWBIT_OF(PARAM_3AA_OTF_OUTPUT);
+			lindex |= LOWBIT_OF(PARAM_3AA_VDMA4_OUTPUT);
+			lindex |= LOWBIT_OF(PARAM_3AA_VDMA2_OUTPUT);
+
+			hindex |= HIGHBIT_OF(PARAM_3AA_OTF_INPUT);
+			hindex |= HIGHBIT_OF(PARAM_3AA_VDMA1_INPUT);
+			hindex |= HIGHBIT_OF(PARAM_3AA_OTF_OUTPUT);
+			hindex |= HIGHBIT_OF(PARAM_3AA_VDMA4_OUTPUT);
+			hindex |= HIGHBIT_OF(PARAM_3AA_VDMA2_OUTPUT);
 		}
 	}
 
@@ -364,8 +378,8 @@ static int fimc_is_hw_3aa_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 
 	if (param_set->dma_output_before_bds.cmd != DMA_OUTPUT_COMMAND_DISABLE) {
 		for (i = 0; i < frame->planes; i++) {
-			param_set->output_dva_before_bds[i] = frame->shot->uctl.scalerUd.txcTargetAddress[i];
-			if (frame->shot->uctl.scalerUd.txcTargetAddress[i] == 0) {
+			param_set->output_dva_before_bds[i] = frame->txcTargetAddress[i];
+			if (frame->txcTargetAddress[i] == 0) {
 				msinfo_hw("[F:%d]txcTargetAddress[%d] is zero\n",
 					frame->instance, hw_ip, frame->fcount, i);
 				param_set->dma_output_before_bds.cmd = DMA_OUTPUT_COMMAND_DISABLE;
@@ -376,15 +390,15 @@ static int fimc_is_hw_3aa_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 	if (param_set->dma_output_after_bds.cmd != DMA_OUTPUT_COMMAND_DISABLE) {
 		for (i = 0; i < frame->planes; i++) {
 #if defined(SOC_3AAISP)
-			param_set->output_dva_after_bds[i] = frame->shot->uctl.scalerUd.txcTargetAddress[i];
-			if (frame->shot->uctl.scalerUd.txcTargetAddress[i] == 0) {
+			param_set->output_dva_after_bds[i] = frame->txcTargetAddress[i];
+			if (frame->txcTargetAddress[i] == 0) {
 				msinfo_hw("[F:%d]txcTargetAddress[%d] is zero\n",
 					frame->instance, hw_ip, frame->fcount, i);
 				param_set->dma_output_after_bds.cmd = DMA_OUTPUT_COMMAND_DISABLE;
 			}
 #else
-			param_set->output_dva_after_bds[i] = frame->shot->uctl.scalerUd.txpTargetAddress[i];
-			if (frame->shot->uctl.scalerUd.txpTargetAddress[i] == 0) {
+			param_set->output_dva_after_bds[i] = frame->txpTargetAddress[i];
+			if (frame->txpTargetAddress[i] == 0) {
 				msinfo_hw("[F:%d]txpTargetAddress[%d] is zero\n",
 					frame->instance, hw_ip, frame->fcount, i);
 				param_set->dma_output_after_bds.cmd = DMA_OUTPUT_COMMAND_DISABLE;
@@ -547,7 +561,6 @@ static int fimc_is_hw_3aa_frame_ndone(struct fimc_is_hw_ip *hw_ip, struct fimc_i
 	int wq_id_3xc, wq_id_3xp;
 	int output_id;
 	int ret = 0;
-	bool flag_get_meta = true;
 
 	BUG_ON(!hw_ip);
 	BUG_ON(!frame);
@@ -570,22 +583,19 @@ static int fimc_is_hw_3aa_frame_ndone(struct fimc_is_hw_ip *hw_ip, struct fimc_i
 	output_id = ENTRY_3AC;
 	if (test_bit(output_id, &frame->out_flag)) {
 		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id_3xc,
-				output_id, done_type, flag_get_meta);
-		flag_get_meta = false;
+				output_id, done_type, false);
 	}
 
 	output_id = ENTRY_3AP;
 	if (test_bit(output_id, &frame->out_flag)) {
 		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id_3xp,
-				output_id, done_type, flag_get_meta);
-		flag_get_meta = false;
+				output_id, done_type, false);
 	}
 
 	output_id = FIMC_IS_HW_CORE_END;
 	if (test_bit(hw_ip->id, &frame->core_flag)) {
 		ret = fimc_is_hardware_frame_done(hw_ip, frame, -1,
-				output_id, done_type, flag_get_meta);
-		flag_get_meta = false;
+				output_id, done_type, false);
 	}
 
 	return ret;
@@ -703,10 +713,8 @@ static int fimc_is_hw_3aa_apply_setfile(struct fimc_is_hw_ip *hw_ip, u32 scenari
 
 	if (sensor_position == SENSOR_POSITION_REAR || sensor_position == SENSOR_POSITION_REAR2 || sensor_position == SENSOR_POSITION_REAR3)
 		cal_addr = hw_3aa->lib_support->minfo->kvaddr_rear_cal;
-#if !defined(CONFIG_CAMERA_OTPROM_SUPPORT_FRONT) || defined(CAMERA_OTPROM_SUPPORT_FRONT_HYNIX )
 	else if (sensor_position == SENSOR_POSITION_FRONT || sensor_position == SENSOR_POSITION_FRONT2)
 		cal_addr = hw_3aa->lib_support->minfo->kvaddr_front_cal;
-#endif
 	else
 		return 0;
 

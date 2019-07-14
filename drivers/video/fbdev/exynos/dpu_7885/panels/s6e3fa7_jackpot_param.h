@@ -38,7 +38,7 @@
 #define LDI_LEN_CHIP_ID				5
 #define LDI_LEN_MTP				32
 #define LDI_LEN_HBM				34
-#define LDI_LEN_MANUFACTURE_INFO		21
+#define LDI_LEN_MANUFACTURE_INFO		20
 #define LDI_LEN_IRC				(IRC_CMD_CNT - 1)
 #define LDI_LEN_POC_EB				7
 #define LDI_LEN_POC_EC				8
@@ -62,6 +62,7 @@
 
 #define LDI_GPARA_DATE		40	/* C8h 41th Para: Manufacture Year, Month */
 #define LDI_GPARA_HBM_ELVSS	23	/* B5h 24th Para: ELVSS_Cal_Offset for HBM */
+#define LDI_GPARA_MANUFACTURE_INFO	1	/* C9h 2nd Para */
 
 #define	LDI_REG_RDDPM		0x0A	/* Read Display Power Mode */
 #define	LDI_LEN_RDDPM		1
@@ -75,14 +76,14 @@
 #define LDI_PNDSIE_MASK		(GENMASK(6, 0))
 
 /*
-* ESD_ERROR[0] =  MIPI DSI error is occurred by ESD.
-* ESD_ERROR[1] =  HS CLK lane error is occurred by ESD.
-* ESD_ERROR[2] =  VLIN3 error is occurred by ESD.
-* ESD_ERROR[3] =  ELVDD error is occurred by ESD.
-* ESD_ERROR[4]  = CHECK_SUM error is occurred by ESD.
-* ESD_ERROR[5] =  Internal HSYNC error is occurred by ESD.
-* ESD_ERROR[6] =  VLIN1 error is occurred by ESD
-*/
+ * ESD_ERROR[0] =  MIPI DSI error is occurred by ESD.
+ * ESD_ERROR[1] =  HS CLK lane error is occurred by ESD.
+ * ESD_ERROR[2] =  VLIN3 error is occurred by ESD.
+ * ESD_ERROR[3] =  ELVDD error is occurred by ESD.
+ * ESD_ERROR[4]  = CHECK_SUM error is occurred by ESD.
+ * ESD_ERROR[5] =  Internal HSYNC error is occurred by ESD.
+ * ESD_ERROR[6] =  VLIN1 error is occurred by ESD
+ */
 #define LDI_REG_ESDERR		0xEE		/* DPUI_KEY_PNELVDE, DPUI_KEY_PNVLI1E, DPUI_KEY_PNVLO3E, DPUI_KEY_PNESDE */
 #define LDI_LEN_ESDERR		1
 #define LDI_PNELVDE_MASK	(BIT(3))	/* ELVDD error */
@@ -138,7 +139,7 @@ static unsigned char SEQ_TEST_KEY_OFF_F0[] = {
 
 static unsigned char SEQ_TE_ON[] = {
 	0x35,
-	0x00
+	0x00, 0x00
 };
 
 static unsigned char SEQ_PCD_SET_DET_LOW[] = {
@@ -959,8 +960,7 @@ static unsigned char IRC_TABLE[EXTEND_BRIGHTNESS + 1][IRC_CMD_CNT] = {
 /* platform brightness <-> acl opr and percent */
 static unsigned int brightness_opr_table[ACL_STATUS_MAX][EXTEND_BRIGHTNESS + 1] = {
 	{
-		[0 ... UI_MAX_BRIGHTNESS - 1]			= OPR_STATUS_15P,
-		[UI_MAX_BRIGHTNESS ... EXTEND_BRIGHTNESS]	= OPR_STATUS_OFF,
+		[0 ... EXTEND_BRIGHTNESS]			= OPR_STATUS_OFF,
 	}, {
 		[0 ... 268]					= OPR_STATUS_15P,
 		[269 ... EXTEND_BRIGHTNESS]			= OPR_STATUS_08P

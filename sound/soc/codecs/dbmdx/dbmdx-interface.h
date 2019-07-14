@@ -35,12 +35,6 @@
 #endif /* CONFIG_OF */
 #endif
 
-#if defined(CONFIG_SND_SOC_DBMDX_VA_NS_SUPPORT)
-#if !defined(DBMDX_VA_NS_SUPPORT)
-#define DBMDX_VA_NS_SUPPORT		1
-#endif
-#endif
-
 #ifndef DBMD2_VA_FIRMWARE_NAME
 #define DBMD2_VA_FIRMWARE_NAME			"dbmd2_va_fw.bin"
 #endif
@@ -109,7 +103,7 @@
 #define DBMDX_VE_AMODEL_NAME			"ve_amodel.bin"
 #endif
 
-#define MAX_REQ_SIZE				8192
+#define MAX_REQ_SIZE				4096
 
 #define DBMDX_AMODEL_HEADER_SIZE		12
 #define DBMDX_AMODEL_MAX_CHUNKS			3

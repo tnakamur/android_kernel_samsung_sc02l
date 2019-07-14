@@ -69,7 +69,7 @@ struct eth_dev {
 
 	spinlock_t		req_lock;	/* guard {rx,tx}_reqs */
 	struct list_head	tx_reqs, rx_reqs;
-	unsigned		tx_qlen;
+	atomic_t		tx_qlen;
 /* Minimum number of TX USB request queued to UDC */
 #ifdef CONFIG_USB_RNDIS_MULTIPACKET_WITH_TIMER
 #define TX_REQ_THRESHOLD	1
@@ -452,7 +452,7 @@ static void rx_fill(struct eth_dev *dev, gfp_t gfp_flags)
 	spin_lock_irqsave(&dev->req_lock, flags);
 	while (!list_empty(&dev->rx_reqs)) {
 		/* break the nexus of continuous completion and re-submission*/
-		if (++req_cnt > qlen(dev->gadget, dev->qmult))
+		if(!dev->port_usb || (++req_cnt > qlen(dev->gadget, dev->qmult)))
 			break;
 
 		req = container_of(dev->rx_reqs.next,
@@ -478,9 +478,12 @@ static void process_rx_w(struct work_struct *work)
 	struct eth_dev	*dev = container_of(work, struct eth_dev, rx_work);
 	struct sk_buff	*skb;
 	int		status = 0;
+	int is_ncm = 0;
 
 	if (!dev->port_usb)
 		return;
+	else
+		is_ncm = !strcmp(dev->port_usb->func.name,"ncm");
 
 	while ((skb = skb_dequeue(&dev->rx_frames))) {
 		if (status < 0
@@ -490,7 +493,7 @@ static void process_rx_w(struct work_struct *work)
 		/*
 		  Need to revisit net->mtu	does not include header size incase of changed MTU
 		*/
-			if(!strcmp(dev->port_usb->func.name,"ncm")) {
+			if(is_ncm) {
 				if (status < 0
 					|| ETH_HLEN > skb->len
 					|| skb->len > (dev->net->mtu + ETH_HLEN)) {
@@ -804,6 +807,8 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	unsigned long		flags;
 	struct usb_ep		*in;
 	u16			cdc_filter;
+	bool eth_multi_pkt_xfer = 0;
+	bool eth_supports_multi_frame = 0;
 #ifdef CONFIG_USB_RNDIS_MULTIPACKET_WITH_TIMER
 	if (dev->en_timer) {
 		hrtimer_cancel(&dev->tx_timer);
@@ -814,6 +819,8 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	if (dev->port_usb) {
 		in = dev->port_usb->in_ep;
 		cdc_filter = dev->port_usb->cdc_filter;
+		eth_multi_pkt_xfer = dev->port_usb->multi_pkt_xfer;
+		eth_supports_multi_frame = dev->port_usb->supports_multi_frame;
 	} else {
 		in = NULL;
 		cdc_filter = 0;
@@ -827,7 +834,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 #if 0
 	/* Allocate memory for tx_reqs to support multi packet transfer */
-	if (dev->port_usb->multi_pkt_xfer && !dev->tx_req_bufsize)
+	if (eth_multi_pkt_xfer && !dev->tx_req_bufsize)
 		alloc_tx_buffer(dev);
 #endif
 
@@ -887,7 +894,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 			/* Multi frame CDC protocols may store the frame for
 			 * later which is not a dropped frame.
 			 */
-			if (dev->port_usb->supports_multi_frame)
+			if (eth_supports_multi_frame)
 				goto multiframe;
 			goto drop;
 		}
@@ -897,7 +904,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	dev->tx_skb_hold_count++;
 	spin_unlock_irqrestore(&dev->req_lock, flags);
 
-	if (dev->port_usb->multi_pkt_xfer) {
+	if (eth_multi_pkt_xfer) {
 		memcpy(req->buf + req->length, skb->data, skb->len);
 		req->length = req->length + skb->len;
 		length = req->length;
@@ -939,7 +946,8 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 		req->context = skb;
 	}
 #ifdef CONFIG_USB_RNDIS_MULTIPACKET_WITH_TIMER
-	retval = tx_task(dev, req);
+	if (dev->port_usb)
+		retval = tx_task(dev, req);
 #else
 	req->complete = tx_complete;
 
@@ -969,19 +977,13 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 	req->length = length;
 
-	/* throttle highspeed IRQ rate back slightly */
-	if (gadget_is_dualspeed(dev->gadget) &&
-			 (dev->gadget->speed == USB_SPEED_HIGH)) {
-		dev->tx_qlen++;
-		if (dev->tx_qlen == (dev->qmult/2)) {
-			req->no_interrupt = 0;
-			dev->tx_qlen = 0;
-		} else {
-			req->no_interrupt = 1;
-		}
-	} else {
-		req->no_interrupt = 0;
-	}
+	/* throttle high/super speed IRQ rate back slightly */
+	if (gadget_is_dualspeed(dev->gadget))
+		req->no_interrupt = (((dev->gadget->speed == USB_SPEED_HIGH ||
+				       dev->gadget->speed == USB_SPEED_SUPER)) &&
+					!list_empty(&dev->tx_reqs))
+			? ((atomic_read(&dev->tx_qlen) % dev->qmult) != 0)
+			: 0;
 
 	retval = usb_ep_queue(in, req, GFP_ATOMIC);
 #endif
@@ -995,7 +997,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	}
 
 	if (retval) {
-		if (!dev->port_usb->multi_pkt_xfer)
+		if (!eth_multi_pkt_xfer)
 			dev_kfree_skb_any(skb);
 drop:
 		dev->net->stats.tx_dropped++;
@@ -1020,7 +1022,7 @@ static void eth_start(struct eth_dev *dev, gfp_t gfp_flags)
 	rx_fill(dev, gfp_flags);
 
 	/* and open the tx floodgates */
-	dev->tx_qlen = 0;
+	atomic_set(&dev->tx_qlen, 0);
 	netif_wake_queue(dev->net);
 }
 
@@ -1548,28 +1550,37 @@ void gether_free_request(struct gether *link)
 	struct eth_dev		*dev = link->ioport;
 	struct usb_request	*req;
 	
-	printk("usb: %s : \n", __func__);
-	
+	printk("usb: %s\n", __func__);
+	flush_work(&dev->work);
+
+	spin_lock(&dev->req_lock);
 	while (!list_empty(&dev->tx_reqs)) {
 		req = container_of(dev->tx_reqs.next,
 					struct usb_request, list);
 		list_del(&req->list);
 
+		spin_unlock(&dev->req_lock);
 		if (link->multi_pkt_xfer)
 			kfree(req->buf);
 		usb_ep_free_request(link->in_ep, req);
+		spin_lock(&dev->req_lock);
 	}
+	spin_unlock(&dev->req_lock);
 
 	link->in_ep->desc = NULL;
 	usb_ep_disable(link->out_ep);
 
+	spin_lock(&dev->req_lock);
 	while (!list_empty(&dev->rx_reqs)) {
 		req = container_of(dev->rx_reqs.next,
 					struct usb_request, list);
 		list_del(&req->list);
 
+		spin_unlock(&dev->req_lock);
 		usb_ep_free_request(link->out_ep, req);
+		spin_lock(&dev->req_lock);
 	}
+	spin_unlock(&dev->req_lock);
 }
 
 EXPORT_SYMBOL_GPL(gether_connect);
@@ -1602,13 +1613,22 @@ void gether_disconnect(struct gether *link)
 	netif_carrier_off(dev->net);
 	printk(KERN_ERR"usb: %s No of ZLPS (%d)\n",__func__,dev->no_of_zlp);
 
+#ifdef CONFIG_USB_RNDIS_MULTIPACKET_WITH_TIMER
+	if (dev->en_timer) {
+		hrtimer_cancel(&dev->tx_timer);
+		dev->en_timer = 0;
+	}
+#endif
 	/* disable endpoints, forcing (synchronous) completion
 	 * of all pending i/o.  then free the request objects
 	 * and forget about the endpoints.
 	 */
 	usb_ep_disable(link->in_ep);
 	link->in_ep->desc = NULL;
-	
+	spin_lock(&dev->lock);
+	dev->port_usb = NULL;
+	spin_unlock(&dev->lock);
+
 	usb_ep_disable(link->out_ep);
 	
 #if 0
@@ -1652,16 +1672,6 @@ void gether_disconnect(struct gether *link)
 	dev->header_len = 0;
 	dev->unwrap = NULL;
 	dev->wrap = NULL;
-
-	spin_lock(&dev->lock);
-	dev->port_usb = NULL;
-	spin_unlock(&dev->lock);
-#ifdef CONFIG_USB_RNDIS_MULTIPACKET_WITH_TIMER
-	if (dev->en_timer) {
-		hrtimer_cancel(&dev->tx_timer);
-		dev->en_timer = 0;
-	}
-#endif
 }
 EXPORT_SYMBOL_GPL(gether_disconnect);
 

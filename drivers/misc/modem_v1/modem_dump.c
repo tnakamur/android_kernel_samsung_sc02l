@@ -21,8 +21,8 @@
 static int save_dump_file(struct link_device *ld, struct io_device *iod,
 		unsigned long arg, u8 __iomem *dump_base, size_t dump_size)
 {
-	struct sk_buff *skb;
 	size_t copied = 0;
+	struct sk_buff *skb;
 	size_t alloc_size = 0xE00;
 	int ret;
 
@@ -103,6 +103,7 @@ int save_acpm_dump(struct link_device *ld, struct io_device *iod,
 	return save_dump_file(ld, iod, arg, mld->acpm_base, acpm_size);
 }
 
+#ifdef CONFIG_CP_RAM_LOGGING
 int save_cplog_dump(struct link_device *ld, struct io_device *iod,
 		unsigned long arg)
 {
@@ -111,7 +112,7 @@ int save_cplog_dump(struct link_device *ld, struct io_device *iod,
 
 	if (!shm_get_cplog_flag()) {
 		mif_err("cplog is not on. Skip cplog dump\n");
-		return 0;
+		return -EPERM;
 	}
 
 	cplog_base = shm_get_cplog_region();
@@ -124,6 +125,7 @@ int save_cplog_dump(struct link_device *ld, struct io_device *iod,
 
 	return save_dump_file(ld, iod, arg, cplog_base, cplog_size);
 }
+#endif
 
 int save_shmem_dump(struct link_device *ld, struct io_device *iod,
 		unsigned long arg)

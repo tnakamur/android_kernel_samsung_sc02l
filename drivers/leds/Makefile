@@ -69,6 +69,9 @@ obj-$(CONFIG_LEDS_SEAD3)		+= leds-sead3.o
 obj-$(CONFIG_LEDS_S2MPB02)		+= leds-s2mpb02.o
 obj-$(CONFIG_LEDS_S2MU004_RGB)		+= leds-s2mu004-rgb.o
 obj-$(CONFIG_LEDS_S2MU005_FLASH)	+= leds-s2mu005.o
+obj-$(CONFIG_LEDS_S2MU106_FLASH)	+= leds-s2mu106.o
+obj-$(CONFIG_LEDS_S2MU205_FLASH)	+= leds-s2mu205.o
+obj-$(CONFIG_LEDS_RT8547)		+= leds-rt8547.o
 
 # LED SPI Drivers
 obj-$(CONFIG_LEDS_DAC124S085)		+= leds-dac124s085.o

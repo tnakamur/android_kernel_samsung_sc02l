@@ -211,6 +211,8 @@
 #define FIMC_IS_4E6_SETF			"setfile_4e6.bin"
 #define FIMC_IS_IMX576_SETF			"setfile_imx576.bin"
 #define FIMC_IS_IMX576_FRONT_SETF	"setfile_imx576_front.bin"
+#define FIMC_IS_3L6_SETF			"setfile_3l6.bin"
+
 
 #define FIMC_IS_COMPANION_MASTER_SETF			"companion_master_setfile.bin"
 #define FIMC_IS_COMPANION_MODE_SETF			"companion_mode_setfile.bin"

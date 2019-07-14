@@ -99,16 +99,6 @@ static const struct snd_soc_ops wdma_ops = {
 static const struct snd_soc_ops uaif_ops = {
 };
 
-/*
-static const struct snd_soc_pcm_stream tfa_params = {
-	.formats = SNDRV_PCM_FMTBIT_S16_LE,
-	.rate_min = 48000,
-	.rate_max = 48000,
-	.channels_min = 2,
-	.channels_max = 2
-};
-*/
-
 static int exynos7885_set_bias_level(struct snd_soc_card *card,
 				  struct snd_soc_dapm_context *dapm,
 				  enum snd_soc_bias_level level)
@@ -624,14 +614,12 @@ static struct snd_soc_dai_link exynos7885_dai[] = {
 		.stream_name = "UAIF3",
 		.cpu_dai_name = "UAIF3",
 		.platform_name = "snd-soc-dummy",
-#ifndef CONFIG_SND_SOC_TFA9872
+#if !defined(CONFIG_SND_SOC_TFA9872) && !defined(CONFIG_SND_SOC_TFA9896) && !defined(CONFIG_SND_SOC_SMA1301)
 		.codec_name = "snd-soc-dummy",
 		.codec_dai_name = "snd-soc-dummy-dai",
 #endif
-		/* .codec_dai_name = "tfa98xx-aif-8-34", */
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBS_CFS,
 		.no_pcm = 1,
-		/* .params = &tfa_params, */
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
 		.be_hw_params_fixup = abox_hw_params_fixup_helper,
@@ -918,10 +906,11 @@ static int exynos7885_audio_probe(struct platform_device *pdev)
 	if (ret)
 	{
 		dev_err(card->dev, "snd_soc_register_card() failed:%d\n", ret);
+	} else {
+		universal7885_mic_bias_parse_dt(pdev);
+		universal7885_init_soundcard(card);
 	}
 
-	universal7885_mic_bias_parse_dt(pdev);
-	universal7885_init_soundcard(card);
 	return ret;
 }
 

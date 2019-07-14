@@ -1692,13 +1692,6 @@ static int max77865_hv_muic_handle_attach
 		new_dev == ATTACHED_DEV_AFC_CHARGER_ERR_V_DUPLI_MUIC)
 		noti = false;
 
-	if (noti) {
-		if (new_dev == ATTACHED_DEV_AFC_CHARGER_9V_MUIC && tx_data != MUIC_HV_9V) {
-			panic("abnormal 9V detected\n");
-		} else if (new_dev == ATTACHED_DEV_AFC_CHARGER_ERR_V_MUIC)
-			panic("ERR V detected\n");
-	}
-
 	if (noti)
 		muic_notifier_attach_attached_dev(new_dev);
 #endif /* CONFIG_MUIC_NOTIFIER */

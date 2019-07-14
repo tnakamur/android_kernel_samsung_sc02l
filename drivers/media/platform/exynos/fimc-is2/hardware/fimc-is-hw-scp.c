@@ -230,9 +230,9 @@ static int fimc_is_hw_scp_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 	fimc_is_hw_scp_update_register(frame->instance, hw_ip, param);
 
 	/* set scp dma out addr */
-	target_addr[0] = frame->shot->uctl.scalerUd.scpTargetAddress[0];
-	target_addr[1] = frame->shot->uctl.scalerUd.scpTargetAddress[1];
-	target_addr[2] = frame->shot->uctl.scalerUd.scpTargetAddress[2];
+	target_addr[0] = frame->scpTargetAddress[0];
+	target_addr[1] = frame->scpTargetAddress[1];
+	target_addr[2] = frame->scpTargetAddress[2];
 
 	msdbg_hw(2, "[F:%d] target addr [0x%x]\n", frame->instance, hw_ip,
 		frame->fcount, target_addr[0]);
@@ -473,14 +473,14 @@ static int fimc_is_hw_scp_frame_ndone(struct fimc_is_hw_ip *hw_ip, struct fimc_i
 	wq_id     = WORK_SCP_FDONE;
 	output_id = ENTRY_SCP;
 	if (test_bit(output_id, &frame->out_flag))
-		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id, output_id,
-				done_type);
+		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id,
+					output_id, done_type, false);
 
 	wq_id     = -1;
 	output_id = FIMC_IS_HW_CORE_END;
 	if (test_bit(hw_ip->id, &frame->core_flag))
-		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id, output_id,
-				done_type);
+		ret = fimc_is_hardware_frame_done(hw_ip, frame, wq_id,
+					output_id, done_type, false);
 
 	return ret;
 }

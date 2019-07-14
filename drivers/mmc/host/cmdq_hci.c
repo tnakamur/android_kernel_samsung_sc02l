@@ -134,7 +134,7 @@ static void cmdq_interrupt_mask_set(struct cmdq_host *cq_host, bool enable)
 			RESP_TIMEOUT | HW_LOCK_ERR);
 		err_mask = RESP_DEVICE_STATE;
 		/* disable write protection violation indication */
-		err_mask &= ~WP_EXCEPTION;
+		err_mask &= ~(WP_EXCEPTION | WP_ERASE_SKIP);
 	} else {
 		data_mask &= ~(DATA_DONE | DATA_CRC_ERR | DATA_RTIMEOUT |
 			HOST_TIMEOUT | FIFO_UNDERRUN | START_BIT_ERR | END_BIT_ERR);
@@ -221,47 +221,53 @@ void cmdq_dumpregs(struct cmdq_host *cq_host)
 		mmc_hostname(mmc));
 
 	pr_err(DRV_NAME ": Caps: 0x%08x		  | Version:  0x%08x\n",
-		cmdq_readl(cq_host, CQCAP),
-		cmdq_readl(cq_host, CQVER));
+		cq_host->cq_dump->cqcap = cmdq_readl(cq_host, CQCAP),
+		cq_host->cq_dump->cqver = cmdq_readl(cq_host, CQVER));
 	pr_err(DRV_NAME ": Queing config: 0x%08x  | Queue Ctrl:  0x%08x\n",
-		cmdq_readl(cq_host, CQCFG),
-		cmdq_readl(cq_host, CQCTL));
+		cq_host->cq_dump->cqcfg = cmdq_readl(cq_host, CQCFG),
+		cq_host->cq_dump->cqctl = cmdq_readl(cq_host, CQCTL));
 	pr_err(DRV_NAME ": Int stat: 0x%08x	  | Int enab:  0x%08x\n",
-		cmdq_readl(cq_host, CQIS),
-		cmdq_readl(cq_host, CQISTE));
+		cq_host->cq_dump->cqis = cmdq_readl(cq_host, CQIS),
+		cq_host->cq_dump->cqiste = cmdq_readl(cq_host, CQISTE));
 	pr_err(DRV_NAME ": Int sig: 0x%08x	  | Int Coal:  0x%08x\n",
-		cmdq_readl(cq_host, CQISGE),
-		cmdq_readl(cq_host, CQIC));
+		cq_host->cq_dump->cqisge = cmdq_readl(cq_host, CQISGE),
+		cq_host->cq_dump->cqic = cmdq_readl(cq_host, CQIC));
 	pr_err(DRV_NAME ": TDL base: 0x%08x	  | TDL up32:  0x%08x\n",
-		cmdq_readl(cq_host, CQTDLBA),
-		cmdq_readl(cq_host, CQTDLBAU));
+		cq_host->cq_dump->cqtlba = cmdq_readl(cq_host, CQTDLBA),
+		cq_host->cq_dump->cqtlbau = cmdq_readl(cq_host, CQTDLBAU));
 	pr_err(DRV_NAME ": Doorbell: 0x%08x	  | Comp Notif:  0x%08x\n",
-		cmdq_readl(cq_host, CQTDBR),
-		cmdq_readl(cq_host, CQTCN));
+		cq_host->cq_dump->cqtdbr = cmdq_readl(cq_host, CQTDBR),
+		cq_host->cq_dump->cqtcn = cmdq_readl(cq_host, CQTCN));
 	pr_err(DRV_NAME ": Dev queue: 0x%08x	  | Dev Pend:  0x%08x\n",
-		cmdq_readl(cq_host, CQDQS),
-		cmdq_readl(cq_host, CQDPT));
+		cq_host->cq_dump->cqdqs = cmdq_readl(cq_host, CQDQS),
+		cq_host->cq_dump->cqdpt = cmdq_readl(cq_host, CQDPT));
 	pr_err(DRV_NAME ": Task clr: 0x%08x	  | Send stat 1:  0x%08x\n",
-		cmdq_readl(cq_host, CQTCLR),
-		cmdq_readl(cq_host, CQSSC1));
+		cq_host->cq_dump->cqtclr = cmdq_readl(cq_host, CQTCLR),
+		cq_host->cq_dump->cqssc1 = cmdq_readl(cq_host, CQSSC1));
 	pr_err(DRV_NAME ": Send stat 2: 0x%08x	  | DCMD resp:  0x%08x\n",
-		cmdq_readl(cq_host, CQSSC2),
-		cmdq_readl(cq_host, CQCRDCT));
+		cq_host->cq_dump->cqssc2 = cmdq_readl(cq_host, CQSSC2),
+		cq_host->cq_dump->cqrdct = cmdq_readl(cq_host, CQCRDCT));
 	pr_err(DRV_NAME ": Resp err mask: 0x%08x  | Task err:  0x%08x\n",
-		cmdq_readl(cq_host, CQRMEM),
-		cmdq_readl(cq_host, CQTERRI));
+		cq_host->cq_dump->cqrmem = cmdq_readl(cq_host, CQRMEM),
+		cq_host->cq_dump->cqterri = cmdq_readl(cq_host, CQTERRI));
 	pr_err(DRV_NAME ": Resp idx 0x%08x	  | Resp arg:  0x%08x\n",
-		cmdq_readl(cq_host, CQCRI),
-		cmdq_readl(cq_host, CQCRA));
-	pr_info(DRV_NAME ": Debug0 0x%08x\n", cmdq_readl(cq_host, CQDEBUG0));
-	pr_info(DRV_NAME ": Debug1 0x%08x\n", cmdq_readl(cq_host, CQDEBUG1));
+		cq_host->cq_dump->cqcri = cmdq_readl(cq_host, CQCRI),
+		cq_host->cq_dump->cqcra = cmdq_readl(cq_host, CQCRA));
+	pr_info(DRV_NAME ": Debug0 0x%08x\n",
+			cq_host->cq_dump->cqdebug0 = cmdq_readl(cq_host, CQDEBUG0));
+	pr_info(DRV_NAME ": Debug1 0x%08x\n",
+			cq_host->cq_dump->cqdebug1 = cmdq_readl(cq_host, CQDEBUG1));
 	pr_info(DRV_NAME ": CQCMD44 0x%08x\n", cmdq_readl(cq_host, CQCMD44));
 	pr_info(DRV_NAME ": CQCMD45 0x%08x\n", cmdq_readl(cq_host, CQCMD45));
 	pr_info(DRV_NAME ": CQCMD46 0x%08x\n", cmdq_readl(cq_host, CQCMD46));
 	pr_info(DRV_NAME ": CQCMD47 0x%08x\n", cmdq_readl(cq_host, CQCMD47));
 	pr_info(DRV_NAME ": CQCMD13 0x%08x\n", cmdq_readl(cq_host, CQCMD13));
-	pr_info(DRV_NAME ": DATA_INTMASK 0x%08x\n", cmdq_readl(cq_host, CQDATAINTMASK1));
-	pr_info(DRV_NAME ": CMD_INTMASK 0x%08x\n", cmdq_readl(cq_host, CQCMDINTMASK2));
+	pr_info(DRV_NAME ": DATA_INTMASK 0x%08x\n",
+			cq_host->cq_dump->cqdataintmask1 =
+			cmdq_readl(cq_host, CQDATAINTMASK1));
+	pr_info(DRV_NAME ": CMD_INTMASK 0x%08x\n",
+			cq_host->cq_dump->cqdataintmask2 =
+			cmdq_readl(cq_host, CQCMDINTMASK2));
 	pr_info(DRV_NAME ": ===========================================\n");
 
 	pr_info(DRV_NAME ": <<<<<<<<<< Debug0 Parsing >>>>>>>>>>\n");
@@ -270,6 +276,11 @@ void cmdq_dumpregs(struct cmdq_host *cq_host)
 
 	if (cq_host->ops->dump_vendor_regs)
 		cq_host->ops->dump_vendor_regs(mmc);
+
+#if defined(CONFIG_MMC_TEST_MODE)
+		/* do not recover system if test mode is enabled */
+		BUG();
+#endif
 }
 
 /**
@@ -488,7 +499,11 @@ static void cmdq_enable_after_sw_reset(struct cmdq_host *cq_host,
 	struct mmc_host *mmc = cq_host->mmc;
 	bool dcmd_enable = (cq_host->quirks & CMDQ_QUIRK_NO_DCMD) ?
 							false : true;
+	struct mmc_cmdq_context_info *ctx_info = &mmc->cmdq_ctx;
+	struct mmc_request *mrq_t;
+	struct mmc_request *mrq_n;
 	u32 reg;
+	unsigned long flags;
 
 	pr_err("[CQ] %s: Enable after SW RESET\n", mmc_hostname(mmc));
 
@@ -521,6 +536,19 @@ static void cmdq_enable_after_sw_reset(struct cmdq_host *cq_host,
 	cmdq_clear_set_irqs(cq_host, 0x0, CQ_INT_ALL);
 
 	cmdq_runtime_pm_put(cq_host);
+
+	spin_lock_irqsave(&cq_host->list_lock, flags);
+	if (!list_empty(&cq_host->active_mrq)) {
+		pr_err("[CQ] %s: pending list clear\n", mmc_hostname(mmc));
+		list_for_each_entry_safe(mrq_t, mrq_n, &cq_host->active_mrq, cmdq_entry) {
+			list_del(&mrq_t->cmdq_entry);
+
+		}
+	}
+	spin_unlock_irqrestore(&cq_host->list_lock, flags);
+
+	ctx_info->curr_dbr = 0;
+
 	cq_host->enabled = true;
 }
 
@@ -764,6 +792,8 @@ static int cmdq_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	u32 tag = mrq->cmdq_req->tag;
 	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
 	struct mmc_cmdq_context_info *ctx_info = &mmc->cmdq_ctx;
+	unsigned long flags;
+	int ret = 0;
 
 	if (!cq_host->enabled) {
 		pr_err("%s: CMDQ host not enabled yet !!!\n",
@@ -774,8 +804,12 @@ static int cmdq_request(struct mmc_host *mmc, struct mmc_request *mrq)
 
 	cmdq_runtime_pm_get(cq_host);
 
-	if (cq_host->ops->hwacg_control)
-		cq_host->ops->hwacg_control(mmc, true);
+	spin_lock_irqsave(&cq_host->lock, flags);
+	if (cq_host->ops->hwacg_control_direct)
+		ret = cq_host->ops->hwacg_control_direct(mmc, true);
+	spin_unlock_irqrestore(&cq_host->lock, flags);
+	if (ret)
+		udelay(1);
 
 	if (cq_host->ops->pm_qos_lock)
 		cq_host->ops->pm_qos_lock(mmc, true);
@@ -811,8 +845,13 @@ static int cmdq_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	if (cq_host->ops->set_tranfer_params)
 		cq_host->ops->set_tranfer_params(mmc);
 wait:
-	if (test_bit(CMDQ_STATE_DCMD_ACTIVE, &ctx_info->curr_state))
+	if (test_bit(CMDQ_STATE_DCMD_ACTIVE, &ctx_info->curr_state)) {
+		if (test_bit(CMDQ_STATE_DO_RECOVERY, &ctx_info->curr_state)) {
+			err = -ETIMEDOUT;
+			goto  out;
+		}
 		goto wait;
+	}
 
 	if (test_bit(CMDQ_STATE_ERR_RCV_DONE, &ctx_info->curr_state)) {
 		/* cq debug */
@@ -843,6 +882,10 @@ busy_wait:
 		 * it needs busy_wait handling.
 		 */
 		if (test_bit(CMDQ_STATE_PREV_DCMD, &ctx_info->curr_state)) {
+			if (test_bit(CMDQ_STATE_DO_RECOVERY, &ctx_info->curr_state)) {
+				err = -ETIMEDOUT;
+				goto  out;
+			}
 			if (cq_host->ops->busy_waiting) {
 				if (cq_host->ops->busy_waiting(cq_host->mmc, mrq) == false) {
 					goto busy_wait;
@@ -931,10 +974,21 @@ busy_wait:
 	else
 		exynos_ss_printk("[CQ] D: W, tag %d\n", tag);
 #endif
+	spin_lock_irqsave(&cq_host->list_lock, flags);
+	if (test_bit(CMDQ_STATE_DO_RECOVERY, &ctx_info->curr_state)) {
+		err = -ETIMEDOUT;
+		spin_unlock_irqrestore(&cq_host->list_lock, flags);
+		goto  out;
+	}
+	list_add_tail(&mrq->cmdq_entry, &cq_host->active_mrq);
+	spin_unlock_irqrestore(&cq_host->list_lock, flags);
+
+	spin_lock_irqsave(&cq_host->lock, flags);
+	set_bit(tag, &ctx_info->curr_dbr);
+	spin_unlock_irqrestore(&cq_host->lock, flags);
 	cmdq_writel(cq_host, 1 << tag, CQTDBR);
 	/* Commit the doorbell write immediately */
 	wmb();
-
 out:
 	if (err) {
 		/* Error return */
@@ -947,12 +1001,72 @@ out:
 	return 0;
 }
 
+static void cmdq_clear_all_data(struct mmc_host *mmc)
+{
+	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
+	struct mmc_cmdq_context_info *ctx_info = &mmc->cmdq_ctx;
+	struct mmc_request *mrq_t;
+	struct mmc_request *mrq_n;
+	unsigned int tag = 0;
+	unsigned long flags;
+
+	if (list_empty(&cq_host->active_mrq))
+		return;
+
+	spin_lock_irqsave(&cq_host->list_lock, flags);
+	set_bit(CMDQ_STATE_DO_RECOVERY, &ctx_info->curr_state);
+	list_for_each_entry_safe(mrq_t, mrq_n, &cq_host->active_mrq, cmdq_entry) {
+		list_del(&mrq_t->cmdq_entry);
+
+		if (mrq_t->cmdq_req->cmdq_req_flags & DCMD)
+			tag = DCMD_SLOT;
+		else
+			tag = mrq_t->cmdq_req->tag;
+
+		pr_err("[CQ] %s: clear pending tag : %d\n",
+				mmc_hostname(mmc), tag);
+
+		if (mrq_t->cmd)
+			mrq_t->cmd->error = -ETIMEDOUT;
+		else
+			mrq_t->data->error = -ETIMEDOUT;
+
+		if (tag == cq_host->dcmd_slot)
+			set_bit(CMDQ_STATE_PREV_DCMD, &ctx_info->curr_state);
+#if defined(CONFIG_MMC_DW_DEBUG)
+		if (cq_host->ops->cmdq_log) {
+			struct cmdq_log_ctx log_ctx;
+			u32 dbr = cmdq_readl(cq_host, CQTDBR);
+
+			log_ctx.x0 = tag;
+			log_ctx.x1 = dbr;
+
+			if (cq_host->cmd_log_idx[tag] != 0xDEADBEAF) {
+				log_ctx.idx = cq_host->cmd_log_idx[tag];
+				cq_host->ops->cmdq_log(cq_host->mmc, false, &log_ctx);
+			} else {
+				WARN_ON(1);
+			}
+			cq_host->cmd_log_idx[tag] = 0xDEADBEAF;
+		}
+#endif
+		mrq_t->done(mrq_t);
+	}
+	spin_unlock_irqrestore(&cq_host->list_lock, flags);
+}
+
 static void cmdq_finish_data(struct mmc_host *mmc, unsigned int tag)
 {
 	struct mmc_request *mrq;
 	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
 	struct mmc_cmdq_context_info *ctx_info = &mmc->cmdq_ctx;
 	u32 dbr = cmdq_readl(cq_host, CQTDBR);
+	unsigned long flags;
+
+	if (test_bit(CMDQ_STATE_ERR, &ctx_info->curr_state)) {
+		pr_err("[CQ] %s: err state is request ignored!\n", mmc_hostname(mmc));
+		return;
+	}
 
 	mrq = get_req_by_tag(cq_host, tag);
 	if (tag == cq_host->dcmd_slot) {
@@ -960,6 +1074,12 @@ static void cmdq_finish_data(struct mmc_host *mmc, unsigned int tag)
 		set_bit(CMDQ_STATE_PREV_DCMD, &ctx_info->curr_state);
 	}
 
+	spin_lock_irqsave(&cq_host->list_lock, flags);
+	if (!list_empty(&cq_host->active_mrq))
+		list_del(&mrq->cmdq_entry);
+	spin_unlock_irqrestore(&cq_host->list_lock, flags);
+
+	clear_bit(tag, &ctx_info->curr_dbr);
 #if defined(CONFIG_MMC_DW_DEBUG)
 	if (cq_host->ops->cmdq_log) {
 		struct cmdq_log_ctx log_ctx;
@@ -983,6 +1103,20 @@ static void cmdq_finish_data(struct mmc_host *mmc, unsigned int tag)
 #endif
 	cmdq_runtime_pm_put(cq_host);
 	mrq->done(mrq);
+	spin_lock_irqsave(&cq_host->lock, flags);
+	if (!(ctx_info->curr_dbr) &&
+		!(ctx_info->active_reqs & ~(1<<mrq->req->tag))) {
+		spin_unlock_irqrestore(&cq_host->lock, flags);
+
+		if (cq_host->ops->hwacg_control_direct)
+			cq_host->ops->hwacg_control_direct(mmc, false);
+		if (cq_host->ops->pm_qos_lock)
+			cq_host->ops->pm_qos_lock(mmc, false);
+		if (cq_host->ops->sicd_control)
+			cq_host->ops->sicd_control(mmc, false);
+	} else {
+		spin_unlock_irqrestore(&cq_host->lock, flags);
+	}
 }
 
 irqreturn_t cmdq_irq(struct mmc_host *mmc, int err)
@@ -1000,6 +1134,11 @@ irqreturn_t cmdq_irq(struct mmc_host *mmc, int err)
 	if (!status && !err)
 		return IRQ_NONE;
 
+	if (test_bit(CMDQ_STATE_DO_RECOVERY, &ctx_info->curr_state)) {
+		pr_err("%s: err: %d CQIS: %08x Ignore Interrupt In Recovery\n", mmc_hostname(mmc), err, status);
+		return IRQ_NONE;
+	}
+
 	/*
 	 * To stall IO thread
 	 */
@@ -1009,6 +1148,7 @@ irqreturn_t cmdq_irq(struct mmc_host *mmc, int err)
 
 	if (status & CQIS_BRE) {
 		pr_err("%s: err: %d CQIS: 0x%08x\n", mmc_hostname(mmc), err, status);
+		ctx_info->dump_state = CMDQ_DUMP_CQIS_BRE;
 		cmdq_dumpregs(cq_host);
 	}
 
@@ -1020,21 +1160,47 @@ irqreturn_t cmdq_irq(struct mmc_host *mmc, int err)
 		if (err_info & CQ_RMEFV) {
 			tag = GET_CMD_ERR_TAG(err_info);
 			pr_err("%s: %s: CMD err tag: %lu\n", mmc_hostname(mmc), __func__, tag);
+			if (!(test_bit(tag, &ctx_info->curr_dbr))) {
+				pr_err("%s: %s: Invailed tag:%lu interrupt!\n",
+						mmc_hostname(mmc), __func__, tag);
+				ctx_info->dump_state = CMDQ_DUMP_CQIS_INV_TAG;
+				cmdq_dumpregs(cq_host);
+				cmdq_clear_all_data(mmc);
+				return IRQ_NONE;
+			}
+
 			/* CMD44/45/46/47 will not have a valid cmd */
 			mrq = get_req_by_tag(cq_host, tag);
 			if (mrq->cmd)
 				mrq->cmd->error = err;
 			else
 				mrq->data->error = err;
+
+			ctx_info->dump_state = CMDQ_DUMP_CQIS_RMEFV;
+			cmdq_dumpregs(cq_host);
 		} else if (err_info & CQ_DTEFV) {
 			tag = GET_DAT_ERR_TAG(err_info);
 			pr_err("%s: %s: Dat err tag: %lu\n", mmc_hostname(mmc), __func__, tag);
+			if (!(test_bit(tag, &ctx_info->curr_dbr))) {
+				pr_err("%s: %s: Invailed tag:%lu interrupt!\n",
+						mmc_hostname(mmc), __func__, tag);
+				ctx_info->dump_state = CMDQ_DUMP_CQIS_INV_TAG;
+				cmdq_dumpregs(cq_host);
+				cmdq_clear_all_data(mmc);
+				return IRQ_NONE;
+			}
+
 			mrq = get_req_by_tag(cq_host, tag);
 			mrq->data->error = err;
+			ctx_info->dump_state = CMDQ_DUMP_CQIS_DTEFV;
+			cmdq_dumpregs(cq_host);
 		} else {
 			pr_err("%s: Incorrect RED interrupt occurred\n",
 						mmc_hostname(mmc));
+
+			ctx_info->dump_state = CMDQ_DUMP_CQIS_INV_RED;
 			cmdq_dumpregs(cq_host);
+			cmdq_clear_all_data(mmc);
 			return IRQ_NONE;
 		}
 
@@ -1046,11 +1212,12 @@ irqreturn_t cmdq_irq(struct mmc_host *mmc, int err)
 			mrq->cmdq_req->resp_err = true;
 			pr_err("%s: Response error (0x%08x) from card !!!",
 					mmc_hostname(mmc), status);
+			ctx_info->dump_state = CMDQ_DUMP_CQIS_RED;
+			cmdq_dumpregs(cq_host);
 		} else {
 			mrq->cmdq_req->resp_idx = cmdq_readl(cq_host, CQCRI);
 			mrq->cmdq_req->resp_arg = cmdq_readl(cq_host, CQCRA);
 		}
-		cmdq_dumpregs(cq_host);
 
 		mmc->err_mrq = mrq;
 		cmdq_finish_data(mmc, tag);
@@ -1085,7 +1252,8 @@ irqreturn_t cmdq_irq(struct mmc_host *mmc, int err)
 			/* complete the corresponding mrq */
 			pr_debug("%s: completing tag -> %lu\n",
 				mmc_hostname(mmc), tag);
-			cmdq_finish_data(mmc, tag);
+			if (!err)
+				cmdq_finish_data(mmc, tag);
 		}
 	}
 
@@ -1246,15 +1414,6 @@ static void cmdq_post_req(struct mmc_host *host, struct mmc_request *mrq,
 		else
 			data->bytes_xfered = blk_rq_bytes(mrq->req);
 	}
-
-	if (cmdq_readl(cq_host, CQTDBR) == 0) {
-		if (cq_host->ops->hwacg_control)
-			cq_host->ops->hwacg_control(host, false);
-		if (cq_host->ops->pm_qos_lock)
-			cq_host->ops->pm_qos_lock(host, false);
-		if (cq_host->ops->sicd_control)
-			cq_host->ops->sicd_control(host, false);
-	}
 }
 
 static void cmdq_dumpstate(struct mmc_host *mmc)
@@ -1273,6 +1432,7 @@ static const struct mmc_cmdq_host_ops cmdq_host_ops = {
 	.halt = cmdq_halt,
 	.reset	= cmdq_reset,
 	.dumpstate = cmdq_dumpstate,
+	.pclear = cmdq_clear_all_data,
 };
 
 struct cmdq_host *cmdq_pltfm_init(struct platform_device *pdev)
@@ -1310,6 +1470,9 @@ EXPORT_SYMBOL(cmdq_pltfm_init);
 int cmdq_init(struct cmdq_host *cq_host, struct mmc_host *mmc,
 	      bool dma64)
 {
+
+	struct cmdq_sfr_ramdump		*dump;
+	struct mmc_cmdq_context_info *ctx_info = &mmc->cmdq_ctx;
 	int err = 0;
 
 	cq_host->dma64 = dma64;
@@ -1323,19 +1486,42 @@ int cmdq_init(struct cmdq_host *cq_host, struct mmc_host *mmc,
 
 	cq_host->mrq_slot = kzalloc(sizeof(cq_host->mrq_slot) *
 				    cq_host->num_slots, GFP_KERNEL);
+
 	if (!cq_host->mrq_slot)
 		return -ENOMEM;
 
+	dump = kzalloc(sizeof(*dump), GFP_KERNEL);
+	if (!dump)
+		return -ENOMEM;
+
+	cq_host->cq_dump = dump;
 	cq_host->halt_failed = false;
 	cq_host->sw_reset = false;
 	cq_host->cnt_recovery = 0;
 	cq_host->cnt_recovery_halt_pass = 0;
 	cq_host->cnt_recovery_halt_fail = 0;
 
+	ctx_info->dump_state = CMDQ_DUMP_NONE_ERR;
+
 	init_completion(&cq_host->halt_comp);
+
+	spin_lock_init(&cq_host->lock);
+	spin_lock_init(&cq_host->list_lock);
+	INIT_LIST_HEAD(&cq_host->active_mrq);
 #if CQ_DBG
 	tcc_miss_period = 0;
 #endif
 	return err;
 }
 EXPORT_SYMBOL(cmdq_init);
+
+
+int cmdq_free(struct cmdq_host *cq_host)
+{
+	if (cq_host->mrq_slot)
+		kzfree(cq_host->mrq_slot);
+	if (cq_host->cq_dump)
+		kzfree(cq_host->cq_dump);
+	return 0;
+}
+EXPORT_SYMBOL(cmdq_free);

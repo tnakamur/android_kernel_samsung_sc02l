@@ -31,6 +31,9 @@
 #include <linux/string.h>
 
 #include <linux/muic/muic.h>
+#if IS_ENABLED(CONFIG_HICCUP_CHARGER)
+#include <linux/sec_batt.h>
+#endif
 
 #if defined(CONFIG_MUIC_NOTIFIER)
 #include <linux/muic/muic_notifier.h>
@@ -165,7 +168,7 @@ int regmap_com_to(struct regmap_desc *pdesc, int port)
 	int uattr, ret;
 
 #if IS_ENABLED(CONFIG_HICCUP_CHARGER)
-	if (pdesc->muic->is_hiccup_mode)
+	if (!lpcharge && pdesc->muic->is_hiccup_mode)
 		port = GND_PATH;
 #endif
 	pops->ioctl(pdesc, GET_COM_VAL, &port, &uattr);

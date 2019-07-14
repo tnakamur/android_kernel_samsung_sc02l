@@ -56,42 +56,25 @@ static u32 sensor_imx258_init_setfile_Image_size;
 
 static const u32 **sensor_imx258_setfiles;
 static const u32 *sensor_imx258_setfile_sizes;
-static const struct sensor_pll_info **sensor_imx258_pllinfos;
+static const struct sensor_pll_info_compact **sensor_imx258_pllinfos;
 static u32 sensor_imx258_max_setfile_num;
 
-static void sensor_imx258_cis_data_calculation(const struct sensor_pll_info *pll_info, cis_shared_data *cis_data)
+static void sensor_imx258_cis_data_calculation(const struct sensor_pll_info_compact *pll_info, cis_shared_data *cis_data)
 {
-	u32 pll_voc_a = 0, vt_pix_clk_hz = 0;
+	u32 vt_pix_clk_hz = 0;
 	u32 frame_rate = 0, max_fps = 0, frame_valid_us = 0;
 
 	BUG_ON(!pll_info);
 
-	/* 1. mipi data rate calculation (Mbps/Lane) */
-	/* ToDo: using output Pixel Clock Divider Value */
-	/* pll_voc_b = pll_info->ext_clk / pll_info->secnd_pre_pll_clk_div * pll_info->secnd_pll_multiplier * 2;
-	op_sys_clk_hz = pll_voc_b / pll_info->op_sys_clk_div;
-	if(gpsSensorExInfo) {
-		gpsSensorExInfo->uiMIPISpeedBps = op_sys_clk_hz;
-		gpsSensorExInfo->uiMCLK = sensorInfo.ext_clk;
-	} */
+	/* 1. pixel rate calculation (Mpps) */ 
+	vt_pix_clk_hz = pll_info->pclk;
 
-	/* 2. pixel rate calculation (Mpps) */
-	pll_voc_a = pll_info->ext_clk / pll_info->pre_pll_clk_div * pll_info->pll_multiplier;
-	vt_pix_clk_hz = pll_voc_a /(pll_info->vt_sys_clk_div * pll_info->vt_pix_clk_div) * NUMBER_OF_PIPELINE;
-
-	dbg_sensor(1, "ext_clock(%d) / pre_pll_clk_div(%d) * pll_multiplier(%d) = pll_voc_a(%d)\n",
-						pll_info->ext_clk, pll_info->pre_pll_clk_div,
-						pll_info->pll_multiplier, pll_voc_a);
-	dbg_sensor(1, "pll_voc_a(%d) / (vt_sys_clk_div(%d) * vt_pix_clk_div(%d)) = pixel clock (%d hz)\n",
-						pll_voc_a, pll_info->vt_sys_clk_div,
-						pll_info->vt_pix_clk_div, vt_pix_clk_hz);
-
-	/* 3. the time of processing one frame calculation (us) */
+	/* 2. the time of processing one frame calculation (us) */
 	cis_data->min_frame_us_time = (pll_info->frame_length_lines * pll_info->line_length_pck
 					/ (vt_pix_clk_hz / (1000 * 1000)));
 	cis_data->cur_frame_us_time = cis_data->min_frame_us_time;
 
-	/* 4. FPS calculation */
+	/* 3. FPS calculation */
 	frame_rate = vt_pix_clk_hz / (pll_info->frame_length_lines * pll_info->line_length_pck);
 	dbg_sensor(1, "frame_rate (%d) = vt_pix_clk_hz(%d) / "
 		KERN_CONT "(pll_info->frame_length_lines(%d) * pll_info->line_length_pck(%d))\n",
@@ -516,7 +499,7 @@ int sensor_imx258_cis_stream_on(struct v4l2_subdev *subdev)
 
 #if 0
 	/* WDR */
-	if (cis_data->companion_data.enable_wdr == true)
+	if (cis_data->is_data.wdr_enable == true)
 		ret = fimc_is_sensor_write8(client, 0x0216, 0x01);
 	else
 		ret = fimc_is_sensor_write8(client, 0x0216, 0x00);
@@ -676,7 +659,7 @@ int sensor_imx258_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_pa
 
 #if 0
 	/* Long exposure */
-	if (cis_data->companion_data.enable_wdr == true) {
+	if (cis_data->is_data.wdr_enable == true) {
 		ret = fimc_is_sensor_write16(client, 0x021E, long_coarse_int);
 		if (ret < 0)
 			goto p_err;

@@ -81,6 +81,7 @@ typedef enum {
 	PDIC_NOTIFY_EVENT_PD_SINK,
 	PDIC_NOTIFY_EVENT_PD_SOURCE,
 	PDIC_NOTIFY_EVENT_PD_SINK_CAP,
+	PDIC_NOTIFY_EVENT_PD_PRSWAP_SNKTOSRC,
 } pdic_notifier_event_t;
 
 typedef struct _power_list {

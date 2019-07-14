@@ -201,6 +201,19 @@ static int vidioc_g_fmt_vid_cap_mplane(struct file *file, void *priv,
 		   rectangle. */
 		s5p_mfc_dec_calc_dpb_size(ctx);
 
+		/* If total memory requirement is too big for this device,
+		 * then it returns error.
+		 * 5: number of extra DPBs
+		 * 3: number of DPBs for Android framework
+		 * 600MB: being used to return an error,
+		 * when 8K resolution video clip is being tried to be decoded
+		 */
+		if ((ctx->raw_buf.total_plane_size * (ctx->dpb_count + 5 + 3)) > (600 * 1024 * 1024)) {
+			mfc_info_ctx("Total memory size is too big. width(%d), height(%d), dpb(%d)\n",
+					ctx->img_width, ctx->img_height, ctx->dpb_count);
+			return -EIO;
+		}
+
 		pix_mp->width = ctx->img_width;
 		pix_mp->height = ctx->img_height;
 		pix_mp->num_planes = ctx->dst_fmt->mem_planes;
@@ -1021,10 +1034,8 @@ static int vidioc_s_ctrl(struct file *file, void *priv,
 		mfc_err_dev("not supported CID: 0x%x\n",ctrl->id);
 		break;
 	case V4L2_CID_MPEG_VIDEO_QOS_RATIO:
-		if (ctrl->value > 150)
-			ctrl->value = 1000;
-		mfc_info_ctx("set %d qos_ratio.\n", ctrl->value);
 		ctx->qos_ratio = ctrl->value;
+		mfc_info_ctx("set %d qos_ratio.\n", ctrl->value);
 		break;
 	case V4L2_CID_MPEG_MFC_SET_DYNAMIC_DPB_MODE:
 		dec->is_dynamic_dpb = ctrl->value;

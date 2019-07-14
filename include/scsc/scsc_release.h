@@ -1,7 +1,6 @@
 /****************************************************************************
  *
-
- * Copyright (c) 2014 - 2018 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2014 - 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  *****************************************************************************/
 
@@ -11,10 +10,10 @@
 #define SCSC_RELEASE_SOLUTION "mx150"
 
 #define SCSC_RELEASE_PRODUCT 5
-#define SCSC_RELEASE_ITERATION 41
-#define SCSC_RELEASE_CANDIDATE 1
+#define SCSC_RELEASE_ITERATION 58
+#define SCSC_RELEASE_CANDIDATE 0
 
-#define SCSC_RELEASE_POINT 3
+#define SCSC_RELEASE_POINT 5
 
 #endif
 

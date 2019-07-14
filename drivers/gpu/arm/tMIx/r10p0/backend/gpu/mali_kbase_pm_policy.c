@@ -423,7 +423,6 @@ void kbase_pm_update_active(struct kbase_device *kbdev)
 				spin_unlock_irqrestore(&kbdev->hwaccess_lock,
 						flags);
 			} else {
-				
 				spin_unlock_irqrestore(&kbdev->hwaccess_lock,
 						flags);
 

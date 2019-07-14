@@ -81,7 +81,11 @@ SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
 #define TF98XX_MAX_DSP_START_TRY_COUNT	10
 
+#if !defined(USE_TFA9872)
+#undef TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE
+#else
 #define TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE
+#endif
 #define TFA_CHECK_CALIBRATE_DONE
 #define TFA_DBGFS_CHECK_MTPEX
 
@@ -609,6 +613,7 @@ static int tfa98xx_dbgfs_temp_set(void *data, u64 val)
 
 	return 0;
 }
+#endif /* CONFIG_DEBUG_FS */
 
 /*
  * calibration:
@@ -657,6 +662,7 @@ void tfa98xx_deferred_calibration_status(tfa98xx_handle_t handle,
 	}
 }
 
+#ifdef CONFIG_DEBUG_FS
 static ssize_t tfa98xx_dbgfs_start_get(struct file *file,
 	char __user *user_buf, size_t count, loff_t *ppos)
 {
@@ -959,6 +965,7 @@ r_c_err:
 	mutex_unlock(&tfa98xx->dsp_lock);
 	return ret;
 }
+#endif /* CONFIG_DEBUG_FS */
 
 enum tfa98xx_error
 tfa_run_calibrate(tfa98xx_handle_t handle, uint16_t *value)
@@ -968,21 +975,19 @@ tfa_run_calibrate(tfa98xx_handle_t handle, uint16_t *value)
 					  .dev_ops.controls.calib);
 	enum tfa98xx_error ret;
 	int spkr_count, i;
-#if defined(TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE)
 	u64 otc_val = 1;
 	int temp_val = 25;
-#endif
+	int is_cont_open = 0;
 
 	mutex_lock(&tfa98xx->dsp_lock);
-#if !defined(TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE)
-	/* Do not open/close tfa98xx: not required by tfa_calibrate */
-	ret = tfa_calibrate(tfa98xx->handle);
-#else
-	ret = tfa98xx_open(tfa98xx->handle);
-	if (ret) {
-		mutex_unlock(&tfa98xx->dsp_lock);
-		pr_info("cannot open handle (%d)\n", ret);
-		return -EBUSY;
+
+	is_cont_open = tfa98xx_handle_is_open(tfa98xx->handle);
+	if (!is_cont_open) {
+		ret = tfa98xx_open(tfa98xx->handle);
+		if (ret) {
+			mutex_unlock(&tfa98xx->dsp_lock);
+			return -EBUSY;
+		}
 	}
 
 	/* OTC <0:always 1:once> */
@@ -992,11 +997,6 @@ tfa_run_calibrate(tfa98xx_handle_t handle, uint16_t *value)
 		TFA98XX_KEY2_PROTECTED_MTP0_MTPOTC_MSK);
 	if (ret)
 		pr_info("setting OTC failed (%d)\n", ret);
-	/* MTPEX <reset to force to calibrate> */
-	ret = tfa98xx_set_mtp(tfa98xx->handle, 0,
-		TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_MSK);
-	if (ret)
-		pr_info("resetting MTPEX failed (%d)\n", ret);
 
 	/* EXT_TEMP */
 #if defined(TFA_READ_BATTERY_TEMP)
@@ -1014,44 +1014,50 @@ tfa_run_calibrate(tfa98xx_handle_t handle, uint16_t *value)
 		handles_local[tfa98xx->handle].temp = temp_val;
 	}
 
+#if !defined(TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE)
+	/* Do not open/close tfa98xx: not required by tfa_calibrate */
+	ret = tfa_calibrate(tfa98xx->handle);
+
+	if (!is_cont_open)
+		tfa98xx_close(tfa98xx->handle);
+
+	if (ret == TFA98XX_ERROR_OK) {
+		ret = tfa98xx_tfa_start(tfa98xx,
+			tfa98xx_profile, tfa98xx_vsteps);
+	}
+#else
+	/* MTPEX <reset to force to calibrate> */
+	ret = tfa98xx_set_mtp(tfa98xx->handle, 0,
+		TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_MSK);
+	if (ret)
+		pr_info("resetting MTPEX failed (%d)\n", ret);
+
 	/* run calibration */
 	ret = tfa_tfadsp_calibrate(tfa98xx->handle);
 
-	tfa98xx_close(tfa98xx->handle);
+	if (!is_cont_open)
+		ret = tfa98xx_close(tfa98xx->handle);
 #endif /* TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE */
+
 	mutex_unlock(&tfa98xx->dsp_lock);
 
-#if !defined(TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE)
+#if defined(TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE)
+	calib->wr_value = false; /* calibration over */
+#endif
 	if (ret) {
 		pr_info("[0x%x] Calibration start failed (%d), deferring...\n",
 			tfa98xx->i2c->addr, ret);
 		calib->triggered = true;
-	} else {
-		pr_info("[0x%x] Calibration started\n", tfa98xx->i2c->addr);
-	}
-#else
-	if (ret) {
-		pr_info("[0x%x] Calibration failed (%d), deferring...\n",
-			tfa98xx->i2c->addr, ret);
-		calib->triggered = true;
 		tfa98xx->calibrate_done = 0;
-		calib->wr_value = false; /* calibration over */
 		calib->rd_valid = true; /* result available */
 		calib->rd_value = false; /* result not valid */
 	} else {
-		pr_info("[0x%x] Calibration succeeded\n", tfa98xx->i2c->addr);
+		pr_info("[0x%x] Calibration started\n", tfa98xx->i2c->addr);
+		calib->triggered = false;
 		tfa98xx->calibrate_done = 1;
-		calib->wr_value = false; /* calibration over */
 		calib->rd_valid = true; /* result available */
 		calib->rd_value = true; /* result valid */
 	}
-#endif
-
-#if !defined(TFA_FORCE_TO_WAIT_UNTIL_CALIBRATE)
-	calib->wr_value = true;  /* request was triggered from here */
-	calib->rd_valid = false; /* result not available */
-	calib->rd_value = false; /* result not valid (default) */
-#endif
 
 	if (value != NULL)
 		if ((calib->wr_value == false && calib->rd_valid == true)
@@ -1178,6 +1184,7 @@ static enum tfa98xx_error tfa98xx_read_battery_temp(int *value)
 }
 #endif /* TFA_READ_BATTERY_TEMP */
 
+#ifdef CONFIG_DEBUG_FS
 static ssize_t tfa98xx_dbgfs_version_read(struct file *file,
 	char __user *user_buf, size_t count, loff_t *ppos)
 {
@@ -1741,7 +1748,7 @@ static void tfa98xx_debug_remove(struct tfa98xx *tfa98xx)
 {
 	debugfs_remove_recursive(tfa98xx->dbg_dir);
 }
-#endif
+#endif /* CONFIG_DEBUG_FS */
 
 static int tfa98xx_get_vstep(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -1958,7 +1965,7 @@ static int get_profile_from_list(char *buf, int id)
 
 	list_for_each_entry(bprof, &profile_list, list) {
 		if (bprof->item_id == id) {
-			strlcpy(buf, bprof->basename, bprof->len);
+			strlcpy(buf, bprof->basename, MAX_CONTROL_NAME);
 			return 0;
 		}
 	}
@@ -2081,7 +2088,7 @@ static int tfa98xx_info_profile(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 
 	strlcpy(uinfo->value.enumerated.name,
-		profile_name, strlen(profile_name));
+		profile_name, MAX_CONTROL_NAME);
 
 	return 0;
 }
@@ -3163,13 +3170,13 @@ tfa98xx_container_loaded(const struct firmware *cont,	void *context)
 
 	tfa98xx_inputdev_check_register(tfa98xx);
 
+#if defined(TFA_TEST_STARTING_AT_PROBING)
 	if (tfa_is_cold(tfa98xx->handle) == 0) {
-		pr_debug("Warning: device 0x%.2x is still warm\n",
+		pr_info("Warning: device 0x%.2x is still warm\n",
 			tfa98xx->i2c->addr);
 		tfa_reset();
 	}
 
-#if !defined(TFA_ACTIVATED_ASYNCHRONOUSLY)
 	if (tfa98xx->handle == 0) {
 		mutex_lock(&tfa98xx->dsp_lock);
 		tfa_err = tfa98xx_tfa_start
@@ -3178,6 +3185,33 @@ tfa98xx_container_loaded(const struct firmware *cont,	void *context)
 			tfa98xx->dsp_init = TFA98XX_DSP_INIT_DONE;
 		else if ((int)tfa_err == TFA98XX_ERROR_NOT_SUPPORTED)
 			tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_FAIL;
+		mutex_unlock(&tfa98xx->dsp_lock);
+	}
+#else
+#if defined(USE_TFA9872)
+	if (tfa98xx->handle == 0)
+#endif
+	{
+		enum tfa98xx_error err;
+		int is_cont_open = 0;
+
+		mutex_lock(&tfa98xx->dsp_lock);
+		is_cont_open = tfa98xx_handle_is_open(tfa98xx->handle);
+		if (!is_cont_open) {
+			err = tfa_cont_open(tfa98xx->handle);
+			if (err != TFA98XX_ERROR_OK)
+				return;
+		}
+		err = tfa_load_cnt_regs
+			(tfa98xx->handle, tfa98xx_profile);
+		if (err == TFA98XX_ERROR_OK)
+			pr_info("succeeded in loading regs on device 0x%.2x\n",
+				tfa98xx->i2c->addr);
+		else
+			pr_info("Warning: failed in loading regs on device 0x%.2x\n",
+				tfa98xx->i2c->addr);
+		if (!is_cont_open)
+			err = tfa_cont_close(tfa98xx->handle);
 		mutex_unlock(&tfa98xx->dsp_lock);
 	}
 #endif

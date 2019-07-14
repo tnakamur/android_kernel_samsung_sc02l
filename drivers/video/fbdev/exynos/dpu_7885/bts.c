@@ -209,6 +209,26 @@ void dpu_bts_update_bw(struct decon_device *decon, struct decon_reg_data *regs,
 	DPU_DEBUG_BTS("%s -\n", __func__);
 }
 
+void dpu_bts_update_qos_mif(struct decon_device *decon, u32 mif_freq)
+{
+	if (pm_qos_request_active(&decon->bts.mif_qos))
+		pm_qos_update_request(&decon->bts.mif_qos, mif_freq);
+	else
+		decon_err("%s: error (%d)\n", __func__, decon->id);
+
+	DPU_INFO_BTS("%s: decon%d, mif_freq(Khz): %u\n", __func__, decon->id, mif_freq);
+}
+
+void dpu_bts_update_qos_int(struct decon_device *decon, u32 int_freq)
+{
+	if (pm_qos_request_active(&decon->bts.int_qos))
+		pm_qos_update_request(&decon->bts.int_qos, int_freq);
+	else
+		decon_err("%s: error (%d)\n", __func__, decon->id);
+
+	DPU_INFO_BTS("%s: decon%d, int_freq(Khz): %u\n", __func__, decon->id, int_freq);
+}
+
 void dpu_bts_update_qos_disp(struct decon_device *decon, u32 disp_freq)
 {
 	if (pm_qos_request_active(&decon->bts.disp_qos)) {
@@ -261,8 +281,9 @@ void dpu_bts_init(struct decon_device *decon)
 	DPU_DEBUG_BTS("[Init: D%d] resol clock = %d Khz\n",
 		decon->id, decon->bts.resol_clk);
 
+	pm_qos_add_request(&decon->bts.mif_qos, PM_QOS_BUS_THROUGHPUT, 0);
+	pm_qos_add_request(&decon->bts.int_qos, PM_QOS_DEVICE_THROUGHPUT, 0);
 	pm_qos_add_request(&decon->bts.disp_qos, PM_QOS_DISPLAY_THROUGHPUT, 0);
-
 	decon->bts.disp_freq_minlock = 0;
 }
 
@@ -270,6 +291,8 @@ void dpu_bts_deinit(struct decon_device *decon)
 {
 	DPU_DEBUG_BTS("%s +\n", __func__);
 	pm_qos_remove_request(&decon->bts.disp_qos);
+	pm_qos_remove_request(&decon->bts.int_qos);
+	pm_qos_remove_request(&decon->bts.mif_qos);
 	DPU_DEBUG_BTS("%s -\n", __func__);
 }
 
@@ -278,6 +301,8 @@ struct decon_bts_ops decon_bts_control = {
 	.bts_calc_bw		= dpu_bts_calc_bw,
 	.bts_update_bw		= dpu_bts_update_bw,
 	.bts_release_bw		= dpu_bts_release_bw,
+	.bts_update_qos_mif	= dpu_bts_update_qos_mif,
+	.bts_update_qos_int	= dpu_bts_update_qos_int,
 	.bts_update_qos_disp	= dpu_bts_update_qos_disp,
 	.bts_deinit		= dpu_bts_deinit,
 };

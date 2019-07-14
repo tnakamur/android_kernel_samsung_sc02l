@@ -252,6 +252,12 @@ struct hip4_priv {
 	int                          guard;
 	/* Global domain Q spinlock */
 	spinlock_t                   gbot_lock;
+
+	/* Collection artificats */
+	void                         *mib_collect;
+	u16                          mib_sz;
+	/* Mutex to protect hcf file collection if a tear down is triggered */
+	struct mutex                 in_collection;
 };
 
 struct scsc_service;
@@ -269,6 +275,7 @@ void hip4_suspend(struct slsi_hip4 *hip);
 void hip4_resume(struct slsi_hip4 *hip);
 void hip4_freeze(struct slsi_hip4 *hip);
 void hip4_deinit(struct slsi_hip4 *hip);
+int hip4_free_ctrl_slots_count(struct slsi_hip4 *hip);
 
 int scsc_wifi_transmit_frame(struct slsi_hip4 *hip, bool ctrl_packet, struct sk_buff *skb);
 

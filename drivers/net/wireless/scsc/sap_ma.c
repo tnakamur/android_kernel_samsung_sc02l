@@ -175,7 +175,7 @@ static int slsi_rx_amsdu_deaggregate(struct net_device *dev, struct sk_buff *skb
 
 		/* Prepare the skb */
 		subframe->dev = dev;
-		subframe->ip_summed = CHECKSUM_UNNECESSARY;
+		subframe->ip_summed = CHECKSUM_NONE;
 		ndev_vif->stats.rx_bytes += subframe->len;
 		ndev_vif->stats.rx_packets++;
 		ndev_vif->rx_packets[trafic_q]++;
@@ -267,10 +267,8 @@ static int slsi_rx_data_process_skb(struct slsi_dev *sdev, struct net_device *de
 			if (peer)
 				peer->sinfo.rx_dropped_misc++;
 		} else {
-			if (peer) {
-				peer->sinfo.rx_packets++;
+			if (peer)
 				ndev_vif->rx_packets[trafic_q]++;
-			}
 			slsi_wakelock_timeout(&sdev->wlan_wl_to, SLSI_RX_WAKELOCK_TIME);
 		}
 		return 1;
@@ -280,7 +278,7 @@ static int slsi_rx_data_process_skb(struct slsi_dev *sdev, struct net_device *de
 	skb_pull(skb, fapi_get_siglen(skb));
 
 	skb->dev = dev;
-	skb->ip_summed = CHECKSUM_UNNECESSARY;
+	skb->ip_summed = CHECKSUM_NONE;
 
 	/* In STA mode, the AP relays back our multicast traffic.
 	 * Receiving these frames and passing it up confuses some
@@ -302,10 +300,8 @@ static int slsi_rx_data_process_skb(struct slsi_dev *sdev, struct net_device *de
 		}
 	}
 
-	if (peer) {
-		peer->sinfo.rx_packets++;
+	if (peer)
 		peer->sinfo.rx_bytes += skb->len;
-	}
 
 	ndev_vif->stats.rx_packets++;
 	ndev_vif->stats.rx_bytes += skb->len;
@@ -426,6 +422,7 @@ void slsi_rx_netdev_data_work(struct work_struct *work)
 			SLSI_MUTEX_UNLOCK(ndev_vif->vif_mutex);
 			break;
 		}
+
 		slsi_debug_frame(sdev, dev, skb, "RX");
 		switch (fapi_get_u16(skb, id)) {
 		case MA_UNITDATA_IND:

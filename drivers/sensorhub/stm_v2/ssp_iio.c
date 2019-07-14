@@ -54,6 +54,10 @@ static void init_sensorlist(struct ssp_data *data)
 		SENSOR_INFO_SCONTEXT,
 		SENSOR_INFO_UNKNOWN,
 		SENSOR_INFO_LIGHT_CCT,
+#if ANDROID_VERSION >= 90000
+		SENSOR_INFO_UNKNOWN,
+		SENSOR_INFO_WAKE_UP_MOTION,
+#endif
 #endif
 	};
 

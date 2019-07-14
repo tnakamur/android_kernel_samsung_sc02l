@@ -415,11 +415,13 @@ void DPU_EVENT_LOG_CMD(struct v4l2_subdev *sd, u32 cmd_id, unsigned long data, u
 	log->type = DPU_EVT_DSIM_COMMAND;
 	log->data.cmd_buf.id = cmd_id;
 	log->data.cmd_buf.size = size;
-	if (cmd_id == MIPI_DSI_DCS_LONG_WRITE)
+	log->data.cmd_buf.line_cnt = dsim->line_cnt;
+	if (cmd_id == MIPI_DSI_DCS_LONG_WRITE) {
 		log->data.cmd_buf.buf = *(u8 *)(data);
-	else
+		log->data.cmd_buf.pl_cnt = dsim->pl_cnt;
+	} else {
 		log->data.cmd_buf.buf = (u8)data;
-
+	}
 	for (i = 0; i < DPU_CALLSTACK_MAX; i++)
 		log->data.cmd_buf.caller[i] = (void *)((size_t)return_address(i + 1));
 }
@@ -517,9 +519,11 @@ void DPU_EVENT_SHOW(struct seq_file *s, struct decon_device *decon)
 			break;
 		case DPU_EVT_DSIM_COMMAND:
 			seq_printf(s, "%20s  ", "DSIM_COMMAND");
-			seq_printf(s, "id=0x%x, command=0x%x\n",
+			seq_printf(s, "line_cnt=%d, id=0x%x, command=0x%x, pl_cnt=0x%x\n",
+					log->data.cmd_buf.line_cnt,
 					log->data.cmd_buf.id,
-					log->data.cmd_buf.buf);
+					log->data.cmd_buf.buf,
+					log->data.cmd_buf.pl_cnt);
 			break;
 		case DPU_EVT_TRIG_MASK:
 			seq_printf(s, "%20s  %20s", "TRIG_MASK", "-\n");

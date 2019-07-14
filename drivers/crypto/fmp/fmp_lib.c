@@ -215,7 +215,6 @@ int fmplib_clear_disk_key(struct exynos_fmp *fmp)
 		ret = -EINVAL;
 		goto err;
 	}
-
 	ret = exynos_smc(SMC_CMD_FMP_DISK_KEY_CLEAR, 0, 0, 0);
 	if (ret) {
 		dev_err(fmp->dev, "%s: Fail to clear FMP disk key. ret = %d\n",
@@ -224,7 +223,6 @@ int fmplib_clear_disk_key(struct exynos_fmp *fmp)
 		ret = -EPERM;
 		goto err;
 	}
-
 	fmp->status_disk_key = KEY_CLEAR;
 err:
 	return ret;

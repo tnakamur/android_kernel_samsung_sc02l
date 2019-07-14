@@ -10,10 +10,12 @@
 
 #ifdef CONFIG_ARM_EXYNOS_ACME
 extern unsigned int exynos_cpufreq_get_max_freq(struct cpumask *mask);
+extern void exynos_cpufreq_reset_boot_qos(void);
 #else
 static inline unsigned int exynos_cpufreq_get_max_freq(struct cpumask *mask)
 {
 	return 0;
 }
+static inline void exynos_cpufreq_reset_boot_qos(void) {}
 #endif
 

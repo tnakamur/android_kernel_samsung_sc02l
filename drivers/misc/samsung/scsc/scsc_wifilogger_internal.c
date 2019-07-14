@@ -226,7 +226,7 @@ void scsc_wifilogger_destroy(void)
 		}
 	}
 	wl->features_mask = 0;
-	kfree(wl);
 	mutex_unlock(&wl->lock);
+	kfree(wl);
 	wifi_logger = NULL;
 }

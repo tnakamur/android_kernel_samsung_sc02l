@@ -23,7 +23,7 @@
 #include <asm/processor.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
-#ifndef CONFIG_UH_RKP
+#ifdef CONFIG_UH_RKP
 #include <linux/rkp.h>
 #endif
 
@@ -71,18 +71,27 @@ static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 	if (boot_mode_security)
 #endif
 		rkp_do = 1;
-	if (rkp_do && (unsigned long)pmd >= (unsigned long)RKP_RBUF_VA &&
-		(unsigned long)pmd < ((unsigned long)RKP_RBUF_VA + RKP_ROBUF_SIZE))
+	if (rkp_do && is_rkp_ro_page((u64)pmd))
 		rkp_ro_free((void*)pmd);
 	else
 		free_page((unsigned long)pmd);
 }
 #endif
-static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
+
+static inline void __pud_populate(pud_t *pud, phys_addr_t pmd, pudval_t prot)
 {
-	set_pud(pud, __pud(__pa(pmd) | PMD_TYPE_TABLE));
+	set_pud(pud, __pud(pmd | prot));
 }
 
+static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
+{
+	__pud_populate(pud, __pa(pmd), PMD_TYPE_TABLE);
+}
+#else
+static inline void __pud_populate(pud_t *pud, phys_addr_t pmd, pudval_t prot)
+{
+	BUILD_BUG();
+}
 #endif	/* CONFIG_PGTABLE_LEVELS > 2 */
 
 #if CONFIG_PGTABLE_LEVELS > 3
@@ -124,18 +133,27 @@ static inline void pud_free(struct mm_struct *mm, pud_t *pud)
 		rkp_do = 1;
 	BUG_ON((unsigned long)pud & (PAGE_SIZE-1));
 
-	if (rkp_do && (unsigned long)pud >= (unsigned long)RKP_RBUF_VA &&
-		(unsigned long)pud < ((unsigned long)RKP_RBUF_VA + RKP_ROBUF_SIZE))
+	if (rkp_do && is_rkp_ro_page((u64)pmd))
 		rkp_ro_free((void*)pud);
 	else
 		free_page((unsigned long)pud);
 }
 #endif
-static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgd, pud_t *pud)
+
+static inline void __pgd_populate(pgd_t *pgdp, phys_addr_t pud, pgdval_t prot)
 {
-	set_pgd(pgd, __pgd(__pa(pud) | PUD_TYPE_TABLE));
+	set_pgd(pgdp, __pgd(pud | prot));
 }
 
+static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgd, pud_t *pud)
+{
+	__pgd_populate(pgd, __pa(pud), PUD_TYPE_TABLE);
+}
+#else
+static inline void __pgd_populate(pgd_t *pgdp, phys_addr_t pud, pgdval_t prot)
+{
+	BUILD_BUG();
+}
 #endif	/* CONFIG_PGTABLE_LEVELS > 3 */
 
 extern pgd_t *pgd_alloc(struct mm_struct *mm);
@@ -144,6 +162,15 @@ extern void pgd_free(struct mm_struct *mm, pgd_t *pgd);
 static inline pte_t *
 pte_alloc_one_kernel(struct mm_struct *mm, unsigned long addr)
 {
+#ifdef CONFIG_UH_RKP
+	int rkp_do = 0;
+#ifdef CONFIG_KNOX_KAP
+	if (boot_mode_security)
+#endif
+		rkp_do = 1;
+	if (rkp_do && addr_rkp_ro(addr))
+		return (pte_t *)rkp_ro_alloc();
+#endif
 	return (pte_t *)__get_free_page(PGALLOC_GFP);
 }
 

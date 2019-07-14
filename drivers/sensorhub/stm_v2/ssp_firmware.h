@@ -18,7 +18,9 @@
 
 #include "ssp.h"
 
-#if ANDROID_VERSION >= 80000
+#if ANDROID_VERSION >= 90000
+#define SSP_FIRMWARE_REVISION_STM       19010800
+#elif ANDROID_VERSION >= 80000
 #define SSP_FIRMWARE_REVISION_STM       18120500
 #else
 #define SSP_FIRMWARE_REVISION_STM       18061200
@@ -31,7 +33,10 @@
 #define NORM_SPI_HZ                     4800000
 
 /* Bootload mode cmd */
-#if ANDROID_VERSION >= 80000
+#if ANDROID_VERSION >= 90000
+#define BL_FW_NAME                      "ssp_stmf410_a2018_P.fw"
+#define BL_UMS_FW_NAME                  "ssp_stmf410_a2018_P.bin"
+#elif ANDROID_VERSION >= 80000
 #define BL_FW_NAME                      "ssp_stmf410_a2018_O.fw"
 #define BL_UMS_FW_NAME                  "ssp_stmf410_a2018_O.bin"
 #else

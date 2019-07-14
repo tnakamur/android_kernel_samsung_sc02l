@@ -456,7 +456,7 @@ int gfspi_get_gpio_dts_info(struct device *dev, struct gf_device *gf_dev)
 		goto fail_pinctrl_get;
 	}
 
-#ifndef ENABLE_SENSORS_FPRINT_SECURE
+#if !defined(ENABLE_SENSORS_FPRINT_SECURE) || defined(DISABLED_GPIO_PROTECTION)
 	gf_dev->pins_poweroff = pinctrl_lookup_state(gf_dev->p, "pins_poweroff");
 #else
 	gf_dev->pins_poweroff = pinctrl_lookup_state(gf_dev->p, "pins_poweroff_tz");
@@ -469,7 +469,7 @@ int gfspi_get_gpio_dts_info(struct device *dev, struct gf_device *gf_dev)
 		goto fail_pinctrl_get;
 	}
 
-#ifndef ENABLE_SENSORS_FPRINT_SECURE
+#if !defined(ENABLE_SENSORS_FPRINT_SECURE) || defined(DISABLED_GPIO_PROTECTION)
 	gf_dev->pins_poweron = pinctrl_lookup_state(gf_dev->p, "pins_poweron");
 #else
 	gf_dev->pins_poweron = pinctrl_lookup_state(gf_dev->p, "pins_poweron_tz");

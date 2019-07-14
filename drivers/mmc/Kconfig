@@ -36,6 +36,20 @@ config MMC_CMDQ_DEBUG
 	  This is an option for use by developers; most people should
 	  say N here. This enables MMC core and driver debugging for CMDQ mode.
 
+config MMC_DATA_LOG
+	bool "Samsung MMC DATA logging"
+	depends on MMC != n
+	---help---
+	  This feature support for MMC Data logging.
+	  Select this option if this feature is needed on working.
+
+config MMC_TEST_MODE
+       bool "Samsung MMC TEST feature"
+       depends on MMC != n
+       ---help---
+         This selects support for test mode for debugging.
+         Select this option if this feature is needed on working.
+
 if MMC
 
 source "drivers/mmc/core/Kconfig"

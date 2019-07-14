@@ -49,12 +49,12 @@ struct crash_key user_crash_key_combination[] = {
 	{KEY_POWER, CRASH_COUNT_THIRD},
 };
 
-struct key_state {
+struct sec_key_state {
 	unsigned int key_code;
 	unsigned int state;
 };
 
-struct key_state key_states[] = {
+struct sec_key_state sec_key_states[] = {
 	{KEY_VOLUMEDOWN, KEY_STATE_UP},
 	{KEY_VOLUMEUP, KEY_STATE_UP},
 	{KEY_POWER, KEY_STATE_UP},
@@ -96,8 +96,8 @@ static int is_crash_keys(unsigned int code)
 {
 	int i;
 
-	for (i = 0; i < ARRAYSIZE(key_states); i++)
-		if (key_states[i].key_code == code)
+	for (i = 0; i < ARRAYSIZE(sec_key_states); i++)
+		if (sec_key_states[i].key_code == code)
 			return 1;
 	return 0;
 }
@@ -135,9 +135,9 @@ static unsigned int is_key_state_down(unsigned int code)
 	if (is_hold_key(code))
 		return is_hold_key_hold();
 
-	for (i = 0; i < ARRAYSIZE(key_states); i++)
-		if (key_states[i].key_code == code)
-			return key_states[i].state == KEY_STATE_DOWN;
+	for (i = 0; i < ARRAYSIZE(sec_key_states); i++)
+		if (sec_key_states[i].key_code == code)
+			return sec_key_states[i].state == KEY_STATE_DOWN;
 	/* Do not reach here */
 	panic("Invalid Keycode");
 }
@@ -149,9 +149,9 @@ static void set_key_state_down(unsigned int code)
 	if (is_hold_key(code))
 		set_hold_key_hold(KEY_STATE_DOWN);
 
-	for (i = 0; i < ARRAYSIZE(key_states); i++)
-		if (key_states[i].key_code == code)
-			key_states[i].state = KEY_STATE_DOWN;
+	for (i = 0; i < ARRAYSIZE(sec_key_states); i++)
+		if (sec_key_states[i].key_code == code)
+			sec_key_states[i].state = KEY_STATE_DOWN;
 	SEC_LOG("code %d", code);
 }
 
@@ -162,9 +162,9 @@ static void set_key_state_up(unsigned int code)
 	if (is_hold_key(code))
 		set_hold_key_hold(KEY_STATE_UP);
 
-	for (i = 0; i < ARRAYSIZE(key_states); i++)
-		if (key_states[i].key_code == code)
-			key_states[i].state = KEY_STATE_UP;
+	for (i = 0; i < ARRAYSIZE(sec_key_states); i++)
+		if (sec_key_states[i].key_code == code)
+			sec_key_states[i].state = KEY_STATE_UP;
 }
 
 static void increase_step(void)
@@ -246,7 +246,7 @@ static struct notifier_block nb_gpio_keys = {
 int __init sec_upload_init(void)
 {
 	/* only work for debug level is low */
-	if ((sec_debug_get_debug_level() & 0x1) != 0x1)
+	if (!sec_debug_enter_upload())
 		register_gpio_keys_notifier(&nb_gpio_keys);
 	return 0;
 }

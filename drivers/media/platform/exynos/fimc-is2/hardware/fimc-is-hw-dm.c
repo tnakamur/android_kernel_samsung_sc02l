@@ -62,16 +62,12 @@ static inline void copy_lens_udm(camera2_uctl_t *uctl, camera2_udm_t *udm)
 
 }
 
-#define CPY_COMPANION_UDM(item)	CPY_SHOT_UCTL_UDM(companion, item)
-static inline void copy_companion_udm(camera2_uctl_t *uctl,
+#define CPY_MODE_UDM(item)	CPY_SHOT_UCTL_UDM(isMode, item)
+static inline void copy_mode_udm(camera2_uctl_t *uctl,
 					camera2_udm_t *udm)
 {
-	CPY_COMPANION_UDM(drc_mode);
-	CPY_COMPANION_UDM(wdr_mode);
-	CPY_COMPANION_UDM(paf_mode);
-	CPY_COMPANION_UDM(lsc_mode);
-	CPY_COMPANION_UDM(bpc_mode);
-	CPY_COMPANION_UDM(bypass_mode);
+	CPY_MODE_UDM(wdr_mode);
+	CPY_MODE_UDM(paf_mode);
 }
 
 int copy_ctrl_to_dm(struct camera2_shot *shot)
@@ -85,8 +81,8 @@ int copy_ctrl_to_dm(struct camera2_shot *shot)
 	copy_aa_udm(&shot->uctl, &shot->udm);
 	/* lens */
 	copy_lens_udm(&shot->uctl, &shot->udm);
-	/* companion */
-	copy_companion_udm(&shot->uctl, &shot->udm);
+	/* mode */
+	copy_mode_udm(&shot->uctl, &shot->udm);
 
 	return 0;
 }

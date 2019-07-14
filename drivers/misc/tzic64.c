@@ -40,8 +40,13 @@
 #include <linux/moduleparam.h>
 #include <linux/printk.h>
 #include <linux/miscdevice.h>
+#if CONFIG_TEEGRIS_VERSION == 3
+#include "tzdev/3.0/tzirs.h"
+#include "tzdev/3.0/tz_cdev.h"
+#else
 #include "tzdev/tzirs.h"
 #include "tzdev/tz_cdev.h"
+#endif /* CONFIG_TEEGRIS_VERSION == 3 */
 #endif /* CONFIG_TZDEV */
 
 static int gotoCpu0(void);

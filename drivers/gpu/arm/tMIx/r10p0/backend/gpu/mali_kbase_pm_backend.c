@@ -309,15 +309,12 @@ void kbase_pm_do_poweroff(struct kbase_device *kbdev, bool is_suspend)
 		kbdev->pm.backend.poweroff_is_suspend = is_suspend;
 
 		spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
-
 		/*Kick off wq here. Callers will have to wait*/
 		queue_work(kbdev->pm.backend.gpu_poweroff_wait_wq,
 				&kbdev->pm.backend.gpu_poweroff_wait_work);
-				
 	} else {
 		spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 	}
-
 }
 
 static bool is_poweroff_in_progress(struct kbase_device *kbdev)
@@ -411,8 +408,7 @@ void kbase_hwaccess_pm_halt(struct kbase_device *kbdev)
 
 	mutex_lock(&kbdev->pm.lock);
 	kbase_pm_cancel_deferred_poweroff(kbdev);
-	
-	kbase_pm_do_poweroff(kbdev, false);
+    kbase_pm_do_poweroff(kbdev, false);
 	mutex_unlock(&kbdev->pm.lock);
 }
 
@@ -491,7 +487,6 @@ void kbase_hwaccess_pm_suspend(struct kbase_device *kbdev)
 	mutex_lock(&kbdev->pm.lock);
 
 	kbase_pm_cancel_deferred_poweroff(kbdev);
-	
 	kbase_pm_do_poweroff(kbdev, true);
 
 	kbase_backend_timer_suspend(kbdev);

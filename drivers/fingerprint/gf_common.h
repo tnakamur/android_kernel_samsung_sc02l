@@ -11,7 +11,10 @@
 #endif
 
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
+#if defined (CONFIG_ARCH_EXYNOS9) || defined(CONFIG_ARCH_EXYNOS8)\
+	|| defined (CONFIG_ARCH_EXYNOS7)
 #include <linux/smc.h>
+#endif
 #include <linux/wakelock.h>
 #include <linux/clk.h>
 #include <linux/pm_runtime.h>
@@ -28,6 +31,8 @@
 #else
 #include <mach/secos_booster.h>
 #endif
+#elif defined(CONFIG_TZDEV_BOOST)
+#include <../drivers/misc/tzdev/tz_boost.h>
 #endif
 
 struct sec_spi_info {
@@ -37,10 +42,21 @@ struct sec_spi_info {
 #endif
 #include <linux/wakelock.h>
 
+/*
+ * This feature is temporary for exynos AP only.
+ * It's for control GPIO config on enabled TZ before enable GPIO protection.
+ * If it's still defined this feature after enable GPIO protection,
+ * it will be happened kernel panic
+ * So it should be un-defined after enable GPIO protection
+ */
+#undef DISABLED_GPIO_PROTECTION
+
 #define GF_IOC_MAGIC	'g'
 
 #define GF_GW32J_CHIP_ID	0x00220e
 #define GF_GW32N_CHIP_ID	0x002215
+#define GF_GW36H_CHIP_ID	0x002504
+#define GF_GW36C_CHIP_ID	0x002502
 
 #define MAX_BAUD_RATE 6500000
 
@@ -167,6 +183,8 @@ struct gf_device {
 	unsigned int current_spi_speed;
 	unsigned int orient;
 	int sensortype;
+	int reset_count;
+	int interrupt_count;
 	bool ldo_onoff;
 	bool tz_mode;
 	const char *chipid;

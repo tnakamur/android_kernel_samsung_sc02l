@@ -233,7 +233,6 @@ static int tfa_update_log(void)
 			return err;
 		}
 
-
 		tfa98xx_convert_bytes2data(read_size, cmd_buf, data);
 
 		/* maximum x */
@@ -299,10 +298,11 @@ static ssize_t tfa_data_maxx_show(struct device *dev,
 	pr_info("%s: %s\n", __func__, read_string);
 
 	if (ret)
-		size = snprintf(buf, FILESIZE_LOG, "data error");
+		size = snprintf(buf, 10 + 1, "data_error");
 	else
 		size = snprintf(buf,
-			FILESIZE_LOG, "%s", read_string);
+			strlen(read_string) + 1,
+			"%s", read_string);
 
 	if (size <= 0) {
 		pr_err("%s: failed to show in sysfs file", __func__);
@@ -358,10 +358,11 @@ static ssize_t tfa_data_maxt_show(struct device *dev,
 	pr_info("%s: %s\n", __func__, read_string);
 
 	if (ret)
-		size = snprintf(buf, FILESIZE_LOG, "data error");
+		size = snprintf(buf, 10 + 1, "data_error");
 	else
 		size = snprintf(buf,
-			FILESIZE_LOG, "%s", read_string);
+			strlen(read_string) + 1,
+			"%s", read_string);
 
 	if (size <= 0) {
 		pr_err("%s: failed to show in sysfs file", __func__);
@@ -417,10 +418,11 @@ static ssize_t tfa_count_overxmax_show(struct device *dev,
 	pr_info("%s: %s\n", __func__, read_string);
 
 	if (ret)
-		size = snprintf(buf, FILESIZE_LOG, "data error");
+		size = snprintf(buf, 10 + 1, "data_error");
 	else
 		size = snprintf(buf,
-			FILESIZE_LOG, "%s", read_string);
+			strlen(read_string) + 1,
+			"%s", read_string);
 
 	if (size <= 0) {
 		pr_err("%s: failed to show in sysfs file", __func__);
@@ -476,10 +478,11 @@ static ssize_t tfa_count_overtmax_show(struct device *dev,
 	pr_info("%s: %s\n", __func__, read_string);
 
 	if (ret)
-		size = snprintf(buf, FILESIZE_LOG, "data error");
+		size = snprintf(buf, 10 + 1, "data_error");
 	else
 		size = snprintf(buf,
-			FILESIZE_LOG, "%s", read_string);
+			strlen(read_string) + 1,
+			"%s", read_string);
 
 	if (size <= 0) {
 		pr_err("%s: failed to show in sysfs file", __func__);
@@ -537,10 +540,11 @@ static ssize_t tfa_data_show(struct device *dev,
 	}
 
 	if (ret)
-		size = snprintf(buf, FILESIZE_LOG, "data error");
+		size = snprintf(buf, 10 + 1, "data_error");
 	else
 		size = snprintf(buf,
-			FILESIZE_LOG, "%s", read_string);
+			strlen(read_string) + 1,
+			"%s", read_string);
 
 	if (size <= 0) {
 		pr_err("%s: failed to show in sysfs file", __func__);

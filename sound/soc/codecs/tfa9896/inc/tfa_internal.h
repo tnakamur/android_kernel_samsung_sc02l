@@ -173,6 +173,10 @@ struct tfa98xx_handle_private {
 #if defined(TFADSP_DSP_BUFFER_POOL)
 	struct tfa98xx_buffer_pool buf_pool[POOL_MAX_INDEX];
 #endif
+#if defined(USE_TFA9896)
+	uint32_t config_crc;
+	uint32_t config_size;
+#endif
 };
 
 /* tfa98xx: tfa_device_ops */

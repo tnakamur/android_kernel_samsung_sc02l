@@ -65,8 +65,9 @@
 #else
 #define SEC_BAT_CURRENT_EVENT_USB_100MA			0x0000
 #endif
-#define SEC_BAT_CURRENT_EVENT_LOW_TEMP			0x0080
-#define SEC_BAT_CURRENT_EVENT_SWELLING_MODE		(SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING | SEC_BAT_CURRENT_EVENT_LOW_TEMP | SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING)
+#define SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND			0x0080
+#define SEC_BAT_CURRENT_EVENT_SWELLING_MODE		(SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING | SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND | SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING)
+#define SEC_BAT_CURRENT_EVENT_LOW_TEMP_MODE		(SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING | SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND)
 #define SEC_BAT_CURRENT_EVENT_USB_SUPER			0x0100
 #define SEC_BAT_CURRENT_EVENT_CHG_LIMIT			0x0200
 #define SEC_BAT_CURRENT_EVENT_CALL			0x0400
@@ -74,12 +75,18 @@
 #define SEC_BAT_CURRENT_EVENT_VBAT_OVP			0x1000
 #define SEC_BAT_CURRENT_EVENT_VSYS_OVP			0x2000
 #define SEC_BAT_CURRENT_EVENT_WPC_VOUT_LOCK		0x4000
+#define SEC_BAT_CURRENT_EVENT_HV_DISABLE		0x10000
+#define SEC_BAT_CURRENT_EVENT_SELECT_PDO		0x20000
 
 #define SIOP_EVENT_NONE 	0x0000
 #define SIOP_EVENT_WPC_CALL 	0x0001
 
 #if defined(CONFIG_SEC_FACTORY)			/* SEC_FACTORY */
+#if defined(CONFIG_A10)
+#define STORE_MODE_CHARGING_MAX 75
+#else
 #define STORE_MODE_CHARGING_MAX 80
+#endif
 #define STORE_MODE_CHARGING_MIN 70
 #else						/* !SEC_FACTORY, STORE MODE */
 #define STORE_MODE_CHARGING_MAX 70
@@ -297,6 +304,10 @@ struct sec_battery_info {
 	int wpc_temp;
 	int coil_temp;
 	int slave_chg_temp;
+#if defined(CONFIG_ABNORMAL_BAT_THM_WA)
+	bool temp_control;
+	int prev_bat_temp;
+#endif
 
 	int temp_adc;
 	int temp_ambient_adc;
@@ -423,9 +434,8 @@ struct sec_battery_info {
 	unsigned int step_charging_charge_power;
 	int step_charging_status;
 	int step_charging_step;
-#else
-	unsigned int base_charge_power;
 #endif
+	unsigned int base_charge_power;
 #if defined(CONFIG_ENG_BATTERY_CONCEPT) || defined(CONFIG_SEC_FACTORY)
 	bool cooldown_mode;
 #endif
@@ -673,6 +683,9 @@ extern bool sec_bat_check_vf_adc(struct sec_battery_info *battery);
 extern void sec_bat_reset_step_charging(struct sec_battery_info *battery);
 extern void sec_step_charging_init(struct sec_battery_info *battery, struct device *dev);
 extern bool sec_bat_check_step_charging(struct sec_battery_info *battery);
+#if defined(CONFIG_BATTERY_AGE_FORECAST)
+void sec_bat_set_aging_info_step_charging(struct sec_battery_info *battery);
+#endif
 #endif
 
 #if defined(CONFIG_UPDATE_BATTERY_DATA)

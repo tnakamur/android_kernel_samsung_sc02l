@@ -158,7 +158,7 @@ static struct GAForensicINFO {
 
 	.rq_struct_curr = 0,
 
-	.thread_info_struct_cpu = offsetof(struct thread_info, cpu),
+	.thread_info_struct_cpu = 0,
 
 	.task_struct_struct_prio = offsetof(struct task_struct, prio),
 	.task_struct_struct_static_prio

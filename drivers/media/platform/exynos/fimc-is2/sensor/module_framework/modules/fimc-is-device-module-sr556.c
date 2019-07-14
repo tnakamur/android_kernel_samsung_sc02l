@@ -39,18 +39,26 @@
 #include "fimc-is-device-module-base.h"
 
 static struct fimc_is_sensor_cfg config_module_sr556[] = {
-	/* 2592x1944@30fps */
-	FIMC_IS_SENSOR_CFG(2592, 1944, 30, 19, 0, CSI_DATA_LANES_2),
+	/* 2576x1932@30fps */
+	FIMC_IS_SENSOR_CFG(2576, 1932, 30, 18, 0, CSI_DATA_LANES_2),
+	/* 2576x1932@15fps */
+	FIMC_IS_SENSOR_CFG(2576, 1932, 15, 18, 1, CSI_DATA_LANES_2),
+	/* 2576x1932@7fps */
+	FIMC_IS_SENSOR_CFG(2576, 1932, 7, 18, 2, CSI_DATA_LANES_2),
 	/* 2560x1440@30fps */
-	FIMC_IS_SENSOR_CFG(2560, 1440, 30, 19, 1, CSI_DATA_LANES_2),
-	/* 1296x972@30fps */
-	FIMC_IS_SENSOR_CFG(1296, 972, 30, 9, 2, CSI_DATA_LANES_2),
-	/* 1296x972@15fps */
-	FIMC_IS_SENSOR_CFG(1296, 972, 15, 9, 3, CSI_DATA_LANES_2),
-	/* 1296x972@7fps */
-	FIMC_IS_SENSOR_CFG(1296, 972, 7, 9, 4, CSI_DATA_LANES_2),
-	/* 648x484@120fps */
-	FIMC_IS_SENSOR_CFG(648, 484, 120, 4, 5, CSI_DATA_LANES_2),
+	FIMC_IS_SENSOR_CFG(2560, 1440, 30, 18, 3, CSI_DATA_LANES_2),
+	/* 2560x1440@15fps */
+	FIMC_IS_SENSOR_CFG(2560, 1440, 15, 18, 4, CSI_DATA_LANES_2),
+	/* 2560x1440@7fps */
+	FIMC_IS_SENSOR_CFG(2560, 1440, 7, 18, 5, CSI_DATA_LANES_2),
+	/* 1920x1920@30fps */
+	FIMC_IS_SENSOR_CFG(1920, 1920, 30, 18, 6, CSI_DATA_LANES_2),
+	/* 1920x1920@15fps */
+	FIMC_IS_SENSOR_CFG(1920, 1920, 15, 18, 7, CSI_DATA_LANES_2),
+	/* 1920x1920@7fps */
+	FIMC_IS_SENSOR_CFG(1920, 1920, 7, 18, 8, CSI_DATA_LANES_2),
+	/* 640x480@120fps */
+	FIMC_IS_SENSOR_CFG(640, 480, 120, 4, 9, CSI_DATA_LANES_2),
 };
 
 static struct fimc_is_vci vci_module_sr556[] = {
@@ -110,8 +118,16 @@ static int sensor_module_sr556_power_setpin(struct device *dev,
 	int gpio_1p2_en = 0;
 	int gpio_1p8_en = 0;
 	int gpio_1p8_a2p8_en = 0;
+	bool shared_camio_1p8 = false;
+	struct fimc_is_core *core;
 
 	BUG_ON(!dev);
+
+	core = (struct fimc_is_core *)dev_get_drvdata(fimc_is_dev);
+	if (!core) {
+		err("core is NULL");
+		return -EINVAL;
+	}
 
 	dnode = dev->of_node;
 
@@ -155,6 +171,9 @@ static int sensor_module_sr556_power_setpin(struct device *dev,
 		gpio_request_one(gpio_1p8_a2p8_en, GPIOF_OUT_INIT_LOW, "IO_LDO_1P8_A2P8_EN");
 		gpio_free(gpio_1p8_a2p8_en);
 	}
+
+	shared_camio_1p8 = of_property_read_bool(dnode, "shared_camio_1p8");
+
 	SET_PIN_INIT(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON);
 	SET_PIN_INIT(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF);
 	SET_PIN_INIT(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON);
@@ -164,12 +183,22 @@ static int sensor_module_sr556_power_setpin(struct device *dev,
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_reset, "sen_rst low", PIN_OUTPUT, 0, 0);
 	if (gpio_is_valid(gpio_sensor_a2p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_sensor_a2p8_en, "sensor_a2p8_en", PIN_OUTPUT, 1, 0);
+	} else {
+		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "RCAM2_AVDD_2P8", PIN_REGULATOR, 1, 200);
 	}
 	if (gpio_is_valid(gpio_1p2_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_1p2_en, "1p2_en", PIN_OUTPUT, 1, 0);
+	} else {
+		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "RCAM2_DVDD_1P2", PIN_REGULATOR, 1, 0);
 	}
 	if (gpio_is_valid(gpio_1p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_1p8_en, "1p8_en", PIN_OUTPUT, 1, 1000);
+		if(shared_camio_1p8) {
+			SET_PIN_SHARED(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, SRT_ACQUIRE,
+					&core->shared_rsc_slock[SHARED_PIN1], &core->shared_rsc_count[SHARED_PIN1], 1);
+		}
+	}else {
+		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 1, 2000);
 	}
 	if (gpio_is_valid(gpio_1p8_a2p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_1p8_a2p8_en, "1p8_a2p8_en", PIN_OUTPUT, 1, 100);
@@ -186,12 +215,22 @@ static int sensor_module_sr556_power_setpin(struct device *dev,
 	}
 	if (gpio_is_valid(gpio_1p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_1p8_en, "1p8_en", PIN_OUTPUT, 0, 0);
+		if(shared_camio_1p8) {
+			SET_PIN_SHARED(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, SRT_RELEASE,
+					&core->shared_rsc_slock[SHARED_PIN1], &core->shared_rsc_count[SHARED_PIN1], 0);
+		}
+	} else {
+		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 0, 0);
 	}
 	if (gpio_is_valid(gpio_1p2_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_1p2_en, "1p2_en", PIN_OUTPUT, 0, 0);
+	} else {
+		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, "RCAM2_DVDD_1P2", PIN_REGULATOR, 0, 0);
 	}
 	if (gpio_is_valid(gpio_sensor_a2p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_sensor_a2p8_en, "sensor_a2p8_en", PIN_OUTPUT, 0, 0);
+	} else {
+		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, "RCAM2_AVDD_2P8", PIN_REGULATOR, 0, 0);
 	}
 
 	/* Rom Power On */
@@ -202,12 +241,16 @@ static int sensor_module_sr556_power_setpin(struct device *dev,
 	}
 	if (gpio_is_valid(gpio_1p2_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_1p2_en, "1p2_en", PIN_OUTPUT, 1, 0);
+		if(shared_camio_1p8) {
+			SET_PIN_SHARED(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, SRT_ACQUIRE,
+					&core->shared_rsc_slock[SHARED_PIN1], &core->shared_rsc_count[SHARED_PIN1], 1);
+		}
 	}
 	if (gpio_is_valid(gpio_1p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_1p8_en, "1p8_en", PIN_OUTPUT, 1, 1000);
 	}
 	if (gpio_is_valid(gpio_1p8_a2p8_en)) {
-		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_1p8_a2p8_en, "1p8_a2p8_en", PIN_OUTPUT, 1, 0);
+		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_1p8_a2p8_en, "1p8_a2p8_en", PIN_OUTPUT, 1, 100);
 	}
 	SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_none, "pin", PIN_FUNCTION, 2, 1500);
 	SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_reset, "sen_rst high", PIN_OUTPUT, 1, 10000);
@@ -215,6 +258,8 @@ static int sensor_module_sr556_power_setpin(struct device *dev,
 #else
 	if (gpio_is_valid(gpio_1p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_1p8_en, "1p8_en", PIN_OUTPUT, 1, 0);
+	} else {
+		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 1, 2000);
 	}
 
 #endif
@@ -231,6 +276,10 @@ static int sensor_module_sr556_power_setpin(struct device *dev,
 	}
 	if (gpio_is_valid(gpio_1p2_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_1p2_en, "1p2_en", PIN_OUTPUT, 0, 0);
+		if(shared_camio_1p8) {
+			SET_PIN_SHARED(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, SRT_RELEASE,
+					&core->shared_rsc_slock[SHARED_PIN1], &core->shared_rsc_count[SHARED_PIN1], 0);
+		}
 	}
 	if (gpio_is_valid(gpio_sensor_a2p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_sensor_a2p8_en, "sensor_a2p8_en", PIN_OUTPUT, 0, 0);
@@ -238,6 +287,8 @@ static int sensor_module_sr556_power_setpin(struct device *dev,
 #else
 	if (gpio_is_valid(gpio_1p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_1p8_en, "1p8_en", PIN_OUTPUT, 0, 0);
+	} else {
+		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 0, 2000);
 	}
 #endif
 
@@ -279,8 +330,7 @@ int sensor_module_sr556_probe(struct platform_device *pdev)
 		goto p_err;
 	}
 
-	//probe_info("%s pdta->id(%d), module_enum id = %d \n",
-	//	__func__, pdata->id, atomic_read(&device->module_count));
+	probe_info("%s pdta->id(%d), module_enum id = %d \n", __func__, pdata->id, atomic_read(&device->module_count));
 	module = &device->module_enum[atomic_read(&device->module_count)];
 	atomic_inc(&device->module_count);
 	clear_bit(FIMC_IS_MODULE_GPIO_ON, &module->state);
@@ -290,8 +340,8 @@ int sensor_module_sr556_probe(struct platform_device *pdev)
 	module->subdev = subdev_module;
 	module->device = pdata->id;
 	module->client = NULL;
-	module->active_width = 2576 + 16;
-	module->active_height = 1932 + 12;
+	module->active_width = 2576 + 0;
+	module->active_height = 1932 + 0;
 	module->margin_left = 0;
 	module->margin_right = 0;
 	module->margin_top = 0;

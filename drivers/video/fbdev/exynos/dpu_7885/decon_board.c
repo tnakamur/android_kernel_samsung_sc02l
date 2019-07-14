@@ -1,11 +1,10 @@
-/* decon_board.c
- *
- * Copyright (c) 2015 Samsung Electronics
+/*
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/delay.h>
 #include <linux/kernel.h>
@@ -21,7 +20,7 @@
 #include "decon_board.h"
 
 /*
-*
+ *
 0. There is a pre-defined property of the name of "decon_board".
 decon_board has a phandle value that uniquely identifies the other node
 containing subnodes to control gpio, regulator, delay and pinctrl.
@@ -121,9 +120,9 @@ struct dt_node_info {
 
 struct timer_info {
 	const char			*name;
-	ktime_t				start;
-	ktime_t				end;
-	ktime_t				now;
+	u64				start;
+	u64				end;
+	u64				now;
 	unsigned int			delay;
 };
 
@@ -235,15 +234,15 @@ static void print_timer(struct timer_info *timer)
 	char buf[70] = {0, };
 	int len = 0;
 
-	elapse = timer->now.tv64 - timer->start.tv64;
-	remain = abs(timer->end.tv64 - timer->now.tv64);
+	elapse = timer->now - timer->start;
+	remain = abs(timer->end - timer->now);
 
-	len += secprintf(buf + len, sizeof(buf) - len, timer->start.tv64);
+	len += secprintf(buf + len, sizeof(buf) - len, timer->start);
 	len += scnprintf(buf + len, sizeof(buf) - len, " - ");
-	len += secprintf(buf + len, sizeof(buf) - len, timer->now.tv64);
+	len += secprintf(buf + len, sizeof(buf) - len, timer->now);
 	len += scnprintf(buf + len, sizeof(buf) - len, " = ");
 	len += secprintf(buf + len, sizeof(buf) - len, elapse);
-	len += scnprintf(buf + len, sizeof(buf) - len, ", %s", timer->end.tv64 < timer->now.tv64 ? "-" : "");
+	len += scnprintf(buf + len, sizeof(buf) - len, ", remain: %s", timer->end < timer->now ? "-" : "");
 	len += secprintf(buf + len, sizeof(buf) - len, remain);
 
 	bd_info("%s: delay: %d, %s\n", timer->name, timer->delay, buf);
@@ -377,7 +376,7 @@ static int decide_subinfo(struct device_node *np, struct action_info *action)
 	switch (action->idx) {
 	case ACTION_GPIO_HIGH:
 	case ACTION_GPIO_LOW:
-		action->gpio = of_get_named_gpio_flags(np->parent, subinfo, 0, NULL);
+		action->gpio = of_get_named_gpio(np->parent, subinfo, 0);
 		if (!gpio_is_valid(action->gpio)) {
 			bd_warn("of_get_named_gpio fail %d %s\n", action->gpio, subinfo);
 			ret = -EINVAL;
@@ -556,7 +555,7 @@ static int do_list(struct list_head *lh)
 {
 	struct action_info *action;
 	int ret = 0;
-	u64 delta;
+	u64 us_delta;
 
 	list_for_each_entry(action, lh, node) {
 		switch (action->idx) {
@@ -595,28 +594,28 @@ static int do_list(struct list_head *lh)
 			pinctrl_select_state(action->pins, action->state);
 			break;
 		case ACTION_TIMER_START:
-			action->timer->start = ns_to_ktime(local_clock());
-			action->timer->end = ktime_add_ms(action->timer->start, action->timer->delay);
+			action->timer->start = local_clock();
+			action->timer->end = action->timer->start + (action->timer->delay * NSEC_PER_MSEC);
 			break;
 		case ACTION_TIMER_DELAY:
-			action->timer->now = ns_to_ktime(local_clock());
+			action->timer->now = local_clock();
 			print_timer(action->timer);
 
-			if (!action->timer->end.tv64)
+			if (!action->timer->end)
 				msleep(action->timer->delay);
-			else if (action->timer->end.tv64 > action->timer->now.tv64) {
-				delta = ktime_us_delta(action->timer->end, action->timer->now);
+			else if (action->timer->end > action->timer->now) {
+				us_delta = ktime_us_delta(ns_to_ktime(action->timer->end), ns_to_ktime(action->timer->now));
 
-				if (!delta || delta > UINT_MAX)
+				if (!us_delta || us_delta > UINT_MAX)
 					break;
 
-				if (delta < MSEC_TO_USEC(SMALL_MSECS))
-					usleep_range(delta, delta + (delta >> 1));
+				if (us_delta < MSEC_TO_USEC(SMALL_MSECS))
+					usleep_range(us_delta, us_delta + (us_delta >> 1));
 				else
-					msleep(USEC_TO_MSEC(delta));
+					msleep(USEC_TO_MSEC(us_delta));
 			}
 		case ACTION_TIMER_CLEAR:
-			action->timer->end.tv64 = 0;
+			action->timer->end = 0;
 			break;
 		case ACTION_DUMMY:
 			break;
@@ -669,5 +668,241 @@ void run_list(struct device *dev, const char *name)
 	}
 
 	do_list(lh);
+}
+
+int of_gpio_get_active(const char *gpioname)
+{
+	int ret = 0, gpio = 0, gpio_level, active_level;
+	struct device_node *np = NULL;
+	enum of_gpio_flags flags = {0, };
+
+	np = of_find_node_with_property(NULL, gpioname);
+	if (!np) {
+		bd_info("of_find_node_with_property fail for %s\n", gpioname);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	bd_dbg("%s property find in node %s\n", gpioname, np->name);
+
+	gpio = of_get_named_gpio_flags(np, gpioname, 0, &flags);
+	if (!gpio_is_valid(gpio)) {
+		bd_warn("of_get_named_gpio fail %d %s\n", gpio, gpioname);
+		ret = -EINVAL;
+		goto exit;
+	}
+	of_node_put(np);
+
+	active_level = !(flags & OF_GPIO_ACTIVE_LOW);
+	gpio_level = gpio_get_value(gpio);
+	ret = (gpio_level == active_level) ? 1 : 0;
+exit:
+	return ret;
+}
+
+int of_gpio_get_value(const char *gpioname)
+{
+	int ret = 0, gpio = 0, gpio_level, active_level;
+	struct device_node *np = NULL;
+	enum of_gpio_flags flags = {0, };
+
+	np = of_find_node_with_property(NULL, gpioname);
+	if (!np) {
+		bd_info("of_find_node_with_property fail for %s\n", gpioname);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	bd_dbg("%s property find in node %s\n", gpioname, np->name);
+
+	gpio = of_get_named_gpio_flags(np, gpioname, 0, &flags);
+	if (!gpio_is_valid(gpio)) {
+		bd_warn("of_get_named_gpio fail %d %s\n", gpio, gpioname);
+		of_node_put(np);
+		ret = -EINVAL;
+		goto exit;
+	}
+	of_node_put(np);
+
+	active_level = !(flags & OF_GPIO_ACTIVE_LOW);
+	gpio_level = gpio_get_value(gpio);
+	ret = gpio_level;
+
+exit:
+	return ret;
+}
+
+int of_gpio_set_value(const char *gpioname, int value)
+{
+	int ret = 0, gpio = 0;
+	struct device_node *np = NULL;
+	enum of_gpio_flags flags = {0, };
+
+	np = of_find_node_with_property(NULL, gpioname);
+	if (!np) {
+		bd_info("of_find_node_with_property fail for %s\n", gpioname);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	bd_dbg("%s property find in node %s\n", gpioname, np->name);
+
+	gpio = of_get_named_gpio_flags(np, gpioname, 0, &flags);
+	if (!gpio_is_valid(gpio)) {
+		bd_warn("of_get_named_gpio fail %d %s\n", gpio, gpioname);
+		of_node_put(np);
+		ret = -EINVAL;
+		goto exit;
+	}
+	of_node_put(np);
+
+	ret = gpio_request_one(gpio, value ? GPIOF_OUT_INIT_HIGH : GPIOF_OUT_INIT_LOW, NULL);
+	if (ret < 0)
+		bd_warn("gpio_request_one fail %d, %d, %s\n", ret, gpio, gpioname);
+	gpio_free(gpio);
+exit:
+	return ret;
+}
+
+int of_get_gpio_with_name(const char *gpioname)
+{
+	int ret = 0, gpio = 0;
+	struct device_node *np = NULL;
+	enum of_gpio_flags flags = {0, };
+
+	np = of_find_node_with_property(NULL, gpioname);
+	if (!np) {
+		bd_info("of_find_node_with_property fail for %s\n", gpioname);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	bd_dbg("%s property find in node %s\n", gpioname, np->name);
+
+	gpio = of_get_named_gpio_flags(np, gpioname, 0, &flags);
+	if (!gpio_is_valid(gpio)) {
+		bd_warn("of_get_named_gpio fail %d %s\n", gpio, gpioname);
+		ret = -EINVAL;
+		goto exit;
+	}
+	of_node_put(np);
+
+	ret = gpio;
+exit:
+	return ret;
+}
+
+/**
+ * of_update_phandle_property - update a phandle property to a device_node pointer
+ * @phandle_name: to. Name of property holding a phandle value which will be updated
+ * @node_name: from. Name of node which has new phandle value
+ *
+ * Example:
+ *
+ * phandle1: node1 {
+ * }
+ *
+ * phandle2: node2 {
+ * }
+ *
+ * node3 {
+ *	phandle_name = <&phandle1>;
+ * }
+ *
+ * To change a device_node using phandle_name like below:
+ *	phandle_name = <&phandle2>;
+ *
+ * you may call this:
+ * of_update_phandle_property("phandle_name", "node2");
+ */
+int of_update_phandle_property(const char *phandle_name, const char *node_name)
+{
+	struct device_node *parent = NULL, *node_new = NULL, *node = NULL;
+	struct property *prop_org, *prop_new;
+	int len = 0, ret = 0;
+	__be32 *pphandle_new = NULL;
+	const __be32 *pphandle_org;
+	phandle phandle_org = 0;
+
+	parent = of_find_node_with_property(NULL, phandle_name);
+	if (!parent) {
+		bd_info("of_find_node_with_property fail with %s\n", phandle_name);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	len = of_count_phandle_with_args(parent, phandle_name, NULL);
+	if (len != 1) {
+		bd_info("of_count_phandle_with_args fail, count: %d\n", len);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	pphandle_org = of_get_property(parent, phandle_name, &len);
+	if (!pphandle_org) {
+		bd_info("of_get_property fail with %s, len(%d)\n", phandle_name, len);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	phandle_org = be32_to_cpup(pphandle_org);
+	if (!phandle_org) {
+		bd_info("%s property has invalid phandle(%d)\n", phandle_name, phandle_org);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	node = of_find_node_by_phandle(phandle_org);
+	if (!node) {
+		bd_info("of_find_node_by_phandle fail with %s(%d)\n", phandle_name, phandle_org);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	node_new = of_find_node_by_name(NULL, node_name);
+	if (!node_new) {
+		bd_info("of_find_node_by_name fail with %s\n", node_name);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (!node_new->phandle) {
+		bd_info("%s node has no label for phandle\n", node_new->full_name);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (phandle_org == node_new->phandle) {
+		bd_info("phandle is same(%d, %d)\n", phandle_org, node_new->phandle);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	prop_org = of_find_property(parent, phandle_name, &len);
+
+	prop_new = kzalloc(sizeof(struct property), GFP_KERNEL);
+	prop_new->name = kstrdup(prop_org->name, GFP_KERNEL);
+	prop_new->value = kzalloc(prop_org->length, GFP_KERNEL);
+	prop_new->length = prop_org->length;
+
+	pphandle_new = prop_new->value;
+	*pphandle_new = be32_to_cpu(node_new->phandle);
+
+	ret = of_update_property(parent, prop_new);
+	if (ret) {
+		bd_info("of_update_property fail: %d\n", ret);
+		kfree(prop_new->value);
+		kfree(prop_new->name);
+		kfree(prop_new);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	bd_info("%s %s phandle is changed. %d(%s)->%d(%s)\n", of_node_full_name(parent), phandle_name,
+		phandle_org, of_node_full_name(of_find_node_by_phandle(phandle_org)),
+		node_new->phandle, of_node_full_name(of_parse_phandle(parent, phandle_name, 0)));
+
+exit:
+	return ret;
 }
 

@@ -122,13 +122,18 @@ struct fimc_is_lib_vra_interface_funcs {
 	enum api_vra_type (*frame_work_abort)(void *fr_obj_ptr,
 			vra_boolean reset_tr_data_base);
 	enum api_vra_type (*frame_work_terminate)(void *fr_obj_ptr);
-#if defined(ENABLE_VRA_LIBRARY_IMPROVE) || defined(ENABLE_HYBRID_FD)
+	/* The set_post_detect_output is added with the ENABLE_HYBRID_FD.
+	 * This function was deprecated after including CNN hardware in VRA block.
+	 * But, we keep this interface function for backward compatibility
+	 */
 	enum api_vra_type (*set_post_detect_output)(void *sen_obj_ptr,
 			vra_boolean post_detect_output);
-#endif
 #ifdef ENABLE_VRA_CHANGE_SETFILE_PARSING
 	int (*copy_tune_set)(void *sen_obj_ptr, vra_uint32 instance_id, struct lib_vra_tune_set *set);
 	int (*apply_tune_set)(void *sen_obj_ptr, vra_uint32 instance_id, vra_uint32 index);
+#endif
+#ifdef ENABLE_VRA_OVERFLOW_RECOVERY
+	int (*recovery)(void *sen_obj_ptr);
 #endif
 };
 
@@ -214,6 +219,14 @@ struct fimc_is_lib_vra {
 	struct api_vra_out_list_info		pdt_out_list_info[VRA_TOTAL_SENSORS];
 	struct api_vra_pdt_out_face		pdt_out_faces[VRA_TOTAL_SENSORS][MAX_FACE_COUNT];
 #endif
+
+	/* Fast FDAE & FDAF */
+	u32					af_all_face_num[VRA_TOTAL_SENSORS];
+	struct api_vra_out_list_info		af_out_list_info[VRA_TOTAL_SENSORS];
+	struct api_vra_face_base_str		af_face_base[VRA_TOTAL_SENSORS][MAX_FACE_COUNT];
+	spinlock_t				af_fd_slock[VRA_TOTAL_SENSORS];
+	spinlock_t				ae_fd_slock[VRA_TOTAL_SENSORS];
+
 };
 
 void fimc_is_lib_vra_os_funcs(void);
@@ -224,6 +237,7 @@ int fimc_is_lib_vra_frame_work_init(struct fimc_is_lib_vra *lib_vra,
 	void __iomem *base_addr, enum fimc_is_lib_vra_input_type input_type);
 int fimc_is_lib_vra_frame_desc_init(struct fimc_is_lib_vra *lib_vra,
 	u32 instance);
+int fimc_is_lib_vra_stop_instance(struct fimc_is_lib_vra *lib_vra, u32 instance);
 int fimc_is_lib_vra_stop(struct fimc_is_lib_vra *lib_vra);
 int fimc_is_lib_vra_frame_work_final(struct fimc_is_lib_vra *lib_vra);
 int fimc_is_lib_vra_otf_input(struct fimc_is_lib_vra *lib_vra,
@@ -250,6 +264,9 @@ int fimc_is_lib_vra_apply_tune_set(struct fimc_is_lib_vra *this,
 #ifdef ENABLE_HYBRID_FD
 int fimc_is_lib_vra_set_post_detect_output(struct fimc_is_lib_vra *lib_vra,
 	unsigned int hfd_enable, u32 instance);
+#endif
+#ifdef ENABLE_VRA_OVERFLOW_RECOVERY
+int fimc_is_lib_vra_reset_recovery(struct fimc_is_lib_vra *lib_vra, u32 instance_id);
 #endif
 
 #ifdef DEBUG_HW_SIZE

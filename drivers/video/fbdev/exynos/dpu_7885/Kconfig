@@ -65,10 +65,20 @@ config EXYNOS_SUPPORT_DOZE
 config EXYNOS_SUPPORT_FB_HANDOVER
 	bool "Suppot bootloader framebuffer handover"
 	depends on EXYNOS_DECON_7885
-	default n
+	default y
+
+config DPU_20
+	bool "New fence operation and New header sync with HWC2.0"
+	depends on EXYNOS_DECON_7885 && (ANDROID_VERSION >= 90000)
+	default y if (ANDROID_VERSION >= 90000)
 
 config LCD_HMT
 	bool "Suppot video emul & aid reverse to VR"
+	depends on EXYNOS_DECON_7885
+	default n
+
+config LOGGING_BIGDATA_BUG
+	bool "Logging extra information when decon bug"
 	depends on EXYNOS_DECON_7885
 	default n
 

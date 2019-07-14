@@ -622,6 +622,7 @@ static int fimc_is_queue_set_format_mplane(struct fimc_is_queue *queue,
 
 	queue->framecfg.format			= fmt;
 	queue->framecfg.colorspace		= pix->colorspace;
+	queue->framecfg.quantization            = pix->quantization;
 	queue->framecfg.width			= pix->width;
 	queue->framecfg.height			= pix->height;
 
@@ -1145,15 +1146,15 @@ int fimc_is_video_reqbufs(struct file *file,
 	struct fimc_is_core *core;
 	struct fimc_is_queue *queue;
 	struct fimc_is_framemgr *framemgr;
-	struct fimc_is_device_sensor *device;
 	struct fimc_is_video *video;
 
 	BUG_ON(!vctx);
 	BUG_ON(!request);
 
 	video = GET_VIDEO(vctx);
-	device = container_of(video, struct fimc_is_device_sensor, video);
-	core = (struct fimc_is_core *)device->private_data;
+	core = (struct fimc_is_core *)dev_get_drvdata(fimc_is_dev);
+	if (!core)
+		goto p_err;
 
 	if (!(vctx->state & (BIT(FIMC_IS_VIDEO_S_FORMAT) | BIT(FIMC_IS_VIDEO_STOP) | BIT(FIMC_IS_VIDEO_S_BUFS)))) {
 		mverr("invalid reqbufs is requested(%lX)", vctx, video, vctx->state);
@@ -1686,6 +1687,9 @@ int fimc_is_video_s_ctrl(struct file *file,
 	case V4L2_CID_IS_DVFS_CLUSTER1:
 		fimc_is_resource_ioctl(resourcemgr, ctrl);
 		break;
+	case V4L2_CID_IS_DVFS_CLUSTER2:
+		/* There is no cluster2 in Lassen */
+		break;
 	case V4L2_CID_IS_DEBUG_SYNC_LOG:
 		fimc_is_logsync(device->interface, ctrl->value, IS_MSG_TEST_SYNC_LOG);
 		break;
@@ -1724,6 +1728,18 @@ int fimc_is_video_s_ctrl(struct file *file,
 			break;
 		}
 		break;
+#ifdef CONFIG_VENDER_MCD_V2
+	case V4L2_CID_IS_OPENING_HINT:
+	{
+		/* Don't use in Lassen*/
+		break;
+	}
+	case V4L2_CID_IS_CLOSING_HINT:
+	{
+		/* Don't use in Lassen*/
+		break;
+	}
+#endif
 	case VENDER_S_CTRL:
 		/* This s_ctrl is needed to skip, when the s_ctrl id was found. */
 		break;

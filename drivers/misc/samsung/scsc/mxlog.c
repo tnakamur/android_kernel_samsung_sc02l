@@ -1,6 +1,6 @@
 /*****************************************************************************
  *
- * Copyright (c) 2014 - 2016 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2014 - 2017 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
 
@@ -9,6 +9,7 @@
 #include "scsc_mx_impl.h"
 #include "mxmgmt_transport.h"
 #include "mxlog_transport.h"
+#include "fwhdr.h"
 #include "mxlog.h"
 
 /*
@@ -20,7 +21,7 @@ static inline void mxlog_phase4_message_handler(const void *message,
 {
 	unsigned char *buf = (unsigned char *)message;
 
-	SCSC_TAG_LVL(MX_FW, level, "%d: %s\n", (int)length, buf);
+	SCSC_TAG_LVL(MX_FW, level, SCSC_PREFIX"%d: %s\n", (int)length, buf);
 }
 
 /**
@@ -161,7 +162,7 @@ static inline void mxlog_phase5_message_handler(const void *message,
 		/* Add FW provided tstamp on front and proper \n at
 		 * the end when needed
 		 */
-		snprintf(spare, MAX_SPARE_FMT + TSTAMP_LEN - 2, "%08X %s%c",
+		snprintf(spare, MAX_SPARE_FMT + TSTAMP_LEN - 2, SCSC_PREFIX"%08X %s%c",
 			 elogmsg->timestamp, fmt,
 			 (fmt[fmt_sz] != '\n') ? '\n' : '\0');
 		fmt = spare;
@@ -346,7 +347,7 @@ static int mxlog_header_parser(u32 header, u8 *phase,
 	return 0;
 }
 
-void mxlog_init(struct mxlog *mxlog, struct scsc_mx *mx)
+void mxlog_init(struct mxlog *mxlog, struct scsc_mx *mx, char *fw_build_id)
 {
 	int ret = 0;
 
@@ -359,12 +360,39 @@ void mxlog_init(struct mxlog *mxlog, struct scsc_mx *mx)
 		(const struct firmware **)&mxlog->logstrings,
 		MX_LOG_LOGSTRINGS_PATH);
 
-	if (!ret && mxlog->logstrings)
+	if (!ret && mxlog->logstrings && mxlog->logstrings->data) {
 		SCSC_TAG_INFO(MX_FW, "Loaded %zd bytes of log-strings from %s\n",
 			      mxlog->logstrings->size, MX_LOG_LOGSTRINGS_PATH);
-	else
+		if (fw_build_id && mxlog->logstrings->data[0] != 0x00 &&
+		    mxlog->logstrings->size >= FW_BUILD_ID_SZ) {
+			SCSC_TAG_INFO(MX_FW, "Log-strings is versioned...checking against fw_build_id.\n");
+			if (strncmp(fw_build_id, mxlog->logstrings->data, FW_BUILD_ID_SZ)) {
+				char found[FW_BUILD_ID_SZ] = {};
+
+				/**
+				 * NULL-terminate it just in case we fetched
+				 * never-ending garbage.
+				 */
+				strncpy(found, mxlog->logstrings->data,
+					FW_BUILD_ID_SZ - 1);
+				SCSC_TAG_WARNING(MX_FW,
+						"--> Log-strings VERSION MISMATCH !!!\n");
+				SCSC_TAG_WARNING(MX_FW,
+						"--> Expected: |%s|\n", fw_build_id);
+				SCSC_TAG_WARNING(MX_FW,
+						"--> FOUND: |%s|\n", found);
+				SCSC_TAG_WARNING(MX_FW,
+						"As a consequence the following mxlog debug messages could be corrupted.\n");
+				SCSC_TAG_WARNING(MX_FW,
+						"The whole firmware package should be pushed to device when updating (not only the mx140.bin).\n");
+			}
+		} else {
+			SCSC_TAG_INFO(MX_FW, "Log-strings is not versioned.\n");
+		}
+	} else {
 		SCSC_TAG_ERR(MX_FW, "Failed to read %s needed by MXlog Phase 5\n",
 			     MX_LOG_LOGSTRINGS_PATH);
+	}
 	/* Registering a generic channel handler */
 	mxlog_transport_register_channel_handler(scsc_mx_get_mxlog_transport(mx),
 						 &mxlog_header_parser,

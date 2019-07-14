@@ -65,7 +65,7 @@
 
 		abox_rmem: abox_rmem@0xE9400000 {
 			compatible = "exynos,abox_rmem";
-			reg = <0x0 0xE9400000 0x2800000>;
+			reg = <0x0 0xE9400000 0x400000>;
 		};
 
 
@@ -77,7 +77,7 @@
 		crypto {
 			compatible = "exynos8890-ion,crypto";
 			ion,reusable;
-			size = <0x1800000>;
+			size = <0x2000000>;
 			alignment = <0x0 0x00400000>;
 			id = <1>;
 		};

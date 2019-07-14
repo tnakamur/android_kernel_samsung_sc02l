@@ -39,6 +39,7 @@
 #include "fimc-is-cis-sr556.h"
 #include "fimc-is-cis-sr556-setA.h"
 #include "fimc-is-cis-sr556-setB.h"
+#include "fimc-is-cis-sr556-setC.h"
 
 #include "fimc-is-helper-i2c.h"
 #include "fimc-is-vender-specific.h"
@@ -1094,14 +1095,14 @@ u32 sensor_sr556_cis_calc_dgain_code(u32 permile)
 {
 	u16 buf[2] = {0, 0};
 	buf[0] = (u16)((int)permile / 1000);
-	buf[1] = (u16)((int)(((permile - (u32)(buf[0] * 1000)) * 512) / 1000));
+	buf[1] = (u16)((int)(((permile - (u32)(buf[0] * 1000)) * 256) / 1000));
 
-	return (buf[0] << 9 | buf[1]);
+	return (buf[0] << 8 | buf[1]);
 }
 
 u32 sensor_sr556_cis_calc_dgain_permile(u32 code)
 {
-	return (((code & 0x1E00) >> 9) * 1000 + ((int)((code & 0x01FF) * 1000 / 512)));
+	return (((code & 0x0F00) >> 8) * 1000 + ((int)((code & 0x00FF) * 1000 / 256)));
 }
 
 int sensor_sr556_cis_adjust_analog_gain(struct v4l2_subdev *subdev, u32 input_again, u32 *target_permile)
@@ -1874,6 +1875,20 @@ int cis_sr556_probe(struct i2c_client *client,
 		sensor_sr556_fsync_master_size = sizeof(sensor_sr556_setfile_B_Fsync_Master) / sizeof(sensor_sr556_setfile_B_Fsync_Master[0]);
 		sensor_sr556_fsync_slave = sensor_sr556_setfile_B_Fsync_Slave;
 		sensor_sr556_fsync_slave_size = sizeof(sensor_sr556_setfile_B_Fsync_Slave) / sizeof(sensor_sr556_setfile_B_Fsync_Slave[0]);
+	}  else if (strcmp(setfile, "setC") == 0) {
+		probe_info("%s : setfile_C for Tablets(Landscape Device)\n", __func__);
+		sensor_sr556_global = sensor_sr556_setfile_C_Global;
+		sensor_sr556_global_size = sizeof(sensor_sr556_setfile_C_Global) / sizeof(sensor_sr556_setfile_C_Global[0]);
+		sensor_sr556_setfiles = sensor_sr556_setfiles_C;
+		sensor_sr556_setfile_sizes = sensor_sr556_setfile_C_sizes;
+		sensor_sr556_pllinfos = sensor_sr556_pllinfos_C;
+		sensor_sr556_max_setfile_num = sizeof(sensor_sr556_setfiles_C) / sizeof(sensor_sr556_setfiles_C[0]);
+		sensor_sr556_fsync_normal = sensor_sr556_setfile_C_Fsync_Normal;
+		sensor_sr556_fsync_normal_size = sizeof(sensor_sr556_setfile_C_Fsync_Normal) / sizeof(sensor_sr556_setfile_C_Fsync_Normal[0]);
+		sensor_sr556_fsync_master = sensor_sr556_setfile_C_Fsync_Master;
+		sensor_sr556_fsync_master_size = sizeof(sensor_sr556_setfile_C_Fsync_Master) / sizeof(sensor_sr556_setfile_C_Fsync_Master[0]);
+		sensor_sr556_fsync_slave = sensor_sr556_setfile_C_Fsync_Slave;
+		sensor_sr556_fsync_slave_size = sizeof(sensor_sr556_setfile_C_Fsync_Slave) / sizeof(sensor_sr556_setfile_C_Fsync_Slave[0]);
 	} else {
 		err("%s setfile index out of bound, take default (setfile_A)", __func__);
 		sensor_sr556_global = sensor_sr556_setfile_A_Global;

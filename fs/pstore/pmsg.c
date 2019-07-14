@@ -29,10 +29,12 @@ static ssize_t write_pmsg(struct file *file, const char __user *buf,
 {
 	size_t i, buffer_size;
 	char *buffer = pmsg_buffer;
+//	int ret;
 
 	if (!count)
 		return 0;
 
+	/* check outside lock, page in any data. write_buf_user also checks */
 	if (!access_ok(VERIFY_READ, buf, count))
 		return -EFAULT;
 

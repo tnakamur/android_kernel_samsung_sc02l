@@ -34,7 +34,8 @@ extern void sec_debug_reboot_handler(void);
 extern void sec_debug_panic_handler(void *buf, bool dump);
 extern void sec_debug_post_panic_handler(void);
 
-extern int  sec_debug_get_debug_level(void);
+extern int sec_debug_get_debug_level(void);
+extern int sec_debug_enter_upload(void);
 extern void sec_debug_disable_printk_process(void);
 
 /* getlog support */
@@ -303,6 +304,10 @@ extern void register_set_auto_comm_buf(void (*func)(int type, const char *buf, s
 extern void register_set_auto_comm_lastfreq(void (*func)(int type, int old_freq, int new_freq, u64 time));
 #endif
 
+#ifdef CONFIG_SEC_DEBUG_INIT_LOG
+extern void register_init_log_hook_func(void (*func)(const char *buf, size_t size));
+#endif
+
 #ifdef CONFIG_SEC_DEBUG_LAST_KMSG
 #define SEC_LKMSG_MAGICKEY 0x0000000a6c6c7546
 extern void sec_debug_save_last_kmsg(unsigned char *head_ptr, unsigned char *curr_ptr, size_t buf_size);
@@ -332,12 +337,14 @@ extern void sec_debug_tsp_log_msg(char *msg, char *fmt, ...);
 extern void sec_debug_tsp_raw_data(char *fmt, ...);
 extern void sec_debug_tsp_raw_data_msg(char *msg, char *fmt, ...);
 extern void sec_tsp_raw_data_clear(void);
+extern void sec_debug_tsp_command_history(char *buf);
 #else
 #define sec_debug_tsp_log(a, ...)		do { } while (0)
 #define sec_debug_tsp_log_msg(a, b, ...)		do { } while (0)
 #define sec_debug_tsp_raw_data(a, ...)			do { } while (0)
 #define sec_debug_tsp_raw_data_msg(a, b, ...)		do { } while (0)
 #define sec_tsp_raw_data_clear()			do { } while (0)
+#define sec_debug_tsp_command_history(a)	do { } while (0)
 #endif /* CONFIG_SEC_DEBUG_TSP_LOG */
 
 #ifdef CONFIG_TOUCHSCREEN_DUMP_MODE
@@ -482,6 +489,18 @@ extern void sec_debug_summary_set_kallsyms_info(struct sec_debug_summary *summar
 int sec_debug_save_cpu_info(void);
 int sec_debug_save_die_info(const char *str, struct pt_regs *regs);
 int sec_debug_save_panic_info(const char *str, unsigned long caller);
+#endif
+
+#define MAX_UNWINDING_LOOP 50 /* maximum number of unwind frame */
+
+#ifdef CONFIG_SEC_DEBUG_INFINITY_BACKTRACE
+extern int s3c2410wdt_set_emergency_reset(unsigned int timeout);
+static inline void exynos_ss_spin_func(void)
+{
+	do {
+		wfi();
+	} while(1);
+}
 #endif
 
 #endif /* SEC_DEBUG_H */

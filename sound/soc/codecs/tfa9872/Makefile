@@ -5,6 +5,7 @@ TFADSP_32BITS            =1
 #TFADSP_DSP_MSG_APR_PACKET_STRATEGY=0
 TFADSP_DSP_BUFFER_POOL   =1
 TFA_BLACKBOX_LOGGING     =1
+#TFA_WRITE_CAL_TO_FILE=0
 TFA_SRC_DIR              =sound/soc/codecs/$(TFA_VERSION)
 TFA98XX_FLAGS           := -DUSE_TFA9872
 
@@ -24,6 +25,9 @@ ccflags-y               += -DTFADSP_DSP_BUFFER_POOL
 endif
 ifdef TFA_BLACKBOX_LOGGING
 ccflags-y               += -DTFA_BLACKBOX_LOGGING
+endif
+ifdef TFA_WRITE_CAL_TO_FILE
+ccflags-y               += -DTFA_WRITE_CAL_TO_FILE
 endif
 
 # objs

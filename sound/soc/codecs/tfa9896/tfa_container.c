@@ -881,6 +881,8 @@ tfa_cont_write_file(int dev_idx,
 
 	type = (enum tfa_header_type) hdr->id;
 
+	pr_info("%s: start (type %d)\n", __func__, type);
+
 	switch (type) {
 	case msg_hdr: /* generic DSP message */
 		size = hdr->size - sizeof(struct tfa_msg_file);
@@ -970,10 +972,24 @@ tfa_cont_write_file(int dev_idx,
 		break;
 	case config_hdr:
 		size = hdr->size - sizeof(struct tfa_config_file);
+#if defined(USE_TFA9896)
+		if (handles_local[dev_idx].config_crc == hdr->crc
+			&& handles_local[dev_idx].config_size == size) {
+			pr_info("%s: skip writing config, duplicated\n",
+				__func__);
+			break;
+		}
+#endif
 		err = tfa98xx_dsp_write_config
 			(dev_idx, size,
 			 (const unsigned char *)
 			 ((struct tfa_config_file *)hdr)->data);
+#if defined(USE_TFA9896)
+		if (err == TFA98XX_ERROR_OK) {
+			handles_local[dev_idx].config_crc = hdr->crc;
+			handles_local[dev_idx].config_size = size;
+		}
+#endif
 		break;
 	case drc_hdr:
 		if (hdr->version[0] == NXPTFA_DR3_VERSION) {
@@ -1014,6 +1030,8 @@ tfa_cont_write_file(int dev_idx,
 		pr_err("Header is of unknown type: 0x%x\n", type);
 		return TFA98XX_ERROR_BAD_PARAMETER;
 	}
+
+	pr_info("%s: end\n", __func__);
 
 	return err;
 }

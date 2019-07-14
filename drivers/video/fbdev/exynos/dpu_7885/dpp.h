@@ -382,6 +382,10 @@ void dma_reg_set_common_recovery_num(u32 id, u32 rcv_num);
 void dma_reg_set_debug(u32 id);
 void dma_reg_set_common_debug(u32 id);
 
+#ifdef CONFIG_EXYNOS_SUPPORT_FB_HANDOVER
+void dpu_of_reserved_mem_device_release(struct decon_device *decon);
+#endif
+
 #define DPP_WIN_CONFIG			_IOW('P', 0, struct decon_win_config)
 #define DPP_STOP			_IOW('P', 1, unsigned long)
 #define DPP_DUMP			_IOW('P', 2, u32)

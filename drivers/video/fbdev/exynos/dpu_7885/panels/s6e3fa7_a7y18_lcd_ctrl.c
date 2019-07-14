@@ -1,9 +1,5 @@
 /*
- * s6e3fa7_a7y18_lcd_ctrl.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2017 Samsung Electronics
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -33,6 +29,10 @@
 
 #define	DPUI_VENDOR_NAME	"SDC"
 #define DPUI_MODEL_NAME		"AMS604NL07"
+#endif
+
+#ifdef CONFIG_SUPPORT_POC_FLASH
+#include "poc.h"
 #endif
 
 #define PANEL_STATE_SUSPENED	0
@@ -111,6 +111,9 @@ struct lcd_info {
 
 	unsigned char			elvss_table[IBRIGHTNESS_HBM_MAX][TEMP_MAX][ELVSS_CMD_CNT];
 	unsigned char			gamma_table[IBRIGHTNESS_HBM_MAX][GAMMA_CMD_CNT];
+#ifdef CONFIG_SUPPORT_POC_FLASH
+	unsigned char			poc_compen_table[IBRIGHTNESS_HBM_MAX][POC_COMPEN_CMD_CNT];
+#endif
 
 	unsigned char			(*aor_table)[AID_CMD_CNT];
 	unsigned char			(*irc_table)[IRC_CMD_CNT];
@@ -177,6 +180,10 @@ struct lcd_info {
 #endif
 	unsigned char			poc_eb[LDI_LEN_POC_EB];
 	unsigned char			poc_ec[LDI_LEN_POC_EC];
+
+#ifdef CONFIG_SUPPORT_POC_FLASH
+	struct panel_poc_device		poc_dev;
+#endif
 };
 
 #ifdef CONFIG_LCD_HMT
@@ -416,6 +423,26 @@ exit:
 	return ret;
 }
 
+#ifdef CONFIG_SUPPORT_POC_FLASH
+static int dsim_panel_poc_compen_ctrl(struct lcd_info *lcd, u8 force)
+{
+	int ret = 0;
+
+	if (force)
+		goto update;
+	else if (lcd->current_bl != lcd->bl)
+		goto update;
+	else
+		goto exit;
+
+update:
+	DSI_WRITE(lcd->poc_compen_table[lcd->bl], POC_COMPEN_CMD_CNT);
+
+exit:
+	return ret;
+}
+#endif
+
 static int low_level_set_brightness(struct lcd_info *lcd, int force)
 {
 	int ret = 0;
@@ -433,6 +460,10 @@ static int low_level_set_brightness(struct lcd_info *lcd, int force)
 	dsim_panel_irc_ctrl(lcd, force);
 
 	dsim_panel_vint_ctrl(lcd, force);
+
+#ifdef CONFIG_SUPPORT_POC_FLASH
+	dsim_panel_poc_compen_ctrl(lcd, force);
+#endif
 
 	DSI_WRITE(SEQ_GAMMA_UPDATE, ARRAY_SIZE(SEQ_GAMMA_UPDATE));
 
@@ -790,13 +821,13 @@ static int s6e3fa7_read_coordinate(struct lcd_info *lcd)
 static int s6e3fa7_read_manufacture_info(struct lcd_info *lcd)
 {
 	int ret = 0;
-	unsigned char buf[LDI_LEN_MANUFACTURE_INFO] = {0, };
+	unsigned char buf[LDI_GPARA_MANUFACTURE_INFO + LDI_LEN_MANUFACTURE_INFO] = {0, };
 
-	ret = s6e3fa7_read_info(lcd, LDI_REG_MANUFACTURE_INFO, LDI_LEN_MANUFACTURE_INFO, buf);
+	ret = s6e3fa7_read_info(lcd, LDI_REG_MANUFACTURE_INFO, ARRAY_SIZE(buf), buf);
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "%s: fail\n", __func__);
 
-	memcpy(lcd->manufacture_info, buf, LDI_LEN_MANUFACTURE_INFO);
+	memcpy(lcd->manufacture_info, &buf[LDI_GPARA_MANUFACTURE_INFO], LDI_LEN_MANUFACTURE_INFO);
 
 	return ret;
 }
@@ -948,8 +979,8 @@ static int s6e3fa7_read_rddpm(struct lcd_info *lcd)
 	ret = s6e3fa7_read_info(lcd, LDI_REG_RDDPM, LDI_LEN_RDDPM, buf);
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "%s: fail\n", __func__);
-
-	memcpy(&lcd->rddpm, buf, LDI_LEN_RDDPM);
+	else
+		memcpy(&lcd->rddpm, buf, LDI_LEN_RDDPM);
 
 	dev_info(&lcd->ld->dev, "%s: %x\n", __func__, lcd->rddpm);
 
@@ -964,13 +995,31 @@ static int s6e3fa7_read_rddsm(struct lcd_info *lcd)
 	ret = s6e3fa7_read_info(lcd, LDI_REG_RDDSM, LDI_LEN_RDDSM, buf);
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "%s: fail\n", __func__);
-
-	memcpy(&lcd->rddpm, buf, LDI_LEN_RDDSM);
+	else
+		memcpy(&lcd->rddsm, buf, LDI_LEN_RDDSM);
 
 	dev_info(&lcd->ld->dev, "%s: %x\n", __func__, lcd->rddsm);
 
 	return ret;
 }
+
+#ifdef CONFIG_LOGGING_BIGDATA_BUG
+unsigned int get_panel_bigdata(struct dsim_device *dsim)
+{
+	struct lcd_info *lcd = dsim->priv.par;
+	unsigned int val = 0;
+
+	lcd->rddpm = 0xff;
+	lcd->rddsm = 0xff;
+
+	s6e3fa7_read_rddpm(lcd);
+	s6e3fa7_read_rddsm(lcd);
+
+	val = (lcd->rddpm  << 8) | lcd->rddsm;
+
+	return val;
+}
+#endif
 
 static int s6e3fa7_init_elvss(struct lcd_info *lcd, u8 *data)
 {
@@ -990,6 +1039,22 @@ static int s6e3fa7_init_elvss(struct lcd_info *lcd, u8 *data)
 
 	return ret;
 }
+
+#ifdef CONFIG_SUPPORT_POC_FLASH
+static int s6e3fa7_init_poc_compen(struct lcd_info *lcd)
+{
+	int i, ret = 0;
+
+	for (i = 0; i < IBRIGHTNESS_MAX; i++) {
+		lcd->poc_compen_table[i][0] = LDI_REG_POC_EB;
+		memcpy(&lcd->poc_compen_table[i][1], lcd->poc_eb, LDI_LEN_POC_EB);
+		memcpy(&lcd->poc_compen_table[i][11], &SEQ_POC_COMPEN_SETTING[11], 8);
+		lcd->poc_compen_table[i][6] = POC_COMPEN_RATIO[i];
+	}
+
+	return ret;
+}
+#endif
 
 static int s6e3fa7_init_hbm_elvss(struct lcd_info *lcd, u8 *data)
 {
@@ -1101,11 +1166,6 @@ static int init_hbm_gamma(struct lcd_info *lcd)
 	for (i = IBRIGHTNESS_MAX; i < IBRIGHTNESS_HBM_MAX; i++)
 		memcpy(&lcd->gamma_table[i], SEQ_GAMMA_CONDITION_SET, GAMMA_CMD_CNT);
 
-/*
-*	V255 of 443 nit
-*	ratio = (443-420) / (600-420) = 0.127778
-*	target gamma = 256 + (281 - 256) * 0.127778 = 259.1944
-*/
 	for (i = IBRIGHTNESS_MAX; i < IBRIGHTNESS_HBM_MAX; i++) {
 		t1 = hitp->ibr_tbl[i] - hitp->ibr_tbl[hitp->idx_ref];
 		t2 = hitp->ibr_tbl[hitp->idx_hbm] - hitp->ibr_tbl[hitp->idx_ref];
@@ -1162,6 +1222,9 @@ static int s6e3fa7_read_init_info(struct lcd_info *lcd)
 	s6e3fa7_init_elvss(lcd, elvss_data);
 	s6e3fa7_init_hbm_elvss(lcd, elvss_data);
 	s6e3fa7_init_irc(lcd, irc_data);
+#ifdef CONFIG_SUPPORT_POC_FLASH
+	s6e3fa7_init_poc_compen(lcd);
+#endif
 
 	DSI_WRITE(SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0));
 
@@ -1333,18 +1396,18 @@ static int panel_dpui_notifier_callback(struct notifier_block *self,
 	set_dpui_field(DPUI_KEY_CELLID, tbuf, size);
 
 	m_info = lcd->manufacture_info;
-	site = get_bit(m_info[1], 4, 4);
-	rework = get_bit(m_info[1], 0, 4);
-	poc = get_bit(m_info[2], 0, 4);
-	seq_printf(&m, "%d%d%d%02x%02x", site, rework, poc, m_info[3], m_info[4]);
+	site = get_bit(m_info[0], 4, 4);
+	rework = get_bit(m_info[0], 0, 4);
+	poc = get_bit(m_info[1], 0, 4);
+	seq_printf(&m, "%d%d%d%02x%02x", site, rework, poc, m_info[2], m_info[3]);
 
-	for (i = 5; i < LDI_LEN_MANUFACTURE_INFO; i++) {
+	for (i = 4; i < LDI_LEN_MANUFACTURE_INFO; i++) {
 		if (!isdigit(m_info[i]) && !isupper(m_info[i])) {
 			invalid = 1;
 			break;
 		}
 	}
-	for (i = 5; !invalid && i < LDI_LEN_MANUFACTURE_INFO; i++)
+	for (i = 4; !invalid && i < LDI_LEN_MANUFACTURE_INFO; i++)
 		seq_printf(&m, "%c", m_info[i]);
 
 	set_dpui_field(DPUI_KEY_OCTAID, tbuf, m.count);
@@ -1362,7 +1425,6 @@ static int fb_notifier_callback(struct notifier_block *self,
 
 	switch (event) {
 	case FB_EVENT_BLANK:
-	case FB_EARLY_EVENT_BLANK:
 		break;
 	default:
 		return NOTIFY_DONE;
@@ -1426,6 +1488,14 @@ static int s6e3fa7_probe(struct lcd_info *lcd)
 
 #ifdef CONFIG_LCD_HMT
 	hmt_init(lcd);
+#endif
+
+#ifdef CONFIG_SUPPORT_POC_FLASH
+	lcd->poc_dev.dsim = lcd->dsim;
+	lcd->poc_dev.lock = &lcd->lock;
+	ret = panel_poc_probe(&lcd->poc_dev);
+	if (ret)
+		dev_err(&lcd->ld->dev, "%s : failed to probe poc_device", __func__);
 #endif
 
 	dsim_panel_set_brightness(lcd, 1);
@@ -1562,7 +1632,7 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }
@@ -1851,18 +1921,18 @@ static ssize_t octa_id_show(struct device *dev,
 	};
 
 	m_info = lcd->manufacture_info;
-	site = get_bit(m_info[1], 4, 4);
-	rework = get_bit(m_info[1], 0, 4);
-	poc = get_bit(m_info[2], 0, 4);
-	seq_printf(&m, "%d%d%d%02x%02x", site, rework, poc, m_info[3], m_info[4]);
+	site = get_bit(m_info[0], 4, 4);
+	rework = get_bit(m_info[0], 0, 4);
+	poc = get_bit(m_info[1], 0, 4);
+	seq_printf(&m, "%d%d%d%02x%02x", site, rework, poc, m_info[2], m_info[3]);
 
-	for (i = 5; i < LDI_LEN_MANUFACTURE_INFO; i++) {
+	for (i = 4; i < LDI_LEN_MANUFACTURE_INFO; i++) {
 		if (!isdigit(m_info[i]) && !isupper(m_info[i])) {
 			invalid = 1;
 			break;
 		}
 	}
-	for (i = 5; !invalid && i < LDI_LEN_MANUFACTURE_INFO; i++)
+	for (i = 4; !invalid && i < LDI_LEN_MANUFACTURE_INFO; i++)
 		seq_printf(&m, "%c", m_info[i]);
 
 	seq_puts(&m, "\n");
@@ -2086,10 +2156,10 @@ exit:
 
 static int s6e3fa7_hmt_update(struct lcd_info *lcd, u8 forced)
 {
-	/*
-	* 1. set hmt comaand
-	* 2. set hmt brightness
-	*/
+/*
+ *	1. set hmt comaand
+ *	2. set hmt brightness
+ */
 
 	hmt_set_mode(lcd, forced);
 	if (lcd->hmt_on)
@@ -2114,10 +2184,10 @@ static ssize_t hmt_brightness_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
-	int value;
+	unsigned int value;
 	int rc;
 
-	rc = kstrtoul(buf, (unsigned int)0, (unsigned long *)&value);
+	rc = kstrtouint(buf, 0, &value);
 	if (rc < 0)
 		return rc;
 
@@ -2255,6 +2325,11 @@ static ssize_t alpm_doze_store(struct device *dev,
 
 	dev_info(&lcd->ld->dev, "%s: %d, %d, %d, %d\n", __func__, value, lcd->doze_state, lcd->current_alpm, lcd->alpm);
 
+	if (lcd->state != PANEL_STATE_RESUMED) {
+		dev_info(&lcd->ld->dev, "%s: panel state is %d\n", __func__, lcd->state);
+		return -EINVAL;
+	}
+
 	if (value >= ALPM_MODE_MAX) {
 		dev_err(&lcd->ld->dev, "%s: undefined alpm mode: %d\n", __func__, value);
 		return -EINVAL;
@@ -2328,7 +2403,7 @@ static ssize_t alpm_doze_store(struct device *dev,
 		lcd->alpm = value;
 		mutex_unlock(&lcd->lock);
 
-		if (lcd->doze_state)
+		if (dsim->doze_state == DOZE_STATE_DOZE)
 			call_panel_ops(dsim, enteralpm, dsim);
 	}
 
@@ -2349,6 +2424,67 @@ static ssize_t alpm_doze_show(struct device *dev,
 }
 
 static DEVICE_ATTR(alpm, 0664, alpm_doze_show, alpm_doze_store);
+#endif
+#ifdef CONFIG_SUPPORT_POC_FLASH
+static ssize_t poc_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+
+	return strlen(buf);
+}
+
+static ssize_t poc_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct lcd_info *lcd = dev_get_drvdata(dev);
+	struct panel_poc_device *poc_dev;
+	struct panel_poc_info *poc_info;
+	int ret;
+	int cmd, addr, len;
+
+	if (lcd->state != PANEL_STATE_RESUMED) {
+		dev_info(&lcd->ld->dev, "%s: panel state is %d\n", __func__, lcd->state);
+		return -EINVAL;
+	}
+
+	poc_dev = &lcd->poc_dev;
+	poc_info = &poc_dev->poc_info;
+
+	ret = sscanf(buf, "%d %d %d\n", &cmd, &addr, &len);
+	if ((ret != 3) || (cmd != POC_OP_SECTOR_ERASE)) {
+		dev_info(&lcd->ld->dev, "%s: err! cmd: [%d] ret: [%d]\n", __func__, cmd, ret);
+		return ret;
+	}
+
+	if (cmd == POC_OP_SECTOR_ERASE)
+		poc_erase(poc_dev, addr, len);
+
+	dev_info(&lcd->ld->dev, "%s: poc_op %d\n", __func__, cmd);
+
+	return size;
+}
+
+static ssize_t poc_mca_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct lcd_info *lcd = dev_get_drvdata(dev);
+	int ret = 0;
+	int i = 0;
+
+	DSI_WRITE(SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0));
+	s6e3fa7_read_poc_info(lcd);
+	DSI_WRITE(SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0));
+
+	for (i = 0 ; i < LDI_LEN_POC_EC ; i++) {
+		dev_info(&lcd->ld->dev, "%s EC[%d]: 0x%02x\n", __func__, i, lcd->poc_ec[i]);
+		snprintf(buf, PAGE_SIZE, "%s%02X ", buf, lcd->poc_ec[i]);
+	}
+
+	return strlen(buf);
+}
+
+static DEVICE_ATTR(poc, 0664, poc_show, poc_store);
+static DEVICE_ATTR(poc_mca, 0444, poc_mca_show, NULL);
 #endif
 
 static DEVICE_ATTR(lcd_type, 0444, lcd_type_show, NULL);
@@ -2396,6 +2532,10 @@ static struct attribute *lcd_sysfs_attributes[] = {
 #if defined(CONFIG_SEC_FACTORY)
 	&dev_attr_poc_enabled.attr,
 #endif
+#ifdef CONFIG_SUPPORT_POC_FLASH
+	&dev_attr_poc.attr,
+	&dev_attr_poc_mca.attr,
+#endif
 	NULL,
 };
 
@@ -2419,7 +2559,7 @@ static void lcd_init_svc(struct lcd_info *lcd)
 	buf = kzalloc(PATH_MAX, GFP_KERNEL);
 	if (buf) {
 		path = kernfs_path(svc_kobj->sd, buf, PATH_MAX);
-		dev_info(&lcd->ld->dev, "%s: %s %s\n", __func__, path, !kn ? "create" : "");
+		dev_info(&lcd->ld->dev, "%s: %s %s\n", __func__, buf, !kn ? "create" : "");
 		kfree(buf);
 	}
 

@@ -31,7 +31,11 @@
 
 /* ================ Defines related to kernel vesion ===============*/
 
-
+#if defined(CONFIG_SND_SOC_DBMDX_VA_NS_SUPPORT)
+#if !defined(DBMDX_VA_NS_SUPPORT)
+#define DBMDX_VA_NS_SUPPORT		1
+#endif
+#endif
 
 #define USE_ALSA_API_3_10_XX	0
 

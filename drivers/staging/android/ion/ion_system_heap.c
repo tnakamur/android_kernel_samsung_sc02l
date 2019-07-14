@@ -29,8 +29,8 @@
 #include "ion.h"
 #include "ion_priv.h"
 
-static gfp_t high_order_gfp_flags = (GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN
-        | __GFP_NORETRY) & ~(__GFP_DIRECT_RECLAIM | __GFP_KSWAPD_RECLAIM);
+static gfp_t high_order_gfp_flags = (GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN |
+				     __GFP_NORETRY) & ~__GFP_RECLAIM;
 static gfp_t low_order_gfp_flags  = (GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN);
 static const unsigned int orders[] = {8, 4, 0};
 static const int num_orders = ARRAY_SIZE(orders);
@@ -323,7 +323,7 @@ void show_ion_system_heap_size(struct seq_file *s)
 	}
 
 	heap = &system_heap->heap;
-	system_byte = (unsigned int)atomic_long_read(&heap->total_allocated);
+	system_byte = (unsigned long)atomic_long_read(&heap->total_allocated);
 	if (s)
 		seq_printf(s, "SystemHeap:     %8lu kB\n", system_byte >> 10);
 	else

@@ -319,8 +319,10 @@ int phy_power_on(struct phy *phy)
 	}
 
 	ret = phy_pm_runtime_get_sync(phy);
-	if (ret < 0 && ret != -ENOTSUPP)
+	if (ret < 0 && ret != -ENOTSUPP) {
+		dev_info(&phy->dev, "%s: %d(%d)\n", __func__, __LINE__, ret);
 		goto err_pm_sync;
+	}
 
 	ret = 0; /* Override possible ret == -ENOTSUPP */
 

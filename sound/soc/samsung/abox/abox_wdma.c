@@ -158,7 +158,7 @@ static int abox_wdma_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	if (params_rate(params) > 48000)
-		abox_request_cpu_gear(dev, data->abox_data, dev, 2);
+		abox_request_cpu_gear_dai(dev, data->abox_data, rtd->cpu_dai, 2);
 
 	dev_info(dev, "%s:Total=%zu PrdSz=%u(%u) #Prds=%u rate=%u, width=%d, channels=%u\n",
 			snd_pcm_stream_str(substream), runtime->dma_bytes,
@@ -234,7 +234,6 @@ static int abox_wdma_trigger(struct snd_pcm_substream *substream, int cmd)
 	struct device *dev = platform->dev;
 	struct abox_platform_data *data = dev_get_drvdata(dev);
 	struct device *dev_abox = &data->pdev_abox->dev;
-	struct snd_pcm_runtime *runtime = substream->runtime;
 	int id = data->id;
 	int result;
 	ABOX_IPC_MSG msg;
@@ -250,9 +249,6 @@ static int abox_wdma_trigger(struct snd_pcm_substream *substream, int cmd)
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		if (memblock_is_memory(runtime->dma_addr))
-			abox_request_dram_on(data->pdev_abox, dev, true);
-
 		pcmtask_msg->param.trigger = 1;
 		result = abox_request_ipc(dev_abox,
 				msg.ipcid, &msg, sizeof(msg), 1, 0);
@@ -284,8 +280,6 @@ static int abox_wdma_trigger(struct snd_pcm_substream *substream, int cmd)
 			break;
 		}
 
-		if (memblock_is_memory(runtime->dma_addr))
-			abox_request_dram_on(data->pdev_abox, dev, false);
 		break;
 	default:
 		result = -EINVAL;
@@ -353,13 +347,13 @@ static int abox_wdma_open(struct snd_pcm_substream *substream)
 
 	if (data->type == PLATFORM_CALL) {
 		abox_request_cpu_gear_sync(dev, data->abox_data,
-				(void *)ABOX_CPU_GEAR_CALL_KERNEL, 1);
+				ABOX_CPU_GEAR_CALL_KERNEL, 1);
 		result = abox_request_l2c_sync(dev, data->abox_data, dev, true);
 		if (IS_ERR_VALUE(result))
 			return result;
 	}
 	pm_runtime_get_sync(rtd->codec->dev);
-	abox_request_cpu_gear(dev, data->abox_data, dev, 3);
+	abox_request_cpu_gear_dai(dev, data->abox_data, rtd->cpu_dai, 3);
 
 	snd_soc_set_runtime_hwparams(substream, &abox_wdma_hardware);
 
@@ -408,11 +402,11 @@ static int abox_wdma_close(struct snd_pcm_substream *substream)
 		break;
 	}
 
-	abox_request_cpu_gear(dev, data->abox_data, dev, 12);
+	abox_request_cpu_gear_dai(dev, data->abox_data, rtd->cpu_dai, 12);
 	pm_runtime_put(rtd->codec->dev);
 	if (data->type == PLATFORM_CALL) {
 		abox_request_cpu_gear_sync(dev, data->abox_data,
-				(void *)ABOX_CPU_GEAR_CALL_KERNEL,
+				ABOX_CPU_GEAR_CALL_KERNEL,
 				ABOX_CPU_GEAR_LOWER_LIMIT);
 		result = abox_request_l2c(dev, data->abox_data, dev, false);
 		if (IS_ERR_VALUE(result))

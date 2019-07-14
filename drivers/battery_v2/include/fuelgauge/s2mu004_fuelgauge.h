@@ -106,6 +106,9 @@ struct fg_age_data_info {
 	int accum[2];
 	int soc_arr_val[22];
 	int ocv_arr_val[22];
+#if defined(CONFIG_S2MU004_MODE_CHANGE_BY_TOPOFF)
+	int volt_mode_tunning;
+#endif
 };
 
 #define	fg_age_data_info_t \
@@ -157,6 +160,7 @@ struct s2mu004_fuelgauge_data {
 		bool is_charging;
 		int mode;
 		int revision;
+		int topoff_current;
 
 		/* HW-dedicated fuelgauge info structure
 		 * used in individual fuelgauge file only
@@ -169,6 +173,7 @@ struct s2mu004_fuelgauge_data {
 		int fg_age_step;
 		int age_reset_status;
 		struct mutex fg_reset_lock;
+		int change_step;
 #endif
 		bool is_fuel_alerted;
 		struct wake_lock fuel_alert_wake_lock;
@@ -176,6 +181,7 @@ struct s2mu004_fuelgauge_data {
 		unsigned int capacity_old;      /* only for atomic calculation */
 		unsigned int capacity_max;      /* only for dynamic calculation */
 		unsigned int standard_capacity;
+		int raw_capacity;
 
 		bool initial_update_of_soc;
 		bool sleep_initial_update_of_soc;

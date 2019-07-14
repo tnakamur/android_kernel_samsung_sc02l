@@ -55,13 +55,18 @@
 /* #define ENABLE_DRC */
 /* #define ENABLE_DIS */
 /* #define ENABLE_DNR_IN_TPU */
+#ifndef DISABLE_TDNR_IN_MCSC
 #define ENABLE_DNR_IN_MCSC
 #define ENABLE_DNR_COMPRESSOR_IN_MCSC
 #define MCSC_TDNR_YIC_MODE	(0)	/* enc/dec_mode> 0: compression, 1: raw mode */
+#endif	//DISABLE_TDNR_IN_MCSC
 #define ENABLE_10BIT_MCSC
 /* #define ENABLE_DJAG_IN_MCSC */
 #define ENABLE_VRA
-/*#define ENABLE_VRA_LIBRARY_IMPROVE*/ /* This feature will be defined in vendor config of each model */
+
+/* VRA 1.4 improvement - adding VRA 1.4 interface */
+#define ENABLE_VRA_LIBRARY_IMPROVE
+
 #if defined(ENABLE_VRA_LIBRARY_IMPROVE)
 #define ENABLE_VRA_CHANGE_SETFILE_PARSING
 #undef VRA_OLD_POSES
@@ -72,6 +77,7 @@
 
 #define USE_ONE_BINARY
 #define USE_RTA_BINARY
+#define USE_DDK_SHUT_DOWN_FUNC
 #define ENABLE_IRQ_MULTI_TARGET
 #define FIMC_IS_ONLINE_CPU_MIN	4
 /* #define USE_MCUCTL */
@@ -91,6 +97,7 @@
 #define USE_SENSOR_IF_DPHY
 #undef ENABLE_CLOCK_GATE
 /* #define ENABLE_DIRECT_CLOCK_GATE */
+#define ENABLE_HMP_BOOST
 
 /*
  * =================================================================================================
@@ -105,9 +112,9 @@
 #define CONFIG_FIMC_IS_BUS_DEVFREQ
 #endif
 #define DDK_OVERFLOW_RECOVERY		(1)	/* 0: do not execute recovery, 1: execute recovery */
-#define CAPTURE_NODE_MAX		6
+#define CAPTURE_NODE_MAX		12
 #define OTF_YUV_FORMAT			(OTF_INPUT_FORMAT_YUV422)
-/* #define USE_YUV_RANGE_BY_ISP */
+#define USE_YUV_RANGE_BY_ISP
 /* #define ENABLE_3AA_DMA_CROP */
 /* #define ENABLE_ULTRA_FAST_SHOT */
 #define ENABLE_HWFC
@@ -115,7 +122,7 @@
 /* #define TPU_COMPRESSOR */
 /* #define USE_I2C_LOCK */
 #undef ENABLE_FULL_BYPASS
-/* #define SENSOR_CONTROL_DELAY		2 */
+#define SENSOR_REQUEST_DELAY		2
 
 #ifdef ENABLE_IRQ_MULTI_TARGET
 #define FIMC_IS_HW_IRQ_FLAG     IRQF_GIC_MULTI_TARGET
@@ -134,6 +141,19 @@
 #define I2C_MUTEX_UNLOCK(lock)
 #endif
 
+/* init AWB */
+/* #define ENABLE_INIT_AWB */
+#define WB_GAIN_COUNT		(4)
+#define INIT_AWB_COUNT_REAR	(3)
+#define INIT_AWB_COUNT_FRONT	(7)
+
 /* #define ENABLE_DBG_EVENT_PRINT */
 
+#define USE_NEW_PER_FRAME_CONTROL
+/* HACK */
+#define DISABLE_CHECK_PERFRAME_FMT_SIZE
+
+#define FAST_FDAE
+
+#define CHAIN_SKIP_GFRAME_FOR_VRA
 #endif

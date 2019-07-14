@@ -17,6 +17,7 @@
 
 typedef enum {
 	attr_noop,
+	attr_sec_defrag_stat,
 	attr_sec_fs_stat,
 	attr_sec_fs_freefrag,
 	attr_delayed_allocation_blocks,
@@ -48,6 +49,34 @@ struct ext4_attr {
 		void *explicit_ptr;
 	} u;
 };
+
+static ssize_t sec_defrag_stat_show(struct ext4_attr *a,
+				struct ext4_sb_info *sbi, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE,
+		"\"%s\":\"%u\",\"%s\":\"%u\",\"%s\":\"%u\",\"%s\":\"%u\",\"%s\":\"%u\",\"%s\":\"%u\"\n",
+		"BESTEXT", 	sbi->s_sec_part_best_extents,
+		"CUREXT", 	sbi->s_sec_part_current_extents,
+		"DEFSCORE", sbi->s_sec_part_score,
+		"DEFWRITE", sbi->s_sec_defrag_writes_kb,
+		"NUMAPP", 	sbi->s_sec_num_apps,
+		"CAPAPP", 	sbi->s_sec_capacity_apps_kb);
+}
+
+static ssize_t sec_defrag_stat_store(struct ext4_attr *a,
+					  struct ext4_sb_info *sbi,
+					  const char *buf, size_t count)
+{
+	if (buf[0] == 'c' || buf[0] == 'C') {
+		sbi->s_sec_part_best_extents = 0;
+		sbi->s_sec_part_current_extents = 0;
+		sbi->s_sec_part_score = 0;
+		sbi->s_sec_defrag_writes_kb = 0;
+		sbi->s_sec_num_apps = 0;
+		sbi->s_sec_capacity_apps_kb = 0;
+	}
+	return count;
+}
 
 static ssize_t sec_fs_stat_show(struct ext4_attr *a,
 				struct ext4_sb_info *sbi, char *buf)
@@ -125,7 +154,7 @@ static ssize_t reserved_clusters_store(struct ext4_attr *a,
 	int ret;
 
 	ret = kstrtoull(skip_spaces(buf), 0, &val);
-	if (!ret || val >= clusters)
+	if (ret || val >= clusters)
 		return -EINVAL;
 
 	atomic64_set(&sbi->s_resv_clusters, val);
@@ -187,6 +216,14 @@ static struct ext4_attr ext4_attr_##_name = {			\
 
 #define ATTR_LIST(name) &ext4_attr_##name.attr
 
+EXT4_RW_ATTR_SBI_UI(sec_part_best_extents, s_sec_part_best_extents);
+EXT4_RW_ATTR_SBI_UI(sec_part_current_extents, s_sec_part_current_extents);
+EXT4_RW_ATTR_SBI_UI(sec_part_score, s_sec_part_score);
+EXT4_RW_ATTR_SBI_UI(sec_defrag_writes_kb, s_sec_defrag_writes_kb);
+EXT4_RW_ATTR_SBI_UI(sec_num_apps, s_sec_num_apps);
+EXT4_RW_ATTR_SBI_UI(sec_capacity_apps_kb, s_sec_capacity_apps_kb);
+
+EXT4_ATTR_FUNC(sec_defrag_stat, 0644);
 EXT4_ATTR_FUNC(sec_fs_stat, 0444);
 EXT4_ATTR_FUNC(sec_fs_freefrag, 0444);
 
@@ -220,6 +257,13 @@ static unsigned int old_bump_val = 128;
 EXT4_ATTR_PTR(max_writeback_mb_bump, 0444, pointer_ui, &old_bump_val);
 
 static struct attribute *ext4_attrs[] = {
+	ATTR_LIST(sec_part_best_extents),
+	ATTR_LIST(sec_part_current_extents),
+	ATTR_LIST(sec_part_score),
+	ATTR_LIST(sec_defrag_writes_kb),
+	ATTR_LIST(sec_num_apps),
+	ATTR_LIST(sec_capacity_apps_kb),
+	ATTR_LIST(sec_defrag_stat),
 	ATTR_LIST(sec_fs_stat),
 	ATTR_LIST(sec_fs_freefrag),
 	ATTR_LIST(delayed_allocation_blocks),
@@ -253,14 +297,18 @@ static struct attribute *ext4_attrs[] = {
 EXT4_ATTR_FEATURE(lazy_itable_init);
 EXT4_ATTR_FEATURE(batched_discard);
 EXT4_ATTR_FEATURE(meta_bg_resize);
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
 EXT4_ATTR_FEATURE(encryption);
+#endif
 EXT4_ATTR_FEATURE(metadata_csum_seed);
 
 static struct attribute *ext4_feat_attrs[] = {
 	ATTR_LIST(lazy_itable_init),
 	ATTR_LIST(batched_discard),
 	ATTR_LIST(meta_bg_resize),
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
 	ATTR_LIST(encryption),
+#endif
 	ATTR_LIST(metadata_csum_seed),
 	NULL,
 };
@@ -287,6 +335,8 @@ static ssize_t ext4_attr_show(struct kobject *kobj,
 	void *ptr = calc_ptr(a, sbi);
 
 	switch (a->attr_id) {
+	case attr_sec_defrag_stat:
+		return sec_defrag_stat_show(a, sbi, buf);
 	case attr_sec_fs_stat:
 		return sec_fs_stat_show(a, sbi, buf);
 	case attr_sec_fs_freefrag:
@@ -333,6 +383,8 @@ static ssize_t ext4_attr_store(struct kobject *kobj,
 	int ret;
 
 	switch (a->attr_id) {
+	case attr_sec_defrag_stat:
+		return sec_defrag_stat_store(a, sbi, buf, len);
 	case attr_reserved_clusters:
 		return reserved_clusters_store(a, sbi, buf, len);
 	case attr_pointer_ui:

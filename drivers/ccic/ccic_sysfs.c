@@ -24,16 +24,29 @@
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/ccic/ccic_sysfs.h>
+
 #ifdef CONFIG_CCIC_S2MM005
 #include <linux/ccic/s2mm005.h>
 #include <linux/ccic/s2mm005_ext.h>
 #include <linux/ccic/s2mm005_fw.h>
 #include <linux/regulator/consumer.h>
 #endif
+
 #ifdef CONFIG_CCIC_S2MU004
 #include <linux/ccic/usbpd.h>
 #include <linux/ccic/usbpd-s2mu004.h>
 #endif
+
+#ifdef CONFIG_CCIC_S2MU106
+#include <linux/ccic/usbpd.h>
+#include <linux/ccic/usbpd-s2mu106.h>
+#endif
+
+#ifdef CONFIG_CCIC_S2MU205
+#include <linux/ccic/usbpd.h>
+#include <linux/ccic/usbpd-s2mu205.h>
+#endif
+
 #if defined(CONFIG_CCIC_ALTERNATE_MODE)
 #include <linux/ccic/ccic_alternate.h>
 #endif
@@ -65,6 +78,22 @@ static ssize_t ccic_cur_ver_show(struct device *dev,
 }
 static DEVICE_ATTR(cur_version, 0444, ccic_cur_ver_show, NULL);
 
+#ifdef CONFIG_CCIC_S2MU205
+static ssize_t ccic_chip_name_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct s2mu205_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+	
+	if (!usbpd_data) {
+		pr_err("%s usbpd_data is null!!\n", __func__);
+		return -ENODEV;
+	}
+
+	return sprintf(buf, "%s\n", usbpd_data->name);
+}
+static DEVICE_ATTR(chip_name, 0444, ccic_chip_name_show, NULL);
+#endif
+		
 static ssize_t ccic_src_ver_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -98,8 +127,15 @@ static ssize_t ccic_show_manual_lpm_mode(struct device *dev,
 
 	return sprintf(buf, "%d\n", usbpd_data->manual_lpm_mode);
 #else
+#ifdef CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *usbpd_data = dev_get_drvdata(dev);
-
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
 	if (!usbpd_data) {
 		pr_err("%s usbpd_data is null!!\n", __func__);
 		return -ENODEV;
@@ -151,7 +187,15 @@ static ssize_t ccic_store_manual_lpm_mode(struct device *dev,
 
 	return size;
 #else
+#ifdef CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
 	int mode;
 
 	if (!usbpd_data) {
@@ -165,13 +209,40 @@ static ssize_t ccic_store_manual_lpm_mode(struct device *dev,
 	mutex_lock(&usbpd_data->lpm_mutex);
 
 #ifdef CONFIG_SEC_FACTORY
-	if (mode != 1 && mode != 2)
+	if (mode != 1 && mode != 2) {
+#ifdef CONFIG_CCIC_S2MU004
 		s2mu004_set_normal_mode(usbpd_data);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+		s2mu106_set_normal_mode(usbpd_data);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+		s2mu205_set_normal_mode(usbpd_data);
+#endif
+	}
 #else
-	if (mode == 1 || mode == 2)
+	if (mode == 1 || mode == 2) {
+#ifdef CONFIG_CCIC_S2MU004
 		s2mu004_set_lpm_mode(usbpd_data);
-	else
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+		s2mu106_set_lpm_mode(usbpd_data);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+		s2mu205_set_lpm_mode(usbpd_data);
+#endif
+	}
+	else {
+#ifdef CONFIG_CCIC_S2MU004
 		s2mu004_set_normal_mode(usbpd_data);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+		s2mu106_set_normal_mode(usbpd_data);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+		s2mu205_set_normal_mode(usbpd_data);
+#endif
+	}
 #endif
 
 	mutex_unlock(&usbpd_data->lpm_mutex);
@@ -197,7 +268,15 @@ static ssize_t ccic_state_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", usbpd_data->pd_state);
 #else
+#ifdef CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
 
 	if (!usbpd_data) {
 		pr_err("%s usbpd_data is null!!\n", __func__);
@@ -231,7 +310,15 @@ static ssize_t ccic_rid_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", usbpd_data->cur_rid);
 #else
+#ifdef CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
 
 	if (!usbpd_data) {
 		pr_err("%s usbpd_data is null!!\n", __func__);
@@ -263,7 +350,15 @@ static ssize_t ccic_store_control_option_command(struct device *dev,
 
 	return size;
 #else
+#ifdef CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
 	int cmd;
 
 	if (!usbpd_data) {
@@ -274,8 +369,15 @@ static ssize_t ccic_store_control_option_command(struct device *dev,
 	sscanf(buf, "%d", &cmd);
 	pr_info("usb: %s mode=%d\n", __func__, cmd);
 
+#ifdef CONFIG_CCIC_S2MU004
 	s2mu004_control_option_command(usbpd_data, cmd);
-
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	s2mu106_control_option_command(usbpd_data, cmd);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	s2mu205_control_option_command(usbpd_data, cmd);
+#endif
 	return size;
 
 #endif
@@ -642,10 +744,12 @@ static ssize_t ccic_send_role_swap_message(struct device *dev,
 	return size;
 }
 static DEVICE_ATTR(role_swap, 0220, NULL, ccic_send_role_swap_message);
+#endif
 
 static ssize_t ccic_acc_device_version_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
+#ifdef CONFIG_CCIC_S2MM005
 	struct s2mm005_data *usbpd_data = dev_get_drvdata(dev);
 
 	if (!usbpd_data) {
@@ -655,9 +759,41 @@ static ssize_t ccic_acc_device_version_show(struct device *dev,
 	pr_info("%s 0x%04x\n", __func__, usbpd_data->Device_Version);
 
 	return sprintf(buf, "%04x\n", usbpd_data->Device_Version);
+#else
+#ifdef CONFIG_CCIC_S2MU004
+	struct s2mu004_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
+	struct usbpd_data *pd_data;
+	struct usbpd_manager_data *manager;
+
+	if (!pdic_data) {
+		pr_err("%s data is null!!\n", __func__);
+		return -ENODEV;
+	}
+
+	pd_data = dev_get_drvdata(pdic_data->dev);
+	if (!pd_data) {
+		pr_err("%s usbpd_data is null!!\n", __func__);
+		return -ENODEV;
+	}
+
+	manager = &pd_data->manager;
+	if (!manager) {
+		pr_err("%s manager_data is null!!\n", __func__);
+		return -ENODEV;
+	}
+	pr_info("%s 0x%04x\n", __func__, manager->Device_Version);
+
+	return sprintf(buf, "%04x\n", manager->Device_Version);
+#endif
 }
 static DEVICE_ATTR(acc_device_version, 0444, ccic_acc_device_version_show,NULL);
-#endif
 
 #ifdef CONFIG_CCIC_S2MM005
 static ssize_t ccic_set_gpio(struct device *dev,
@@ -811,13 +947,21 @@ static ssize_t ccic_usbpd_ids_show(struct device *dev,
 	pr_info("usb: %s : %s",
 		__func__, buf);
 #else
+#ifdef CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
 	struct usbpd_data *pd_data;
 	struct usbpd_manager_data *manager;
 	int retval = 0;
 
 	if (!pdic_data) {
-		pr_err("%s s2mu004_data is null!!\n", __func__);
+		pr_err("%s data is null!!\n", __func__);
 		return -ENODEV;
 	}
 
@@ -858,13 +1002,21 @@ static ssize_t ccic_usbpd_type_show(struct device *dev,
 	pr_info("usb: %s : %d",
 		__func__, usbpd_data->acc_type);
 #else
+#ifdef CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *pdic_data = dev_get_drvdata(dev);
+#endif
 	struct usbpd_data *pd_data;
 	struct usbpd_manager_data *manager;
 	int retval = 0;
 
 	if (!pdic_data) {
-		pr_err("%s s2mu004_data is null!!\n", __func__);
+		pr_err("%s data is null!!\n", __func__);
 		return -ENODEV;
 	}
 
@@ -902,7 +1054,15 @@ static ssize_t ccic_water_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", (usbpd_data->water_det | !usbpd_data->run_dry));
 #else
+#ifdef CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+#ifdef CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
 
 	if(!usbpd_data) {
 		pr_err("%s usbpd_data is null!!\n", __func__);
@@ -938,14 +1098,17 @@ static struct attribute *ccic_attributes[] = {
 	&dev_attr_samsung_uvdm.attr,
 	&dev_attr_dna_audio_uvdm.attr,
 	&dev_attr_dex_fan_uvdm.attr,
-	&dev_attr_acc_device_version.attr,
 #endif
+	&dev_attr_acc_device_version.attr,
 	&dev_attr_usbpd_ids.attr,
 	&dev_attr_usbpd_type.attr,
 #ifdef CONFIG_CCIC_S2MM005
 	&dev_attr_control_gpio.attr,
 #endif
 	&dev_attr_water.attr,
+#ifdef CONFIG_CCIC_S2MU205
+	&dev_attr_chip_name.attr,
+#endif
 	NULL
 };
 

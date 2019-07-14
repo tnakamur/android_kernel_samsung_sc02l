@@ -15,6 +15,9 @@ ccflags-y += $(CONFIG_SAMSUNG_MAXWELL_EXTRA)
 
 obj-$(CONFIG_SCSC_DEBUG) += scsc_logring.o
 scsc_logring-y += scsc_logring_main.o scsc_logring_ring.o scsc_logring_debugfs.o
+
+obj-$(CONFIG_SCSC_LOG_COLLECTION) += scsc_log_collection.o
+scsc_log_collection-y += scsc_log_collector.o scsc_log_collector_proc.o scsc_log_collector_mmap.o
 ##
 ## The following cumbersome ifeq/else is the only way to make
 ## this CONFIG_SCSC_PRINTK propagate correctly in any scenario (y,m,n)
@@ -79,6 +82,8 @@ scsc_mx-y += \
 	mxmgmt_transport.o \
 	gdb_transport.o \
 	mx140_file.o
+scsc_mx-$(CONFIG_SCSC_MXLOGGER) += mxlogger.o
+
 
 scsc_mx-$(CONFIG_SCSC_WLBTD) += scsc_wlbtd.o
 

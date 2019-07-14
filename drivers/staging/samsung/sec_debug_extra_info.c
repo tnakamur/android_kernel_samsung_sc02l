@@ -386,7 +386,7 @@ void sec_debug_set_extra_info_backtrace(struct pt_regs *regs)
 		unsigned long where = frame.pc;
 		int ret;
 
-		ret = unwind_frame(&frame);
+		ret = unwind_frame(NULL, &frame);
 		if (ret < 0)
 			break;
 
@@ -439,7 +439,7 @@ void sec_debug_set_extra_info_backtrace_cpu(struct pt_regs *regs, int cpu)
 		unsigned long where = frame.pc;
 		int ret;
 
-		ret = unwind_frame(&frame);
+		ret = unwind_frame(NULL, &frame);
 		if (ret < 0)
 			break;
 

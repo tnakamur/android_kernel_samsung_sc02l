@@ -102,6 +102,7 @@ obj-$(CONFIG_USB_PHY)		+= usb/
 obj-$(CONFIG_USB)		+= usb/
 obj-$(CONFIG_PCI)		+= usb/
 obj-$(CONFIG_USB_GADGET)	+= usb/
+obj-$(CONFIG_OF)		+= usb/
 obj-$(CONFIG_SERIO)		+= input/serio/
 obj-$(CONFIG_GAMEPORT)		+= input/gameport/
 obj-$(CONFIG_INPUT)		+= input/
@@ -194,6 +195,7 @@ obj-y                           += motor/
 
 # CCIC
 obj-y	+= ccic/
+obj-$(CONFIG_TEE)		+= tee/
 
 #Sensorhub
 obj-$(CONFIG_SENSORS_SSP)       += sensorhub/
@@ -209,3 +211,7 @@ obj-$(CONFIG_UH) 		+= uh/
 
 # FIVE TEE driver
 obj-$(CONFIG_FIVE_TEE_DRIVER)	+= five/
+obj-$(CONFIG_ICD)		+= icdrv/
+
+# GNSS
+obj-$(CONFIG_GPS_BCM4753)	+= gps/

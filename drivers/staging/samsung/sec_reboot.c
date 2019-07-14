@@ -57,8 +57,14 @@ enum sec_reset_reason {
 	SEC_RESET_REASON_FWUP      = (SEC_RESET_REASON_PREFIX | 0x9), /* emergency firmware update */
 	SEC_RESET_REASON_EM_FUSE   = (SEC_RESET_REASON_PREFIX | 0xa), /* EMC market fuse */
 	SEC_RESET_REASON_BOOTLOADER   = (SEC_RESET_REASON_PREFIX | 0xd), /* go to download mode */
+#ifdef CONFIG_MUIC_S2MU005
+	SEC_RESET_REASON_MUIC_1K   = (SEC_RESET_REASON_PREFIX | 0xe), /* setting for muic 1k */
+#endif
+#ifdef CONFIG_SEC_PERIPHERAL_SECURE_CHK
+	SEC_RESET_REASON_CROSS_FAIL   = (SEC_RESET_REASON_PREFIX | 0xf), /* setting for muic 1k */
+#endif
 	SEC_RESET_REASON_EMERGENCY = 0x0,
-
+	SEC_RESET_SET_FORCE_UPLOAD = (SEC_RESET_SET_PREFIX | 0x40000),
 	SEC_RESET_SET_DEBUG        = (SEC_RESET_SET_PREFIX | 0xd0000),
 	SEC_RESET_SET_SWSEL        = (SEC_RESET_SET_PREFIX | 0xe0000),
 	SEC_RESET_SET_SUD          = (SEC_RESET_SET_PREFIX | 0xf0000),
@@ -188,6 +194,14 @@ static void sec_reboot(enum reboot_mode reboot_mode, const char *cmd)
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_FWUP);
 		else if (!strcmp(cmd, "em_mode_force_user"))
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_EM_FUSE);
+#ifdef CONFIG_MUIC_S2MU005
+		else if (!strcmp(cmd, "muic_1k"))
+			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_MUIC_1K);
+#endif
+#ifdef CONFIG_SEC_PERIPHERAL_SECURE_CHK
+		else if (!strcmp(cmd, "cross_fail"))
+			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_CROSS_FAIL);
+#endif
 #if defined(CONFIG_SEC_ABC)
 		else if (!strcmp(cmd, "user_dram_test") && sec_abc_get_enabled())
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_USER_DRAM_TEST);
@@ -196,6 +210,10 @@ static void sec_reboot(enum reboot_mode reboot_mode, const char *cmd)
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_EMERGENCY);
 		else if (!strncmp(cmd, "debug", 5) && !kstrtoul(cmd + 5, 0, &value))
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_SET_DEBUG | value);
+#if defined(CONFIG_SEC_DEBUG_SUPPORT_FORCE_UPLOAD)
+		else if (!strncmp(cmd, "forceupload", 11) && !kstrtoul(cmd + 11, 0, &value))
+			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_SET_FORCE_UPLOAD | value);
+#endif
 		else if (!strncmp(cmd, "swsel", 5) && !kstrtoul(cmd + 5, 0, &value))
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_SET_SWSEL | value);
 		else if (!strncmp(cmd, "sud", 3) && !kstrtoul(cmd + 3, 0, &value))

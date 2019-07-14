@@ -451,6 +451,7 @@ int sensor_2p6_cis_set_global_setting(struct v4l2_subdev *subdev)
 	cis = (struct fimc_is_cis *)v4l2_get_subdevdata(subdev);
 	BUG_ON(!cis);
 
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	/* ARM start */
 	ret = fimc_is_sensor_write16(cis->client, 0xFCFC, 0x4000);
 	ret = fimc_is_sensor_write16(cis->client, 0x6010, 0x0001);
@@ -475,6 +476,7 @@ int sensor_2p6_cis_set_global_setting(struct v4l2_subdev *subdev)
 	dbg_sensor(1, "[%s] global setting done\n", __func__);
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -519,26 +521,26 @@ int sensor_2p6_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 #ifdef USE_AP_PDAF
 	if (cis->use_pdaf == true) {
 		if (mode <= SENSOR_2P6_MODE_2304X1120_30) {
-			cis->cis_data->companion_data.paf_stat_enable = true;
+			cis->cis_data->is_data.paf_stat_enable = true;
 		} else {
-			cis->cis_data->companion_data.paf_stat_enable = false;
+			cis->cis_data->is_data.paf_stat_enable = false;
 		}
 		dbg_sensor(1, "[%s] mode(%d) paf_stat_enable(%d) \n",
-			__func__, mode, cis->cis_data->companion_data.paf_stat_enable);
+			__func__, mode, cis->cis_data->is_data.paf_stat_enable);
 	}
 #endif
 
 #if defined(USE_SENSOR_WDR)
 	/* In case of fastAE or high speed fps, forced to set wdr off */
 	if (mode <= SENSOR_2P6_MODE_4608X2240_30) {
-		cis->cis_data->companion_data.wdr_enable = true;
+		cis->cis_data->is_data.wdr_enable = true;
 	} else {
-		cis->cis_data->companion_data.wdr_enable = false;
+		cis->cis_data->is_data.wdr_enable = false;
 	}
 	dbg_sensor(1, "[%s] mode(%d) wdr_enable(%d) \n",
-		__func__, mode, cis->cis_data->companion_data.wdr_enable);
+		__func__, mode, cis->cis_data->is_data.wdr_enable);
 #endif
-
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 #ifdef USE_AP_PDAF
 	if (cis->use_pdaf == true) {
 		sensor_2p6_cis_data_calculation(sensor_2p6_pdaf_pllinfos[mode], cis->cis_data);
@@ -573,9 +575,9 @@ int sensor_2p6_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 #endif
 
 		/* pdaf tail mode off */
-		if (cis->cis_data->companion_data.paf_stat_enable == false) {
+		if (cis->cis_data->is_data.paf_stat_enable == false) {
 			info("[%s]: Set pdaf tail mode off (paf_stat_enable %d)\n",
-				__func__, cis->cis_data->companion_data.paf_stat_enable);
+				__func__, cis->cis_data->is_data.paf_stat_enable);
 
 			ret = fimc_is_sensor_write16(cis->client, 0x6028, 0x2000);
 			if (ret < 0) {
@@ -598,7 +600,7 @@ int sensor_2p6_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 	{
 		/* pdaf tail mode off */
 		info("[%s]: Set pdaf tail mode off (paf_stat_enable %d)\n",
-			__func__, cis->cis_data->companion_data.paf_stat_enable);
+			__func__, cis->cis_data->is_data.paf_stat_enable);
 
 		ret = fimc_is_sensor_write16(cis->client, 0x6028, 0x2000);
 		if (ret < 0) {
@@ -619,7 +621,7 @@ int sensor_2p6_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 #endif
 
 #if defined(USE_SENSOR_WDR)
-	if (cis->cis_data->companion_data.wdr_enable == false) {
+	if (cis->cis_data->is_data.wdr_enable == false) {
 		info("[%s] S5K2P6_WDR_DISABLE\n", __func__);
 		ret = fimc_is_sensor_write16(cis->client, 0x6028, 0x4000);
 		if (ret < 0) {
@@ -638,6 +640,7 @@ int sensor_2p6_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 	dbg_sensor(1, "[%s] mode changed(%d)\n", __func__, mode);
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -701,7 +704,7 @@ int sensor_2p6_cis_set_size(struct v4l2_subdev *subdev, cis_shared_data *cis_dat
 		ret = -EINVAL;
 		goto p_err;
 	}
-
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	/* 1. page_select */
 	ret = fimc_is_sensor_write16(client, 0x6028, 0x2000);
 	if (ret < 0)
@@ -795,6 +798,7 @@ int sensor_2p6_cis_set_size(struct v4l2_subdev *subdev, cis_shared_data *cis_dat
 #endif
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	return ret;
 }
 
@@ -1932,6 +1936,7 @@ int cis_2p6_probe(struct i2c_client *client,
 #ifdef USE_AP_PDAF
 	if (of_property_read_bool(dnode, "use_pdaf")) {
 		use_pdaf = true;
+		probe_info("2p6 use to pdaf mode");
 	}
 #endif
 

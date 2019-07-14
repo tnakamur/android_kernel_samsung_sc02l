@@ -234,13 +234,14 @@ void dpu_prepare_win_update_config(struct decon_device *decon,
 	struct decon_win_config *win_config = win_data->config;
 	bool reconfigure = false;
 	struct decon_rect r;
-#if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
 	struct decon_win_config *update_config = &win_config[DECON_WIN_UPDATE_IDX];
 
-	if ((decon->dt.out_type == DECON_OUT_DSI) && (decon->doze_state == DOZE_STATE_DOZE)) {
+#if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
+	if ((decon->dt.out_type == DECON_OUT_DSI) && (decon->doze_state == DOZE_STATE_DOZE))
 		memset(update_config, 0, sizeof(struct decon_win_config));
-	}
 #endif
+	if (decon->partial_force_disable)
+		memset(update_config, 0, sizeof(struct decon_win_config));
 
 	if (!decon->win_up.enabled)
 		return;
@@ -296,6 +297,9 @@ static int win_update_send_partial_command(struct dsim_device *dsim,
 	DPU_DEBUG_WIN("SET: [%d %d %d %d]\n", rect->left, rect->top,
 			rect->right - rect->left + 1, rect->bottom - rect->top + 1);
 
+	if (!dsim->priv.lcdconnected)
+		return 0;
+
 	column[0] = MIPI_DCS_SET_COLUMN_ADDRESS;
 	column[1] = (rect->left >> 8) & 0xff;
 	column[2] = rect->left & 0xff;
@@ -329,6 +333,8 @@ static int win_update_send_partial_command(struct dsim_device *dsim,
 			return -EINVAL;
 		}
 	}
+
+	dsim_wait_for_cmd_done(dsim);
 
 	return 0;
 }

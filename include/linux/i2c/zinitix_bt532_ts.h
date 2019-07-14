@@ -26,6 +26,13 @@
 #define TCLM_CONCEPT
 #endif
 
+/*
+ * bit value should be made a promise with InputFramework.
+ *	bit	: feature
+ *	0	: AOT -Doubletap wakeup in whole screen when LCD off.
+ */
+#define INPUT_FEATURE_SUPPORT_AOT		(1 << 0)
+
 /* TCLM_CONCEPT */
 #define BT532_TS_NVM_OFFSET_FAC_RESULT			0
 #define BT532_TS_NVM_OFFSET_DISASSEMBLE_COUNT		2
@@ -130,6 +137,8 @@ struct bt532_ts_platform_data {
 	bool		support_touchkey;
 	bool		support_spay;
 	bool		support_aod;
+	bool		support_aot;
+	bool		support_ear_detect;
 	bool		support_lpm_mode;
 	bool		bringup;
 	bool		mis_cal_check;

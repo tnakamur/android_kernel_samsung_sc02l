@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (c) 2014 - 2016 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2014 - 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
 #include <linux/types.h>
@@ -163,10 +163,29 @@ static int slsi_rx_netdev_mlme(struct slsi_dev *sdev, struct net_device *dev, st
 	case MLME_RSSI_REPORT_IND:
 		slsi_rx_rssi_report_ind(sdev, dev, skb);
 		break;
+	case MLME_RANGE_IND:
+		slsi_rx_range_ind(sdev, dev, skb);
+		break;
+	case MLME_RANGE_DONE_IND:
+		slsi_rx_range_done_ind(sdev, dev, skb);
+		break;
+
 #endif
-#ifdef CONFIG_SCSC_WLAN_ENHANCED_LOGGING
 	case MLME_EVENT_LOG_IND:
 		slsi_rx_event_log_indication(sdev, dev, skb);
+		break;
+#ifdef CONFIG_SCSC_WIFI_NAN_ENABLE
+	case MLME_NAN_EVENT_IND:
+		slsi_nan_event(sdev, dev, skb);
+		slsi_kfree_skb(skb);
+		break;
+	case MLME_NAN_FOLLOWUP_IND:
+		slsi_nan_followup_ind(sdev, dev, skb);
+		slsi_kfree_skb(skb);
+		break;
+	case MLME_NAN_SERVICE_IND:
+		slsi_nan_service_ind(sdev, dev, skb);
+		slsi_kfree_skb(skb);
 		break;
 #endif
 	default:
@@ -313,6 +332,17 @@ static int sap_mlme_rx_handler(struct slsi_dev *sdev, struct sk_buff *skb)
 			return slsi_rx_enqueue_netdev_mlme(sdev, skb,  SLSI_NET_INDEX_WLAN);
 		case MLME_SIGNIFICANT_CHANGE_IND:
 			return slsi_rx_enqueue_netdev_mlme(sdev, skb, SLSI_NET_INDEX_WLAN);
+
+		case MLME_NAN_EVENT_IND:
+		case MLME_NAN_FOLLOWUP_IND:
+		case MLME_NAN_SERVICE_IND:
+			return slsi_rx_enqueue_netdev_mlme(sdev, skb, vif);
+		case MLME_RANGE_IND:
+		case MLME_RANGE_DONE_IND:
+			if (vif == 0)
+				return slsi_rx_enqueue_netdev_mlme(sdev, skb, SLSI_NET_INDEX_WLAN);
+			else
+				return slsi_rx_enqueue_netdev_mlme(sdev, skb, vif);
 #endif
 #ifdef CONFIG_SCSC_WLAN_ENHANCED_LOGGING
 		case MLME_EVENT_LOG_IND:

@@ -22,65 +22,27 @@
 #include <linux/err.h>
 #include <linux/scatterlist.h>
 #include <linux/smc.h>
-
+#include "fmp_fips_integrity.h"
 #include "hmac-sha256.h"
 #include "fmp_fips_info.h" /* for FIPS_FMP_FUNC_TEST macro */
+#undef FIPS_DEBUG_INTEGRITY
 
-#undef FIPS_DEBUG
-
-/* Same as build time */
 static const unsigned char *integrity_check_key = "The quick brown fox jumps over the lazy dog";
 
-static const char *symtab[][3] = {
-		{".text",	"first_fmp_text",	"last_fmp_text"  },
-		{".rodata",	"first_fmp_rodata",	"last_fmp_rodata"},
-		{".init.text",	"first_fmp_init",	"last_fmp_init"  } };
-
-extern const char *get_builtime_fmp_hmac(void);
-
-#ifdef FIPS_DEBUG
-static int
-dump_bytes(const char *section_name, const char *first_symbol, const char *last_symbol)
+/*
+ * This function return kernel offset.
+ * If CONFIG_RELOCATABLE is set
+ * Then the kernel will be placed into the random offset in memory
+ * At the build time, we write self address of the "buildtime_address"
+ * to the "buildtime_address" variable
+ */
+static __u64 get_kernel_offset(void)
 {
-	u8 *start_addr = (u8 *)kallsyms_lookup_name(first_symbol);
-	u8 *end_addr   = (u8 *)kallsyms_lookup_name(last_symbol);
-
-	if (!start_addr || !end_addr || start_addr >= end_addr) {
-		pr_err("FIPS(%s): Error Invalid Address Section:%s, Start_Addr:%p, End_Addr:%p\n",
-			__func__, section_name, start_addr, end_addr);
-		return -1;
-	}
-
-	pr_info("FIPS FMP RUNTIME : Section - %s, %s : %p, %s : %p\n",
-		section_name, first_symbol, start_addr, last_symbol, end_addr);
-	print_hex_dump_bytes("FIPS FMP RUNTIME : ",
-		DUMP_PREFIX_NONE, start_addr, end_addr - start_addr);
-
-	return 0;
+	static __u64 runtime_address = (__u64) &fmp_buildtime_address;
+	__u64 kernel_offset = abs(fmp_buildtime_address - runtime_address);
+	return kernel_offset;
 }
-#endif
 
-static int query_symbol_addresses(const char *first_symbol, const char *last_symbol,
-				unsigned long *start_addr, unsigned long *end_addr)
-{
-	unsigned long start = kallsyms_lookup_name(first_symbol);
-	unsigned long end = kallsyms_lookup_name(last_symbol);
-
-#ifdef FIPS_DEBUG
-	pr_err("FIPS CRYPTO RUNTIME : %s : %p, %s : %p\n",
-		first_symbol, (u8 *)start, last_symbol, (u8 *)end);
-#endif
-
-	if (!start || !end || start >= end) {
-		pr_err("FIPS(%s): Error Invalid Addresses.", __func__);
-		return -1;
-	}
-
-	*start_addr = start;
-	*end_addr = end;
-
-	return 0;
-}
 
 int do_fmp_integrity_check(void)
 {
@@ -91,6 +53,10 @@ int do_fmp_integrity_check(void)
 	struct hmac_sha256_ctx ctx;
 	const char *builtime_hmac = 0;
 	unsigned int size = 0;
+#ifdef FIPS_DEBUG_INTEGRITY
+	unsigned int covered = 0;
+	unsigned int num_addresses = 0;
+#endif
 
 	memset(runtime_hmac, 0x00, 32);
 
@@ -100,19 +66,21 @@ int do_fmp_integrity_check(void)
 		return -1;
 	}
 
-	rows = (unsigned int)sizeof(symtab) / sizeof(symtab[0]);
+	rows = (__u32) ARRAY_SIZE(integrity_fmp_addrs);
 
-	for (i = 0; i < rows; i++) {
-		err = query_symbol_addresses(symtab[i][1], symtab[i][2], &start_addr, &end_addr);
-		if (err) {
-			pr_err("FIPS(%s): Error to get start / end addresses\n",
-				__func__);
-			return -1;
-		}
+	for (i = 0; integrity_fmp_addrs[i].first && i < rows; i++) {
 
-#ifdef FIPS_DEBUG
-		dump_bytes(symtab[i][0], symtab[i][1], symtab[i][2]);
+		start_addr = integrity_fmp_addrs[i].first + get_kernel_offset();
+		end_addr   = integrity_fmp_addrs[i].last  + get_kernel_offset();
+
+		/* Print addresses for HMAC calculation */
+#ifdef FIPS_DEBUG_INTEGRITY
+		pr_info("FIPS_DEBUG_INTEGRITY : first last %08llux %08llux\n",
+			integrity_fmp_addrs[i].first,
+			integrity_fmp_addrs[i].last);
+		covered += (end_addr - start_addr);
 #endif
+
 		size = end_addr - start_addr;
 
 		err = hmac_sha256_update(&ctx,
@@ -128,6 +96,18 @@ int do_fmp_integrity_check(void)
 	err = hmac_sha256_update(&ctx, (unsigned char *)start_addr, 1);
 #endif
 
+/* Dump bytes for HMAC */
+#ifdef FIPS_DEBUG_INTEGRITY
+	num_addresses = i;
+	for (i = 0; integrity_fmp_addrs[i].first && i < rows; i++) {
+		start_addr = integrity_fmp_addrs[i].first + get_kernel_offset();
+		end_addr   = integrity_fmp_addrs[i].last  + get_kernel_offset();
+		size = end_addr - start_addr;
+		print_hex_dump(KERN_INFO, "FIPS_DEBUG_INTEGRITY : bytes for HMAC = ",
+			DUMP_PREFIX_NONE, 16, 1,
+			(char *)start_addr, size, false);
+	}
+#endif
 	err = hmac_sha256_final(&ctx, runtime_hmac);
 	if (err) {
 		pr_err("FIPS(%s): Error in finalize", __func__);
@@ -136,18 +116,16 @@ int do_fmp_integrity_check(void)
 	}
 
 	hmac_sha256_ctx_cleanup(&ctx);
-	builtime_hmac = get_builtime_fmp_hmac();
-	if (!builtime_hmac) {
-		pr_err("FIPS(%s): Unable to retrieve builtime_hmac", __func__);
-		return -1;
-	}
+	builtime_hmac = builtime_fmp_hmac;
 
-#ifdef FIPS_DEBUG
-	print_hex_dump_bytes("FIPS CRYPTO RUNTIME : runtime hmac  = ",
-			DUMP_PREFIX_NONE, runtime_hmac, sizeof(runtime_hmac));
-	print_hex_dump_bytes("FIPS CRYPTO RUNTIME : builtime_hmac = ",
-			DUMP_PREFIX_NONE, builtime_hmac, sizeof(runtime_hmac));
+#ifdef FIPS_DEBUG_INTEGRITY
+	pr_info("FIPS_DEBUG_INTEGRITY : %d bytes are covered, Address fragments (%d)", covered, num_addresses);
+	print_hex_dump(KERN_INFO, "FIPS FMP RUNTIME : runtime hmac  = ",
+		DUMP_PREFIX_NONE, 16, 1, runtime_hmac, sizeof(runtime_hmac), false);
+	print_hex_dump(KERN_INFO, "FIPS FMP RUNTIME : builtime_hmac = ",
+		DUMP_PREFIX_NONE, 16, 1, builtime_hmac, sizeof(runtime_hmac), false);
 #endif
+
 
 	if (!memcmp(builtime_hmac, runtime_hmac, sizeof(runtime_hmac))) {
 		pr_info("FIPS(%s): Integrity Check Passed", __func__);

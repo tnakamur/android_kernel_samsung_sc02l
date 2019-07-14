@@ -36,7 +36,13 @@
 #define SENSOR_TYPE_SCONTEXT                        (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 5)
 #define SENSOR_TYPE_MOBEAM                          (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 6)
 #define SENSOR_TYPE_LIGHT_CCT                       (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 7)
+#if ANDROID_VERSION >= 90000
+#define SENSOR_TYPE_CALL_GESTURE                    (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 8)
+#define SENSOR_TYPE_WAKE_UP_MOTION                  (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 9)
+#define SENSOR_TYPE_MAX                             (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 10)
+#else
 #define SENSOR_TYPE_MAX                             (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 8)
+#endif
 #else
 #define SENSOR_TYPE_MOBEAM                          (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 5)
 #define SENSOR_TYPE_MAX                             (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 6)

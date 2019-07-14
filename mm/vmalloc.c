@@ -127,8 +127,14 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr,
 	 * nr is a running index into the array which helps higher level
 	 * callers keep track of where we're up to.
 	 */
-
+#ifdef CONFIG_UH_RKP
+	unsigned long paddr = addr;
+	if(pgprot_rkp_ro(prot))
+		paddr &= (~PTE_RKP_RO);
+	pte = pte_alloc_kernel(pmd, paddr);
+#else
 	pte = pte_alloc_kernel(pmd, addr);
+#endif
 	if (!pte)
 		return -ENOMEM;
 	do {
@@ -472,8 +478,8 @@ overflow:
 		goto retry;
 	}
 	if (printk_ratelimit())
-		pr_warn("vmap allocation for size %lu failed: "
-			"use vmalloc=<size> to increase size.\n", size);
+		pr_warn("vmap allocation for size %lu failed: use vmalloc=<size> to increase size\n",
+			size);
 	kfree(va);
 	return ERR_PTR(-EBUSY);
 }
@@ -1145,11 +1151,7 @@ void *vm_map_ram(struct page **pages, unsigned int count, int node, pgprot_t pro
 }
 EXPORT_SYMBOL(vm_map_ram);
 
-#ifdef CONFIG_UH_RKP
-struct vm_struct *vmlist __initdata;
-#else
 static struct vm_struct *vmlist __initdata;
-#endif
 
 /**
  * vm_area_add_early - add vmap area early during boot

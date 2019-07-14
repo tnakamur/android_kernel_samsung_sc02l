@@ -156,9 +156,19 @@ struct tdmb_i2c_dev {
 struct tdmb_dt_platform_data {
 	int tdmb_irq;
 	int tdmb_en;
+	int tdmb_lna_en;
+	bool tdmb_lna_gpio_req;
+	int tdmb_ant1_sw;
+	bool tdmb_ant1_gpio_req;
+	int tdmb_ant1_sel;
+	int tdmb_ant2_sw;
+	bool tdmb_ant2_gpio_req;
+	int tdmb_ant2_sel;
 	int tdmb_rst;
 	int tdmb_use_rst;
 	int tdmb_use_irq;
+	int tdmb_xtal_en;
+	bool tdmb_xtal_gpio_req;
 #ifdef CONFIG_TDMB_XTAL_FREQ
 	int tdmb_xtal_freq;
 #endif

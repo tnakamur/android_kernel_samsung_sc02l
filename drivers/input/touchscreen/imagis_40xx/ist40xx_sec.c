@@ -129,14 +129,11 @@ static void not_support_cmd(void *dev_data)
 
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 
-	mutex_lock(&sec->cmd_lock);
-	sec->cmd_is_running = false;
-	mutex_unlock(&sec->cmd_lock);
-
 	sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
+	sec_cmd_set_cmd_exit(sec);
+
 	input_info(true, &data->client->dev, "%s: \"%s(%d)\"\n", __func__,
 		   buf, (int)strnlen(buf, sizeof(buf)));
-	return;
 }
 
 static void get_chip_vendor(void *dev_data)
@@ -425,9 +422,8 @@ static void dead_zone_enable(void *dev_data)
 			  "%s now sys_mode status is not STATE_POWER_ON!\n",
 			  __func__);
 		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
-		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
-		return;
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
+		goto out;
 	}
 
 	input_info(true, &data->client->dev, "%s(), %d\n", __func__,
@@ -447,6 +443,7 @@ static void dead_zone_enable(void *dev_data)
 		ist40xx_set_edge_mode(0);
 		break;
 	default:
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		input_info(true, &data->client->dev, "%s(), Invalid Argument\n",
 			   __func__);
 		break;
@@ -456,7 +453,10 @@ static void dead_zone_enable(void *dev_data)
 	else
 		snprintf(buf, sizeof(buf), "%s", "NG");
 
+out:
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
+
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__,
 		   buf, (int)strnlen(buf, sizeof(buf)));
 }
@@ -468,16 +468,6 @@ static void glove_mode(void *dev_data)
 	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
 
 	sec_cmd_set_default_result(sec);
-
-	if (data->status.sys_mode != STATE_POWER_ON) {
-		input_err(true, &data->client->dev,
-			  "%s now sys_mode status is not STATE_POWER_ON!\n",
-			  __func__);
-		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
-		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
-		return;
-	}
 
 	input_info(true, &data->client->dev, "%s(), %d\n", __func__,
 		   sec->cmd_param[0]);
@@ -496,6 +486,59 @@ static void glove_mode(void *dev_data)
 		ist40xx_set_glove_mode(1);
 		break;
 	default:
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		tsp_info("%s(), Invalid Argument\n", __func__);
+		break;
+	}
+
+	if (sec->cmd_state == SEC_CMD_STATUS_OK)
+		snprintf(buf, sizeof(buf), "%s", "OK");
+	else
+		snprintf(buf, sizeof(buf), "%s", "NG");
+
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
+
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__,
+		   buf, (int)strnlen(buf, sizeof(buf)));
+}
+
+extern void ist40xx_set_touchable_mode(int mode);
+static void set_touchable_area(void *dev_data)
+{
+	char buf[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+
+	sec_cmd_set_default_result(sec);
+
+	if (data->status.sys_mode != STATE_POWER_ON) {
+		input_err(true, &data->client->dev,
+			  "%s now sys_mode status is not STATE_POWER_ON!\n",
+			  __func__);
+		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
+		goto out;
+	}
+
+	input_info(true, &data->client->dev, "%s(), %d\n", __func__,
+		   sec->cmd_param[0]);
+
+	switch (sec->cmd_param[0]) {
+	case 0:
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		input_info(true, &data->client->dev, "%s(), Unset Touchable Area\n",
+			   __func__);
+		ist40xx_set_touchable_mode(0);
+		break;
+	case 1:
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		input_info(true, &data->client->dev, "%s(), Set Touchable Area\n",
+			   __func__);
+		ist40xx_set_touchable_mode(1);
+		break;
+	default:
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		tsp_info("%s(), Invalid Argument\n", __func__);
 		break;
 	}
@@ -504,15 +547,12 @@ static void glove_mode(void *dev_data)
 	else
 		snprintf(buf, sizeof(buf), "%s", "NG");
 
+out:
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
+	
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__,
 		   buf, (int)strnlen(buf, sizeof(buf)));
-
-	mutex_lock(&sec->cmd_lock);
-	sec->cmd_is_running = false;
-	mutex_unlock(&sec->cmd_lock);
-
-	sec->cmd_state = SEC_CMD_STATUS_WAITING;
 }
 
 static void spay_enable(void *dev_data)
@@ -543,6 +583,7 @@ static void spay_enable(void *dev_data)
 		data->spay = true;
 		break;
 	default:
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		input_info(true, &data->client->dev, "%s(), Invalid Argument\n",
 			   __func__);
 		break;
@@ -591,14 +632,94 @@ err:
 		snprintf(buf, sizeof(buf), "%s", "NG");
 
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
+
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__,
 		   buf, (int)strnlen(buf, sizeof(buf)));
+}
 
-	mutex_lock(&sec->cmd_lock);
-	sec->cmd_is_running = false;
-	mutex_unlock(&sec->cmd_lock);
+static void singletap_enable(void *dev_data)
+{
+#ifdef USE_SPONGE_LIB
+	int ret;
+#endif
+	char buf[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
 
-	sec->cmd_state = SEC_CMD_STATUS_WAITING;
+	sec_cmd_set_default_result(sec);
+
+	input_info(true, &data->client->dev, "%s(), %d\n", __func__,
+		sec->cmd_param[0]);
+
+	switch (sec->cmd_param[0]) {
+	case 0:
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		input_info(true, &data->client->dev, "%s(), Unset Single Tab Mode\n",
+			__func__);
+		data->singletab= false;
+		break;
+	case 1:
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		input_info(true, &data->client->dev, "%s(), Set Single Tab Mode\n",
+			__func__);
+		data->singletab= true;
+		break;
+	default:
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_info(true, &data->client->dev, "%s(), Invalid Argument\n",
+			__func__);
+		break;
+	}
+
+	if (data->singletab) {
+#ifdef USE_SPONGE_LIB
+		data->lpm_mode |= IST40XX_GETURE_CTRL_STAP;
+#else
+		data->g_reg.b.ctrl |= IST40XX_GETURE_CTRL_STAP;
+		data->g_reg.b.setting |= IST40XX_GETURE_SET_STAP;
+#endif
+	} else {
+#ifdef USE_SPONGE_LIB
+		data->lpm_mode &= ~IST40XX_GETURE_CTRL_STAP;
+#else
+		data->g_reg.b.ctrl &= ~IST40XX_GETURE_CTRL_STAP;
+		data->g_reg.b.setting &= ~IST40XX_GETURE_SET_STAP;
+#endif
+	}
+
+#ifdef USE_SPONGE_LIB
+	ret = ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL,
+				(u16*)&data->lpm_mode, 1);
+	if (ret) {
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev,
+				"%s(), fail to write sponge reg.\n", __func__);
+		goto err;
+	}
+
+	ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+				(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
+	if (ret) {
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev,
+				"%s(), fail to write notify packet.\n", __func__);
+		goto err;
+	}
+
+err:
+#endif
+
+	if (sec->cmd_state == SEC_CMD_STATUS_OK)
+		snprintf(buf, sizeof(buf), "%s", "OK");
+	else
+		snprintf(buf, sizeof(buf), "%s", "NG");
+
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
+
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__,
+		buf, (int)strnlen(buf, sizeof(buf)));
 }
 
 static void aod_enable(void *dev_data)
@@ -629,6 +750,7 @@ static void aod_enable(void *dev_data)
 		data->aod = true;
 		break;
 	default:
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		input_info(true, &data->client->dev, "%s(), Invalid Argument\n",
 			   __func__);
 		break;
@@ -678,14 +800,10 @@ err:
 		snprintf(buf, sizeof(buf), "%s", "NG");
 
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
+
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__,
 		   buf, (int)strnlen(buf, sizeof(buf)));
-
-	mutex_lock(&sec->cmd_lock);
-	sec->cmd_is_running = false;
-	mutex_unlock(&sec->cmd_lock);
-
-	sec->cmd_state = SEC_CMD_STATUS_WAITING;
 }
 
 static void set_aod_rect(void *dev_data)
@@ -709,10 +827,15 @@ static void set_aod_rect(void *dev_data)
 		input_err(true, &data->client->dev,
 			  "%s(), error currently, status is a Power off.\n",
 			  __func__);
-		goto err;
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
+		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
+		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+		sec_cmd_set_cmd_exit(sec);
+		return;
 	}
 
 	if (!data->aod) {
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		input_err(true, &data->client->dev,
 			  "%s(), error currently unset aod\n", __func__);
 		goto err;
@@ -779,14 +902,9 @@ err:
 		snprintf(buf, sizeof(buf), "%s", "NG");
 
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__,
 		   buf, (int)strnlen(buf, sizeof(buf)));
-
-	mutex_lock(&sec->cmd_lock);
-	sec->cmd_is_running = false;
-	mutex_unlock(&sec->cmd_lock);
-
-	sec->cmd_state = SEC_CMD_STATUS_WAITING;
 }
 
 static void get_aod_rect(void *dev_data)
@@ -807,14 +925,10 @@ static void get_aod_rect(void *dev_data)
 
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 	sec->cmd_state = SEC_CMD_STATUS_OK;
+	sec_cmd_set_cmd_exit(sec);
+
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__,
 		   buf, (int)strnlen(buf, sizeof(buf)));
-
-	mutex_lock(&sec->cmd_lock);
-	sec->cmd_is_running = false;
-	mutex_unlock(&sec->cmd_lock);
-
-	sec->cmd_state = SEC_CMD_STATUS_WAITING;
 }
 
 static void get_threshold(void *dev_data)
@@ -834,7 +948,7 @@ static void get_threshold(void *dev_data)
 			  __func__);
 		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
 		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
 		return;
 	}
 
@@ -1119,13 +1233,13 @@ void get_self_cp_array(void *dev_data)
 		return;
 	}
 
-	buf = kmalloc(IST40XX_MAX_NODE_NUM * 5, GFP_KERNEL);
+	buf = kmalloc(IST40XX_MAX_SELF_NODE_NUM * 5, GFP_KERNEL);
 	if (!buf) {
 		input_err(true, &data->client->dev,
 			  "%s: Couldn't Allocate memory\n", __func__);
 		return;
 	}
-	memset(buf, 0, IST40XX_MAX_NODE_NUM * 5);
+	memset(buf, 0, IST40XX_MAX_SELF_NODE_NUM * 5);
 
 	for (i = 0; i < tsp->ch_num.rx + tsp->ch_num.tx; i++) {
 		count += snprintf(msg, msg_len, "%d,", cal_self_cp_value[i]);
@@ -1149,8 +1263,7 @@ int ist40xx_miscalib_wait(struct ist40xx_data *data)
 	while (cnt-- > 0) {
 		ist40xx_delay(100);
 
-		if (data->status.miscalib_msg[0]
-		    && data->status.miscalib_msg[1]) {
+		if (data->status.miscalib == 2) {
 			input_info(true, &data->client->dev,
 				   "SLF Calibration status : %d, Max gap : %d - (%08x)\n",
 				   CALIB_TO_STATUS(data->status.
@@ -1248,7 +1361,7 @@ void run_miscalibration(void *dev_data)
 			  "%s now sys_mode status is STATE_POWER_OFF!\n",
 			  __func__);
 		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
 		mis_cal_data = 0xF2;
 		goto cmd_result;
 	}
@@ -1388,6 +1501,140 @@ void get_miscalibration_value(void *dev_data)
 		   sec->cmd_param[0], sec->cmd_param[1], buf);
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
 		   (int)strnlen(buf, sizeof(buf)));
+}
+
+void get_mis_cal_info(void *dev_data)
+{
+	int i;
+	int ret = 0;
+	int val, max_val = 0, min_val = 0;
+	char buf[16] = { 0 };
+	char buf_onecmd[16] = { 0 };
+	char mis_cal_data = 0xf0;
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+	TSP_INFO *tsp = &data->tsp_info;
+
+	sec_cmd_set_default_result(sec);
+
+	if (data->status.sys_mode != STATE_POWER_ON) {
+		input_err(true, &data->client->dev,
+			  "%s now sys_mode status is state_power_off!\n",
+			  __func__);
+		snprintf(buf, sizeof(buf), "%s", "tsp turned off");
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
+		mis_cal_data = 1;
+		goto cmd_result;
+	}
+
+	mutex_lock(&data->lock);
+	ret = ist40xx_read_cp_node(data, &tsp->node, true, true);
+	if (ret) {
+		mutex_unlock(&data->lock);
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev, "%s(), tsp cp read fail!\n",
+			  __func__);
+		mis_cal_data = 1;
+		goto cmd_result;
+	}
+	ist40xx_parse_cp_node(data, &tsp->node, true);
+
+	ret = parse_cp_node(data, &tsp->node, cal_cp_value, cal_self_cp_value,
+				TSP_CDC_ALL, true);
+	if (ret) {
+		mutex_unlock(&data->lock);
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev,
+			  "%s(), tsp cp parse fail!\n", __func__);
+		mis_cal_data = 1;
+		goto cmd_result;
+	}
+
+	ist40xx_reset(data, false);
+	ret = ist40xx_miscalibrate(data, 1);
+	if (ret) {
+		ist40xx_disable_irq(data);
+		ist40xx_reset(data, false);
+		ist40xx_start(data);
+		ist40xx_enable_irq(data);
+		mutex_unlock(&data->lock);
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev,
+			  "%s(), miscalibration fail!\n", __func__);
+		mis_cal_data = 1;
+		goto cmd_result;
+	}
+
+	ret = ist40xx_read_cp_node(data, &tsp->node, false, true);
+	ist40xx_disable_irq(data);
+	ist40xx_reset(data, false);
+	ist40xx_start(data);
+	ist40xx_enable_irq(data);
+	mutex_unlock(&data->lock);
+	if (ret) {
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev,
+			  "%s(), miscal cp read fail!\n", __func__);
+		mis_cal_data = 1;
+		goto cmd_result;
+	}
+
+	ist40xx_parse_cp_node(data, &tsp->node, false);
+
+	ret = parse_cp_node(data, &tsp->node, miscal_cp_value,
+			  miscal_self_cp_value, TSP_CDC_ALL, false);
+	if (ret) {
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev,
+			  "%s(), miscal parse fail!\n", __func__);
+		mis_cal_data = 1;
+		goto cmd_result;
+	}
+
+	val = cal_cp_value[0] - miscal_cp_value[0];
+	if (val < 0)
+		val *= -1;
+	max_val = min_val = val;
+	tsp_verb("Miscal MTL\n");
+	for (i = 0; i < tsp->screen.rx * tsp->screen.tx; i++) {
+		val = cal_cp_value[i] - miscal_cp_value[i];
+		if (val < 0)
+			val *= -1;
+		miscal_maxgap_value[i] = val;
+		max_val = max(max_val, val);
+		min_val = min(min_val, val);
+		tsp_verb(" [%d] |%d - %d| = %d\n", i, cal_cp_value[i],
+			 miscal_cp_value[i], miscal_maxgap_value[i]);
+	}
+
+	tsp_verb("Miscal SLF\n");
+	for (i = 0; i < tsp->ch_num.rx + tsp->ch_num.tx; i++) {
+		val = cal_self_cp_value[i] - miscal_self_cp_value[i];
+		if (val < 0)
+			val *= -1;
+		miscal_self_maxgap_value[i] = val;
+		tsp_verb(" [%d] |%d - %d| = %d\n", i, cal_self_cp_value[i],
+			 miscal_self_cp_value[i], miscal_self_maxgap_value[i]);
+	}
+
+
+	if (max_val > SEC_MISCAL_SPEC) {
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		mis_cal_data = 1;
+	} else {
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		mis_cal_data = 0;
+	}
+
+cmd_result:
+	snprintf(buf, sizeof(buf), "%d,%d,0,0", mis_cal_data == 0 ? 0 : 1, max_val);
+	snprintf(buf_onecmd, sizeof(buf_onecmd), "%d,%d", min_val, max_val);
+
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
+		sec_cmd_set_cmd_result_all(sec, buf_onecmd, strnlen(buf_onecmd, sizeof(buf_onecmd)), "MIS_CAL");
+	input_info(true, &data->client->dev, "%s(), %s, (%d)\n", __func__, buf,
+		   max_val);
 }
 
 static void check_connection(void *dev_data)
@@ -1584,6 +1831,8 @@ void dump_cp_log(struct ist40xx_data *data, u8 flag)
 		input_raw_info(true, &data->client->dev, "### DIFF between miscal and cal cp-value: Max/Min %d,%d ###\n",
 				max_val, min_val);
 	}
+
+	kfree(buf);
 }
 
 void ist40xx_display_dump_log(struct ist40xx_data *data)
@@ -1726,7 +1975,7 @@ void get_self_cdc_array(void *dev_data)
 			  "%s: Couldn't Allocate memory\n", __func__);
 		return;
 	}
-	memset(buf, 0, IST40XX_MAX_NODE_NUM * 5);
+	memset(buf, 0, IST40XX_MAX_SELF_NODE_NUM * 5);
 
 	for (i = 0; i < tsp->ch_num.rx + tsp->ch_num.tx; i++) {
 		count += snprintf(msg, msg_len, "%d,", self_node_value[i]);
@@ -2028,14 +2277,15 @@ void get_tx_self_cdc_value(void *dev_data)
 		   (int)strnlen(buf, sizeof(buf)));
 }
 
-void get_cdc_all_data(void *dev_data)
+void run_cs_raw_read_all(void *dev_data)
 {
-	int i;
-	int ret;
-	char buf[16] = { 0 };
+	int i, j, idx, ret;
+	int count = 0;
+	char *buf;
+	const int msg_len = 16;
+	char msg[msg_len];
 	u8 flag = NODE_FLAG_CDC;
-	char *cdc_buffer;
-	char temp[10];
+	char buff[16] = { 0 };
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
 	TSP_INFO *tsp = &data->tsp_info;
@@ -2046,95 +2296,22 @@ void get_cdc_all_data(void *dev_data)
 		input_err(true, &data->client->dev,
 			  "%s now sys_mode status is not STATE_POWER_ON!\n",
 			  __func__);
-		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
-		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+		snprintf(buff, sizeof(buff), "%s", "TSP turned off");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		return;
 	}
 
-	cdc_buffer = kzalloc(SEC_CMD_RESULT_STR_LEN, GFP_KERNEL);
-	if (!cdc_buffer) {
-		input_err(true, &data->client->dev,
-			  "%s: failed to allication memory\n", __func__);
-		goto out_cdc_all_data;
-	}
-
+	mutex_lock(&data->lock);
 	ret = ist40xx_read_touch_node(data, flag, &tsp->node);
 	if (ret) {
+		mutex_unlock(&data->lock);
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		input_err(true, &data->client->dev,
 			  "%s(), tsp node read fail!\n", __func__);
-		goto err_read_data;
-	}
-	ist40xx_parse_touch_node(data, &tsp->node);
-
-	ret =
-	    parse_tsp_node(data, flag, &tsp->node, node_value, self_node_value,
-			   TSP_CDC_SCREEN);
-	if (ret) {
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
-		input_err(true, &data->client->dev,
-			  "%s(), tsp node parse fail!\n", __func__);
-		goto err_read_data;
-	}
-
-	for (i = 0; i < tsp->screen.rx * tsp->screen.tx; i++) {
-		snprintf(temp, 10, "%d,", node_value[i]);
-		strncat(cdc_buffer, temp, 10);
-	}
-
-	sec_cmd_set_cmd_result(sec, cdc_buffer,
-			       strnlen(cdc_buffer, sizeof(cdc_buffer)));
-
-	sec->cmd_state = SEC_CMD_STATUS_OK;
-
-	kfree(cdc_buffer);
-	return;
-
-err_read_data:
-	kfree(cdc_buffer);
-out_cdc_all_data:
-	sec->cmd_state = SEC_CMD_STATUS_FAIL;
-}
-
-void get_self_cdc_all_data(void *dev_data)
-{
-	int i;
-	int ret;
-	u8 flag = NODE_FLAG_CDC;
-	char *cdc_buffer;
-	char temp[10];
-	char buf[16] = { 0 };
-	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
-	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
-	TSP_INFO *tsp = &data->tsp_info;
-
-	sec_cmd_set_default_result(sec);
-
-	if (data->status.sys_mode != STATE_POWER_ON) {
-		input_err(true, &data->client->dev,
-			  "%s now sys_mode status is not STATE_POWER_ON!\n",
-			  __func__);
-		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
-		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		return;
 	}
-
-	cdc_buffer = kzalloc(SEC_CMD_RESULT_STR_LEN, GFP_KERNEL);
-	if (!cdc_buffer) {
-		input_err(true, &data->client->dev,
-			  "%s: failed to allication memory\n", __func__);
-		goto out_cdc_all_data;
-	}
-
-	ret = ist40xx_read_touch_node(data, flag, &tsp->node);
-	if (ret) {
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
-		input_err(true, &data->client->dev,
-			  "%s(), tsp node read fail!\n", __func__);
-		goto err_read_data;
-	}
+	mutex_unlock(&data->lock);
 	ist40xx_parse_touch_node(data, &tsp->node);
 
 	ret =
@@ -2144,26 +2321,152 @@ void get_self_cdc_all_data(void *dev_data)
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		input_err(true, &data->client->dev,
 			  "%s(), tsp node parse fail!\n", __func__);
-		goto err_read_data;
+		return;
 	}
 
-	for (i = 0; i < tsp->screen.rx + tsp->screen.tx; i++) {
-		snprintf(temp, 10, "%d,", self_node_value[i]);
-		strncat(cdc_buffer, temp, 10);
+	buf = kmalloc(IST40XX_MAX_NODE_NUM * 5, GFP_KERNEL);
+	if (!buf) {
+		input_err(true, &data->client->dev,
+			  "%s: Couldn't Allocate memory\n", __func__);
+		return;
 	}
+	memset(buf, 0, IST40XX_MAX_NODE_NUM * 5);
 
-	sec_cmd_set_cmd_result(sec, cdc_buffer,
-			       strnlen(cdc_buffer, sizeof(cdc_buffer)));
+	if (tsp->dir.swap_xy) {
+		for (i = 0; i < tsp->ch_num.rx; i++) {
+			for (j = 0; j < tsp->ch_num.tx; j++) {
+				idx = j * tsp->ch_num.rx + i;
+				count += snprintf(msg, msg_len, "%d,", node_value[idx]);
+				strncat(buf, msg, msg_len);
+			}
+		}
+	} else {
+		for (i = 0; i < tsp->ch_num.tx; i++) {
+			for (j = 0; j < tsp->ch_num.rx; j++) {
+				idx = i * tsp->ch_num.rx + j;
+				count += snprintf(msg, msg_len, "%d,", node_value[idx]);
+				strncat(buf, msg, msg_len);
+			}
+		}
+	}
 
 	sec->cmd_state = SEC_CMD_STATUS_OK;
+	sec_cmd_set_cmd_result(sec, buf, count - 1);
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
+		   count);
+	kfree(buf);
+}
 
-	kfree(cdc_buffer);
-	return;
+void run_cs_delta_read_all(void *dev_data)
+{
+	int i, j, idx, ret;
+	int count = 0;
+	char *buf;
+	const int msg_len = 16;
+	char msg[msg_len];
+	u8 flag = NODE_FLAG_CDC;
+	char buff[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+	TSP_INFO *tsp = &data->tsp_info;
 
-err_read_data:
-	kfree(cdc_buffer);
-out_cdc_all_data:
-	sec->cmd_state = SEC_CMD_STATUS_FAIL;
+	sec_cmd_set_default_result(sec);
+
+	if (data->status.sys_mode != STATE_POWER_ON) {
+		input_err(true, &data->client->dev,
+			  "%s now sys_mode status is not STATE_POWER_ON!\n",
+			  __func__);
+		snprintf(buff, sizeof(buff), "%s", "TSP turned off");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		return;
+	}
+
+	mutex_lock(&data->lock);
+	ret = ist40xx_read_touch_node(data, flag, &tsp->node);
+	if (ret) {
+		mutex_unlock(&data->lock);
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev,
+			  "%s(), tsp node read fail!\n", __func__);
+		return;
+	}
+	mutex_unlock(&data->lock);
+	ist40xx_parse_touch_node(data, &tsp->node);
+
+	ret =
+	    parse_tsp_node(data, flag, &tsp->node, node_value, self_node_value,
+			   TSP_CDC_ALL);
+	if (ret) {
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_err(true, &data->client->dev,
+			  "%s(), tsp node parse fail!\n", __func__);
+		return;
+	}
+
+	buf = kmalloc(IST40XX_MAX_NODE_NUM * 5, GFP_KERNEL);
+	if (!buf) {
+		input_err(true, &data->client->dev,
+			  "%s: Couldn't Allocate memory\n", __func__);
+		return;
+	}
+	memset(buf, 0, IST40XX_MAX_NODE_NUM * 5);
+
+	if (tsp->dir.swap_xy) {
+		for (i = 0; i < tsp->ch_num.rx; i++) {
+			for (j = 0; j < tsp->ch_num.tx; j++) {
+				idx = j * tsp->ch_num.rx + i;
+				count += snprintf(msg, msg_len, "%d,",
+					node_value[idx] - tsp->baseline);
+				strncat(buf, msg, msg_len);
+			}
+		}
+	} else {
+		for (i = 0; i < tsp->ch_num.tx; i++) {
+			for (j = 0; j < tsp->ch_num.rx; j++) {
+				idx = i * tsp->ch_num.rx + j;
+				count += snprintf(msg, msg_len, "%d,",
+					node_value[idx] - tsp->baseline);
+				strncat(buf, msg, msg_len);
+			}
+		}
+	}
+
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+	sec_cmd_set_cmd_result(sec, buf, count - 1);
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
+		   count);
+	kfree(buf);
+}
+
+#define MAX_DCM_DEFAULT     500
+void get_max_dcm(void *dev_data)
+{
+	int ret = 0;
+	char buf[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+	u32 max_dcm = 0;
+
+	sec_cmd_set_default_result(sec);
+
+	ret = ist40xx_read_cmd(data, eHCOM_GET_MAX_DCM, &max_dcm);
+	if (unlikely(ret)) {
+		ist40xx_reset(data, false);
+		ist40xx_start(data);
+		max_dcm = 0;
+	}
+
+	if (max_dcm == 0)
+		max_dcm = MAX_DCM_DEFAULT;
+
+	snprintf(buf, sizeof(buf), "%d", max_dcm);
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	input_info(true, &data->client->dev, "%s(), max dcm: %s\n", __func__, buf);
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
+			(int)strnlen(buf, sizeof(buf)));
 }
 
 #ifdef IST40XX_USE_CMCS
@@ -2222,7 +2525,7 @@ int get_read_all_data(struct ist40xx_data *data, u8 flag)
 	}
 	mutex_unlock(&data->lock);
 
-	buffer = kzalloc(SEC_CMD_RESULT_STR_LEN, GFP_KERNEL);
+	buffer = kzalloc(IST40XX_MAX_NODE_NUM * 5, GFP_KERNEL);
 	if (!buffer) {
 		tsp_err("%s: failed to buffer alloc\n", __func__);
 		goto cm_err_out;
@@ -2421,11 +2724,11 @@ void run_cm_test(void *dev_data)
 				continue;
 			next_idx = idx + 1;
 			if (ts_cmcs_buf->cm[idx])
-				tx_cm_gap_value[idx] = 100 *
+				rx_cm_gap_value[idx] = 100 *
 					(s16)abs(ts_cmcs_buf->cm[idx] - ts_cmcs_buf->cm[next_idx]) /
 					ts_cmcs_buf->cm[idx];
 			else
-				tx_cm_gap_value[idx] = 9999;
+				rx_cm_gap_value[idx] = 9999;
 		}
 	}
 
@@ -2998,6 +3301,7 @@ void run_cmcs_full_test(void *dev_data)
 	char cs_fail_msg[128] = { 0 };
 	char micro_fail_msg[128] = { 0 };
 	char buf[256] = { 0 };
+	char test[32];
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
 
@@ -3011,6 +3315,8 @@ void run_cmcs_full_test(void *dev_data)
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 		return;
 	}
+
+	snprintf(test, sizeof(test), "%d", sec->cmd_param[0]);
 
 	if ((ts_cmcs_bin == NULL) || (ts_cmcs_bin_size == 0)) {
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
@@ -3119,6 +3425,10 @@ void run_cmcs_full_test(void *dev_data)
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
 			(int)strnlen(buf, sizeof(buf)));
+	if (cm_result || cs_result || micro_cm_result)
+		sec_cmd_send_event_to_user(sec, test, "RESULT=FAIL");
+	else
+		sec_cmd_send_event_to_user(sec, test, "RESULT=PASS");
 }
 #endif
 
@@ -3592,7 +3902,7 @@ void ist40xx_read_sec_info_all(void *dev_data)
 			  __func__);
 		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
 		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
 		return;
 	}
 
@@ -3653,7 +3963,7 @@ static void increase_disassemble_count(void *dev_data)
 			  __func__);
 		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
 		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
 		return;
 	}
 
@@ -3701,7 +4011,7 @@ static void get_disassemble_count(void *dev_data)
 			  __func__);
 		snprintf(buf, sizeof(buf), "%s", "TSP turned off");
 		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
-		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
 		return;
 	}
 
@@ -3998,8 +4308,10 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("dead_zone_enable", dead_zone_enable),},
 	{SEC_CMD("clear_cover_mode", not_support_cmd),},
 	{SEC_CMD("glove_mode", glove_mode),},
+	{SEC_CMD("set_touchable_area", set_touchable_area),},
 	{SEC_CMD("hover_enable", not_support_cmd),},
 	{SEC_CMD("spay_enable", spay_enable),},
+	{SEC_CMD("singletap_enable", singletap_enable),},
 	{SEC_CMD("aod_enable", aod_enable),},
 	{SEC_CMD("set_aod_rect", set_aod_rect),},
 	{SEC_CMD("get_aod_rect", get_aod_rect),},
@@ -4016,10 +4328,13 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("run_self_cdc_read", run_self_cdc_read),},
 	{SEC_CMD("run_cdc_read_key", run_cdc_read_key),},
 	{SEC_CMD("get_cdc_value", get_cdc_value),},
-	{SEC_CMD("get_cdc_all_data", get_cdc_all_data),},
-	{SEC_CMD("get_self_cdc_all_data", get_self_cdc_all_data),},
+	{SEC_CMD("get_cdc_all_data", get_cdc_array),},
+	{SEC_CMD("get_self_cdc_all_data", get_self_cdc_array),},
 	{SEC_CMD("get_cdc_array", get_cdc_array),},
 	{SEC_CMD("get_self_cdc_array", get_self_cdc_array),},
+	{SEC_CMD("run_cs_raw_read_all", run_cs_raw_read_all),},
+	{SEC_CMD("run_cs_delta_read_all", run_cs_delta_read_all),},
+	{SEC_CMD("get_cs_delta_max", get_max_dcm),},
 #ifdef IST40XX_USE_CMCS
 	{SEC_CMD("get_cm_all_data", get_cm_all_data),},
 	{SEC_CMD("get_slope0_all_data", get_slope0_all_data),},
@@ -4042,12 +4357,14 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("get_cs0_array", get_cs_array),},
 	{SEC_CMD("get_cs1_array", get_cs_array),},
 	{SEC_CMD("run_cmcs_full_test", run_cmcs_full_test),},
+	{SEC_CMD("run_trx_short_test", run_cmcs_full_test),},
 #endif
 	{SEC_CMD("get_config_ver", get_config_ver),},
 	{SEC_CMD("run_force_calibration", run_force_calibration),},
 	{SEC_CMD("get_force_calibration", get_force_calibration),},
 	{SEC_CMD("run_mis_cal_read", run_miscalibration),},
 	{SEC_CMD("get_mis_cal", get_miscalibration_value),},
+	{SEC_CMD("get_mis_cal_info", get_mis_cal_info),},
 	{SEC_CMD("check_connection", check_connection),},
 #ifdef TCLM_CONCEPT
 	{SEC_CMD("set_external_factory", set_external_factory),},

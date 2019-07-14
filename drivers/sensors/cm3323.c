@@ -46,8 +46,13 @@
 #define REG_BLUE	0x0A
 #define REG_WHITE	0x0B
 
+#define REG_DEVICE_ID	0x0C
+#define VAL_DEVICE_ID	0x23
+
 #define LIGHT_LOG_TIME	15 /* 15 sec */
 #define ALS_REG_NUM	2
+
+#define I2C_RETRY_CNT 5
 
 enum {
 	LIGHT_ENABLED = BIT(0),
@@ -70,7 +75,6 @@ struct cm3323_p {
 	struct delayed_work work;
 	struct regulator *vdd_pmic;
 	int vdd_ldo;
-	bool vdd_always_on;
 	atomic_t delay;
 
 	u8 power_state;
@@ -85,6 +89,7 @@ static int cm3323_i2c_read_word(struct cm3323_p *data,
 	int ret;
 	struct i2c_msg msg[2];
 	unsigned char r_buf[2];
+	int retry = 0;
 
 	msg[0].addr = data->i2c_client->addr;
 	msg[0].flags = I2C_M_WR;
@@ -96,17 +101,21 @@ static int cm3323_i2c_read_word(struct cm3323_p *data,
 	msg[1].len = 2;
 	msg[1].buf = r_buf;
 
-	ret = i2c_transfer(data->i2c_client->adapter, msg, 2);
-	if (ret < 0) {
-		pr_err("[SENSOR]: %s - i2c read error %d\n", __func__, ret);
-
-		return ret;
+	for (retry = 0; retry < I2C_RETRY_CNT; retry++) {
+		ret = i2c_transfer(data->i2c_client->adapter, msg, 2);
+		if (ret == 2) {
+			*buf = (u16)r_buf[1];
+			*buf = (*buf << 8) | (u16)r_buf[0];
+			break;
+		}
+		
+		pr_err("[SENSOR]: %s - i2c read error %d (%d)\n", __func__, ret, retry);
+		
+		if (retry < I2C_RETRY_CNT - 1)
+			usleep_range(2000, 2000);
 	}
 
-	*buf = (u16)r_buf[1];
-	*buf = (*buf << 8) | (u16)r_buf[0];
-
-	return 0;
+	return (ret == 2) ? 0 : ret;
 }
 
 static int cm3323_i2c_write(struct cm3323_p *data,
@@ -115,6 +124,7 @@ static int cm3323_i2c_write(struct cm3323_p *data,
 	int ret = 0;
 	struct i2c_msg msg;
 	unsigned char w_buf[2];
+	int retry = 0;
 
 	w_buf[0] = reg_addr;
 	w_buf[1] = buf;
@@ -125,13 +135,18 @@ static int cm3323_i2c_write(struct cm3323_p *data,
 	msg.len = 2;
 	msg.buf = (char *)w_buf;
 
-	ret = i2c_transfer(data->i2c_client->adapter, &msg, 1);
-	if (ret < 0) {
-		pr_err("[SENSOR]: %s - i2c write error %d\n", __func__, ret);
-		return ret;
+	for (retry = 0; retry < I2C_RETRY_CNT; retry++) {
+		ret = i2c_transfer(data->i2c_client->adapter, &msg, 1);
+		if (ret == 1)
+			break;
+
+		pr_err("[SENSOR]: %s - i2c write error %d (%d)\n", __func__, ret, retry);
+
+		if (retry < I2C_RETRY_CNT - 1)
+			usleep_range(2000, 2000);
 	}
 
-	return 0;
+	return (ret == 1) ? 0 : ret;
 }
 
 static void cm3323_vdd_onoff(struct cm3323_p *data, bool onoff)
@@ -265,16 +280,10 @@ static ssize_t light_enable_store(struct device *dev,
 	pr_info("[SENSOR]: %s - new_value = %u\n", __func__, enable);
 	if (enable && !(data->power_state & LIGHT_ENABLED)) {
 		data->power_state |= LIGHT_ENABLED;
-		if(!data->vdd_always_on)
-			cm3323_vdd_onoff(data, true);
-
 		cm3323_light_enable(data);
 	} else if (!enable && (data->power_state & LIGHT_ENABLED)) {
 		cm3323_light_disable(data);
 		data->power_state &= ~LIGHT_ENABLED;
-
-		if(!data->vdd_always_on)
-			cm3323_vdd_onoff(data, false);
 	}
 
 	return size;
@@ -419,7 +428,6 @@ static int cm3323_parse_dt(struct device *dev, struct cm3323_p *data)
 	struct device_node *np = dev->of_node;
 	enum of_gpio_flags flags;
 	int ret;
-	int val;
 
 	data->vdd_ldo = of_get_named_gpio_flags(np, "cm3323-i2c,vdd-ldo", 0, &flags);
 
@@ -437,14 +445,6 @@ static int cm3323_parse_dt(struct device *dev, struct cm3323_p *data)
 
 		ret = gpio_direction_output(data->vdd_ldo, 1);
 	}
-	ret = of_property_read_u32(np, "cm3323-i2c,vdd-alwayson",
-			&val);
-	if (ret < 0) {
-		SENSOR_ERR("Cannot get vdd-alwayson\n");
-		data->vdd_always_on= false;
-	}
-	else
-		data->vdd_always_on = (val > 0)? true: false;
 
 	return 0;
 }
@@ -454,6 +454,27 @@ static int cm3323_parse_dt(struct device *dev, struct cm3323_p *data)
 	return -ENODEV;
 }
 #endif
+
+static int cm3323_device_id_check(struct cm3323_p *data)
+{
+	int ret = 0;
+	u16 val = 0;
+
+	ret = cm3323_i2c_read_word(data, REG_DEVICE_ID, &val);
+
+	if (!ret) {
+		val = val & 0x00FF;
+		if (val == VAL_DEVICE_ID) {
+			pr_info("[SENSOR]: %s - Device matched, id = %d\n", __func__, val);
+			return 0;
+		} else {
+			pr_err("[SENSOR]: %s - Device not matched, id = %d\n", __func__, val);
+			return -ENODEV;
+		}
+	}
+
+	return ret;
+}
 
 static int cm3323_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
@@ -474,15 +495,22 @@ static int cm3323_probe(struct i2c_client *client,
 		ret = -ENOMEM;
 		goto exit_kzalloc;
 	}
-	ret = cm3323_parse_dt(&client->dev, data);
-
 
 	data->i2c_client = client;
 	i2c_set_clientdata(client, data);
 
 	cm3323_vdd_onoff(data, true);
 
-	/* Check if the device is there or not. */
+	// Check if CM3323 IC exists
+	ret = cm3323_device_id_check(data);
+	if (ret < 0) {
+		pr_err("[SENSOR]: %s - CM3323E not found! %d\n", __func__, ret);
+		goto exit_kzalloc;
+	}
+
+	ret = cm3323_parse_dt(&client->dev, data);
+
+	/* Set up register data */
 	ret = cm3323_setup_reg(data);
 	if (ret < 0) {
 		pr_err("[SENSOR]: %s - could not setup regs\n", __func__);
@@ -502,9 +530,6 @@ static int cm3323_probe(struct i2c_client *client,
 	/* set sysfs for light sensor */
 	sensors_register(&data->light_dev, data, sensor_attrs, MODULE_NAME);
 	pr_info("[SENSOR]: %s - Probe done!\n", __func__);
-
-	if(!data->vdd_always_on)
-		cm3323_vdd_onoff(data, false);
 
 	return 0;
 
@@ -598,18 +623,7 @@ static struct i2c_driver cm3323_i2c_driver = {
 	.id_table = cm3323_device_id,
 };
 
-static int __init cm3323_init(void)
-{
-	return i2c_add_driver(&cm3323_i2c_driver);
-}
-
-static void __exit cm3323_exit(void)
-{
-	i2c_del_driver(&cm3323_i2c_driver);
-}
-
-module_init(cm3323_init);
-module_exit(cm3323_exit);
+module_i2c_driver(cm3323_i2c_driver);
 
 MODULE_DESCRIPTION("RGB Sensor device driver for cm3323");
 MODULE_AUTHOR("Samsung Electronics");

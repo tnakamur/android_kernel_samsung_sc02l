@@ -237,6 +237,7 @@ typedef struct s2mu005_charger_platform_data {
 	/* Slow charging current */
 	int slow_charging_current;
 	int mivr_voltage;
+	int pd_authentication;
 } s2mu005_charger_platform_data_t;
 
 struct s2mu005_charger_data {
@@ -264,6 +265,7 @@ struct s2mu005_charger_data {
 
 	bool ovp;
 	bool otg_on;
+	int is_otg;
 
 	int unhealth_cnt;
 	int status;
@@ -284,6 +286,8 @@ struct s2mu005_charger_data {
 
 	bool suspended;
 	bool pending_chg_work;
+
+	unsigned char reg_0x98;
 };
 
 #endif /*S2MU005_CHARGER_H*/

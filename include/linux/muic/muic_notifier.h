@@ -82,7 +82,7 @@ extern void muic_notifier_logically_attach_attached_dev(muic_attached_dev_t new_
 extern void muic_notifier_logically_detach_attached_dev(muic_attached_dev_t cur_dev);
 extern void muic_notifier_chg_off(muic_attached_dev_t new_dev);
 
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU205)
 extern int muic_ccic_notifier_register(struct notifier_block *nb,
 		notifier_fn_t notifier, muic_notifier_device_t listener);
 extern int muic_ccic_notifier_unregister(struct notifier_block *nb);

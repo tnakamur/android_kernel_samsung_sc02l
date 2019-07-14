@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (c) 2014 - 2016 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2014 - 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
 
@@ -19,12 +19,11 @@ void mxman_init(struct mxman *mxman, struct scsc_mx *mx);
 void mxman_deinit(struct mxman *mxman);
 int mxman_open(struct mxman *mxman);
 void mxman_close(struct mxman *mxman);
-void mxman_fail(struct mxman *mxman, u16 scsc_panic_code);
+void mxman_fail(struct mxman *mxman, u16 scsc_panic_code, const char *reason);
 void mxman_freeze(struct mxman *mxman);
 int mxman_force_panic(struct mxman *mxman);
 int mxman_suspend(struct mxman *mxman);
 void mxman_resume(struct mxman *mxman);
-bool mxman_recovery_disabled(void);
 void mxman_show_last_panic(struct mxman *mxman);
 
 enum mxman_state {
@@ -34,6 +33,8 @@ enum mxman_state {
 	MXMAN_STATE_FAILED,
 	MXMAN_STATE_FREEZED,
 };
+
+#define SCSC_FAILURE_REASON_LEN 256
 
 struct mxman {
 	struct scsc_mx          *mx;
@@ -46,6 +47,7 @@ struct mxman {
 	char                    *fw;
 	u32                     fw_image_size;
 	struct completion       mm_msg_start_ind_completion;
+	struct completion       mm_msg_halt_rsp_completion;
 	struct fwhdr            fwhdr;
 	struct mxconf           *mxconf;
 	enum mxman_state        mxman_state;
@@ -65,17 +67,18 @@ struct mxman {
 	u64			last_panic_time;
 	u32			last_panic_rec_r[PANIC_RECORD_SIZE]; /* Must be at least SCSC_R4_V2_MINOR_53 */
 	u16			last_panic_rec_sz;
+	char			failure_reason[SCSC_FAILURE_REASON_LEN]; /* previous failure reason */
 };
 
 void mxman_register_gdb_channel(struct scsc_mx *mx, mxmgmt_channel_handler handler, void *data);
 void mxman_send_gdb_channel(struct scsc_mx *mx, void *data, size_t length);
 
 #ifdef CONFIG_SCSC_CHV_SUPPORT
-
 #define SCSC_CHV_ARGV_ADDR_OFFSET 0x200008
 
 extern int chv_run;
-
 #endif
+
+#define SCSC_SYSERR_HOST_SERVICE_SHIFT 4
 
 #endif

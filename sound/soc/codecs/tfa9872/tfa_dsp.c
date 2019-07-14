@@ -56,6 +56,8 @@ int tfa98xx_log_tfa_family;
 #define MTPEX_WAIT_NTRIES 25
 
 #define REDUCED_REGISTER_SETTING
+/* #define RAMPING_DOWN_BEFORE_STOP */
+#undef RAMPING_DOWN_BEFORE_STOP
 #define WRITE_CALIBRATION_DATA_TO_MTP
 #define CHECK_CALIBRATION_DATA_RANGE
 #if defined(WRITE_CALIBRATION_DATA_TO_MTP)
@@ -63,6 +65,7 @@ int tfa98xx_log_tfa_family;
 static enum tfa98xx_error
 tfa_tfadsp_wait_calibrate_done(tfa98xx_handle_t handle);
 #endif
+#define SET_CALIBRATION_AT_ALL_DEVICE_READY
 
 static int tfa98xx_runtime_verbose;
 static int tfa98xx_trace_level;
@@ -609,9 +612,9 @@ void tfa98xx_set_spkr_select(tfa98xx_handle_t dev_idx, char *configuration)
 	 char first_letter;
 
 	/* 4=Left, 2=Right, 1=none, 0=default */
-	if (configuration == NULL)
+	if (configuration == NULL) {
 		handles_local[dev_idx].spkr_select = 0;
-	else {
+	} else {
 		first_letter = (char)tolower((unsigned char)configuration[0]);
 		switch (first_letter) {
 		case 'b': /* SC / both -> apply primary to secondary */
@@ -718,7 +721,7 @@ tfa_probe(unsigned char slave_address, tfa98xx_handle_t *p_handle)
 #endif
 		break;
 	default:
-		pr_info("Unknown slave adress!\n");
+		pr_info("Unknown slave address!\n");
 		/* wrong slave address */
 		error = TFA98XX_ERROR_BAD_PARAMETER;
 	}
@@ -1025,14 +1028,13 @@ enum tfa98xx_error tfa98xx_dsp_reset(tfa98xx_handle_t dev_idx, int state)
 			/* generic function */
 			TFA_SET_BF_VOLATILE(dev_idx, RST, (uint16_t)state);
 	}
+
 	return error;
 }
 
 /* tfa98xx_dsp_system_stable
  *  return: *ready = 1 when clocks are stable to allow DSP subsystem access
- */
-
-/* This is the clean, default static
+ * This is the clean, default static
  */
 static enum tfa98xx_error _tfa98xx_dsp_system_stable(tfa98xx_handle_t handle,
 						int *ready)
@@ -1340,7 +1342,8 @@ tfa98xx_set_mtp(tfa98xx_handle_t handle,
 
 	if (mtp_old == mtp_new) /* no change */ {
 		if (tfa98xx_runtime_verbose)
-			pr_info("No change in MTP. Value not written!\n");
+			pr_info("%s: no change in MTP. no value written!\n",
+				__func__);
 		return TFA98XX_ERROR_OK;
 	}
 	tfa98xx_key2(handle, 0); /* unlock */
@@ -1388,7 +1391,7 @@ enum tfa98xx_error tfa_calibrate(tfa98xx_handle_t handle)
 
 static short twos(short x)
 {
-	 return (x < 0) ? x + 512 : x;
+	return (x < 0) ? x + 512 : x;
 }
 
 void tfa98xx_set_exttemp(tfa98xx_handle_t handle, short ext_temp)
@@ -1673,7 +1676,7 @@ tfa98xx_wait_result(tfa98xx_handle_t handle, int wait_retry_count)
  * convert memory bytes to signed 24 bit integers
  *	input:  bytes contains "num_bytes" byte elements
  *	output: data contains "num_bytes/3" int24 elements
-*/
+ */
 void tfa98xx_convert_bytes2data(int num_bytes,
 	const unsigned char bytes[], int data[])
 {
@@ -1853,9 +1856,9 @@ tfa_dsp_msg_write_id(tfa98xx_handle_t handle,
 }
 
 /*
-* status function used by tfa_dsp_msg() to retrieve command/msg status:
-* return a <0 status of the DSP did not ACK.
-*/
+ * status function used by tfa_dsp_msg() to retrieve command/msg status:
+ * return a <0 status of the DSP did not ACK.
+ */
 enum tfa98xx_error
 tfa_dsp_msg_status(tfa98xx_handle_t handle, int *p_rpc_status)
 {
@@ -2010,6 +2013,13 @@ enum tfa98xx_error dsp_msg(tfa98xx_handle_t handle, int length, const char *buf)
 	tfadsp_buf = buf;
 	tfadsp_buf_size = length;
 
+	if ((handles_local[0].ext_dsp == 1)
+		&& (handles_local[handle].ext_dsp != 1)) {
+		pr_debug("%s: switch handle to master device (%d to 0)\n",
+			__func__, handle);
+		handle = 0; /* master device only */
+	}
+
 #if defined(TFADSP_32BITS)
 	/*need bits conversion: 24 bits --> 32 bits */
 	buf32_len = (length/3)*4;
@@ -2105,7 +2115,7 @@ enum tfa98xx_error dsp_msg(tfa98xx_handle_t handle, int length, const char *buf)
 						 (const char *)
 						 /*tfadsp_buf*/blob);
 				} else {
-					pr_info("%s: skip dsp_msg when pstream is not active\n",
+					pr_info("%s: skip when pstream is not active\n",
 						__func__);
 				}
 #endif /* TFADSP_DSP_MSG_APR_PACKET_STRATEGY */
@@ -2134,7 +2144,7 @@ enum tfa98xx_error dsp_msg(tfa98xx_handle_t handle, int length, const char *buf)
 					 .dev_ops.dsp_msg)
 					(handle, tfadsp_buf_size, tfadsp_buf);
 			} else {
-				pr_info("%s: skip dsp_msg when pstream is not active\n",
+				pr_info("%s: skip when pstream is not active\n",
 					__func__);
 			}
 		}
@@ -2144,7 +2154,7 @@ enum tfa98xx_error dsp_msg(tfa98xx_handle_t handle, int length, const char *buf)
 				(handle, tfadsp_buf_size, tfadsp_buf);
 			/* Use default */
 		} else {
-			pr_info("%s: skip dsp_msg when pstream is not active\n",
+			pr_info("%s: skip when pstream is not active\n",
 				__func__);
 		}
 	}
@@ -2397,7 +2407,7 @@ dsp_msg_read(tfa98xx_handle_t handle, int length, unsigned char *bytes)
 #endif
 
 	if (handles_local[handle].saam_use_case == 1) {
-		pr_info("%s: skip dsp_msg_read in SaaM (RaM / SaM only)\n",
+		pr_info("%s: skip in SaaM (RaM / SaM only)\n",
 			__func__);
 		return error;
 	}
@@ -2406,6 +2416,13 @@ dsp_msg_read(tfa98xx_handle_t handle, int length, unsigned char *bytes)
 
 	tfadsp_buf = bytes;
 	tfadsp_buf_size = length;
+
+	if ((handles_local[0].ext_dsp == 1)
+		&& (handles_local[handle].ext_dsp != 1)) {
+		pr_debug("%s: switch handle to master device (%d to 0)\n",
+			__func__, handle);
+		handle = 0; /* master device only */
+	}
 
 #if defined(TFADSP_32BITS)
 	buf32_len = (length/3)*4;
@@ -2455,7 +2472,7 @@ dsp_msg_read(tfa98xx_handle_t handle, int length, unsigned char *bytes)
 			/* Use default */
 		}
 	} else {
-		pr_debug("%s: skip dsp_msg_read when pstream is not active\n",
+		pr_debug("%s: skip when pstream is not active\n",
 			 __func__);
 	}
 
@@ -2506,9 +2523,11 @@ dsp_msg_read(tfa98xx_handle_t handle, int length, unsigned char *bytes)
 
 	return error;
 
+#if defined(TFADSP_32BITS)
 dsp_msg_read_error_exit:
 	pr_err("%s: can not allocate memory\n", __func__);
 	return TFA98XX_ERROR_FAIL;
+#endif /* (TFADSP_32BITS) */
 }
 
 enum tfa98xx_error
@@ -2602,7 +2621,7 @@ mem_write(tfa98xx_handle_t handle,
  *  write/read raw msg functions :
  *  the buffer is provided in little endian format, each word
  *  occupying 3 bytes, length is in bytes.
- *  The functions will return immediately and do not not wait for DSP reponse.
+ *  functions will return immediately and do not not wait for DSP response.
  */
 #define MAX_WORDS (300)
 enum tfa98xx_error
@@ -2649,7 +2668,7 @@ tfa_dsp_msg(tfa98xx_handle_t handle, int length, const char *buf)
  * write/read raw msg functions:
  * the buffer is provided in little endian format, each word
  * occupying 3 bytes, length is in bytes.
- * The functions will return immediately and do not not wait for DSP reponse.
+ * functions will return immediately and do not not wait for DSP ressponse.
  * An ID is added to modify the command-ID
  */
 enum tfa98xx_error
@@ -2753,7 +2772,7 @@ tfa98xx_dsp_read_mem(tfa98xx_handle_t handle,
 	else
 		dmem = TFA98XX_DMEM_XMEM;
 
-	/* Remove offset from adress */
+	/* Remove offset from address */
 	start_offset = start_offset & 0xffff;
 	num_bytes = num_words * bytes_per_word;
 	p = p_values;
@@ -2947,7 +2966,10 @@ enum tfa98xx_error tfa_dsp_cmd_id_write_read(tfa98xx_handle_t handle,
 	       param_id == SB_PARAM_GET_LSMODEL ||
 	       param_id == SB_PARAM_GET_ALGO_PARAMS)) {
 		/* Modifying the ID for GetRe25C */
-		buffer[0] = 4;
+		buffer[0] = 4; /* CC: 4 (DS) for mono */
+	} else {
+		if (tfa98xx_cnt_max_device() == 2)
+			buffer[0] = 0; /* CC: 0 (reset all) for stereo */
 	}
 
 	error = dsp_msg(handle, sizeof(unsigned char[3]), (char *)buffer);
@@ -3052,7 +3074,7 @@ tfa98xx_dsp_get_hw_feature_bits(tfa98xx_handle_t handle, int *features)
 	if (handles_local[handle].hw_feature_bits != -1) {
 		*features = handles_local[handle].hw_feature_bits;
 	} else {
-			mtpbf = 0xf907;  /* MTP9 for tfa2, 8 bits */
+		mtpbf = 0xf907;  /* MTP9 for tfa2, 8 bits */
 		value = tfa_read_reg(handle, mtpbf) & 0xffff;
 		*features = handles_local[handle].hw_feature_bits = value;
 	}
@@ -3631,6 +3653,13 @@ tfa_run_speaker_boost(tfa98xx_handle_t handle, int force, int profile)
 
 	/* cold start and not tap profile */
 	if ((value == 1) && (!istap_prof)) {
+		if (handles_local[handle].ext_dsp) { /* master device only */
+			/* flush message buffer */
+			pr_debug("%s: flush buffer in blob, in cold start\n",
+				__func__);
+			err = tfa_tib_dsp_msgblob(handle, -2, NULL);
+		}
+
 		/* Run startup and write all files */
 		pr_info("%s: cold start, speaker startup\n", __func__);
 		err = tfa_run_speaker_startup(handle, force, profile);
@@ -3641,12 +3670,16 @@ tfa_run_speaker_boost(tfa98xx_handle_t handle, int force, int profile)
 		}
 
 		/* Save the current profile and set the vstep to 0 */
-		/* This needs to be overwriten even in CF bypass */
+		/* This needs to be overwritten even in CF bypass */
 		tfa_set_swprof(handle, (unsigned short)profile);
 		tfa_set_swvstep(handle, 0);
 
 		/* Dont run this for softDSP */
+#if defined(SET_CALIBRATION_AT_ALL_DEVICE_READY)
+		if (!handles_local[0].ext_dsp) { /* check only master device */
+#else
 		if (!handles_local[handle].ext_dsp) {
+#endif
 			/* Startup with CF in bypass then return here */
 			if (tfa_cf_enabled(handle) == 0)
 				return err;
@@ -3670,7 +3703,7 @@ tfa_run_speaker_boost(tfa98xx_handle_t handle, int force, int profile)
 		/* Dont run this for softDSP */
 		if (!handles_local[handle].ext_dsp) {
 			/* Save the current profile and set the vstep to 0 */
-			/* This needs to be overwriten in tap profile */
+			/* This needs to be overwritten in tap profile */
 			tfa_set_swprof(handle, (unsigned short)profile);
 			tfa_set_swvstep(handle, 0);
 		}
@@ -3686,7 +3719,7 @@ tfa_run_speaker_startup(tfa98xx_handle_t handle, int force, int profile)
 
 	pr_debug("coldstart%s :", force ? " (forced)" : "");
 
-	if (!force) { /* in case of force CF already runnning */
+	if (!force) { /* in case of force CF already running */
 		err = tfa_run_startup(handle, profile);
 		PRINT_ASSERT(err);
 		if (err) {
@@ -3780,11 +3813,12 @@ tfa_run_speaker_calibration(tfa98xx_handle_t handle, int profile)
 		err = tfa98xx_supported_speakers(handle, &spkr_count);
 
 		if (spkr_count == 1)
-			pr_debug(" %d mOhms\n", handles_local[handle].mohm[0]);
+			pr_debug("P: %d mOhms\n",
+				handles_local[handle].mohm[0]);
 		else
-			pr_debug(" Prim:%d mOhms, Sec:%d mOhms\n",
-						handles_local[handle].mohm[0],
-						handles_local[handle].mohm[1]);
+			pr_debug("P: %d mOhms, S:%d mOhms\n",
+						handles_local[0].mohm[0],
+						handles_local[1].mohm[0]);
 	}
 
 	/* When MTPOTC is set (cal=once) re-lock key2 */
@@ -3803,24 +3837,49 @@ enum tfa98xx_error tfa_set_calibration_values(tfa98xx_handle_t handle)
 	unsigned char bytes[6] = {0};
 	unsigned short value = 0;
 	int dsp_cal_value_left = 0, dsp_cal_value_right = 0;
+	int devcount = tfa98xx_cnt_max_device();
+	static int need_cal;
+
+	if (handle == 0) /* reset need_cal for the first device */
+		need_cal = 0;
+	need_cal |= (TFA_GET_BF(handle, MTPEX) == 0) ? 1 : 0;
+
+#if defined(SET_CALIBRATION_AT_ALL_DEVICE_READY)
+	if (handle < devcount - 1) {
+		pr_info("%s: suspend setting calibration data till all device is enabled\n",
+			__func__);
+		return err;
+	}
+#endif
+
+	pr_debug("%s: calibration is %srequired\n",
+		__func__, (need_cal) ? "" : "not ");
 
 	/* If calibration is set to once we load from MTP, else send zero's */
-	if (TFA_GET_BF(handle, MTPEX) == 1) {
-		/* mono */
-		if (tfa98xx_cnt_max_device() == 1) {
+	if (need_cal == 0) {
+		if (devcount == 1) { /* mono */
 			err = reg_read(handle, 0xF5, &value);
 			dsp_cal_value_left = (value * 65536) / 1000;
+			pr_info("%s: calibration data: %d\n",
+				__func__, value);
 
 			dsp_cal_value_right = dsp_cal_value_left;
-		} else { /* stereo */
+		} else if (devcount == 2) { /* stereo */
 			/* For now use quick hack
 			 * to assume handle 0 & 1 for stereo
 			 */
 			err = reg_read(0, 0xF5, &value);
 			dsp_cal_value_left = (value * 65536) / 1000;
+			pr_info("%s: calibration data[0]: %d\n",
+				__func__, value);
 
 			err = reg_read(1, 0xF5, &value);
 			dsp_cal_value_right = (value * 65536) / 1000;
+			pr_info("%s: calibration data[1]: %d\n",
+				__func__, value);
+		} else {
+			pr_err("%s: more than 2 devices were selected (devcount %d)\n",
+				__func__, devcount);
 		}
 
 		/* We have to copy it for both channels. Even when MONO! */
@@ -3831,7 +3890,12 @@ enum tfa98xx_error tfa_set_calibration_values(tfa98xx_handle_t handle)
 		bytes[3] = (uint8_t) ((dsp_cal_value_right >> 16) & 0xffff);
 		bytes[4] = (uint8_t) ((dsp_cal_value_right >> 8) & 0xff);
 		bytes[5] = (uint8_t) (dsp_cal_value_right & 0xff);
-	} else {
+
+#if defined(TFA_BLACKBOX_LOGGING)
+		if (handles_local[0].log_set_cb)
+			handles_local[0].log_set_cb();
+#endif
+	} else { /* calibration is required */
 		bytes[0] = 0;
 		bytes[1] = 0;
 		bytes[2] = 0;
@@ -3845,13 +3909,9 @@ enum tfa98xx_error tfa_set_calibration_values(tfa98xx_handle_t handle)
 		 sizeof(bytes), bytes);
 
 #if defined(WRITE_CALIBRATION_DATA_TO_MTP)
-	if (TFA_GET_BF(handle, MTPEX) == 0)
+	if (need_cal == 1)
 		err = tfa_tfadsp_wait_calibrate_done(handle);
 #endif
-
-	/* print out readback for debugging */
-	if (TFA_GET_BF(handle, MTPEX) == 1)
-		pr_info("%s: calibration data: %d\n", __func__, value);
 
 	return err;
 }
@@ -3951,7 +4011,7 @@ enum tfa98xx_error tfa_run_startup(tfa98xx_handle_t handle, int profile)
 	struct tfa_device_list *dev = tfa_cont_device(handle);
 	int i, noinit = 0;
 #if defined(REDUCED_REGISTER_SETTING)
-	static int first_after_boot = 1;
+	static int first_after_boot[MAX_HANDLES] = {1};
 	int is_cold_amp;
 #endif
 
@@ -3960,7 +4020,7 @@ enum tfa98xx_error tfa_run_startup(tfa98xx_handle_t handle, int profile)
 
 #if defined(REDUCED_REGISTER_SETTING)
 	is_cold_amp = tfa_is_cold_amp(handle);
-	if (first_after_boot || (is_cold_amp == 1)) {
+	if (first_after_boot[handle] || (is_cold_amp == 1)) {
 #endif
 		/* process the device list
 		 * to see if the user implemented the noinit
@@ -3991,12 +4051,12 @@ enum tfa98xx_error tfa_run_startup(tfa98xx_handle_t handle, int profile)
 #if defined(REDUCED_REGISTER_SETTING)
 	} else {
 		pr_info("%s: skip init and writing registers under dev (%d:%d)\n",
-			__func__, first_after_boot, is_cold_amp);
+			__func__, first_after_boot[handle], is_cold_amp);
 	}
 #endif
 
 #if defined(REDUCED_REGISTER_SETTING)
-	if ((first_after_boot || (is_cold_amp == 1))
+	if ((first_after_boot[handle] || (is_cold_amp == 1))
 		|| (profile != tfa_get_swprof(handle))) {
 #endif
 		/* also write register the settings from the default profile
@@ -4027,7 +4087,7 @@ enum tfa98xx_error tfa_run_startup(tfa98xx_handle_t handle, int profile)
 	 */
 		TFA_SET_BF_VOLATILE(handle, MANSCONF, 1);
 #if defined(REDUCED_REGISTER_SETTING)
-		first_after_boot = 0;
+		first_after_boot[handle] = 0;
 #endif
 	}
 	if (tfa98xx_runtime_verbose && (tfa98xx_dev_family(handle) == 2))
@@ -4167,10 +4227,10 @@ tfa_run_wait_calibration(tfa98xx_handle_t handle, int *calibrate_done)
 	}
 
 	/* poll xmem for calibrate always
-		* calibrate_done = 0 means "calibrating",
-		* calibrate_done = -1 (or 0xFFFFFF) means "fails"
-		* calibrate_done = 1 means calibration done
-		*/
+	 * calibrate_done = 0 means "calibrating",
+	 * calibrate_done = -1 (or 0xFFFFFF) means "fails"
+	 * calibrate_done = 1 means calibration done
+	 */
 	while ((*calibrate_done != 1)
 	       && (tries < TFA98XX_API_WAITRESULT_NTRIES)) {
 		err = mem_read(handle, TFA_FW_XMEM_CALIBRATION_DONE,
@@ -4246,8 +4306,6 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 					__func__, cal_prof_idx);
 				next_profile = cal_prof_idx;
 			}
-
-			break;
 		}
 	}
 
@@ -4328,9 +4386,11 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 			if (err != TFA98XX_ERROR_OK)
 				goto error_exit;
 			if (handles_local[dev].is_cold == 0) {
-				pr_debug("%s: flush buffer in blob, in warm start\n",
-					__func__);
-				err = tfa_tib_dsp_msgblob(dev, -2, NULL);
+				if (handles_local[dev].ext_dsp == 1) {
+					pr_debug("%s: flush buffer in blob, in warm start\n",
+						__func__);
+					tfa_tib_dsp_msgblob(dev, -2, NULL);
+				}
 			}
 		}
 
@@ -4411,11 +4471,6 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 		tfa_cont_close(dev); /* close all of them */
 	}
 
-#if defined(TFA_BLACKBOX_LOGGING)
-	if (handles_local[0].log_set_cb)
-		handles_local[0].log_set_cb();
-#endif
-
 	return err;
 
 error_exit:
@@ -4433,6 +4488,10 @@ enum tfa_error tfa_stop(void)
 {
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
 	int dev, devcount = tfa98xx_cnt_max_device();
+#if defined(RAMPING_DOWN_BEFORE_STOP)
+	int ampgain = 0;
+	int i;
+#endif
 
 	if (devcount == 0) {
 		pr_err("No or wrong container file loaded\n");
@@ -4446,16 +4505,50 @@ enum tfa_error tfa_stop(void)
 		if (tfa98xx_runtime_verbose)
 			pr_debug("Stopping device [%s]\n",
 				 tfa_cont_device_name(dev));
+
+#if defined(RAMPING_DOWN_BEFORE_STOP)
+		if (tfa98xx_dev_family(dev) == 2) {
+			/* ramp down amplifier gain for 5 msec */
+			ampgain = tfa_get_bf(dev, TFA2_BF_AMPGAIN);
+			pr_debug("%s: ramp down ampgain (%d)\n",
+				 __func__, ampgain);
+			for (i = 4; i >= 0; i--) {
+				tfa_set_bf(dev,
+					TFA2_BF_AMPGAIN,
+					ampgain * i / 5);
+				msleep_interruptible(1);
+			}
+		}
+#endif
+
 		/* mute */
 		tfa_run_mute(dev);
+
 		/* powerdown CF */
 		err = tfa98xx_powerdown(dev, 1);
 		if (err != TFA98XX_ERROR_OK)
 			goto error_exit;
 
+		if (handles_local[dev].ext_dsp == 1) {
+			/* flush message buffer */
+			pr_debug("%s: flush buffer in blob, at stop\n",
+				__func__);
+			tfa_tib_dsp_msgblob(dev, -2, NULL);
+		}
+
 		/* Workaround for ticket PLMA5337 */
 		if ((handles_local[dev].rev & 0xff) == 0x72)
 			TFA_SET_BF_VOLATILE(dev, AMPE, 0);
+
+#if defined(RAMPING_DOWN_BEFORE_STOP)
+		if (tfa98xx_dev_family(dev) == 2) {
+			/* restore amplifier gain */
+			pr_debug("%s: restore ampgain (%d)\n",
+				 __func__, ampgain);
+			tfa_set_bf(dev,
+				TFA2_BF_AMPGAIN, ampgain);
+		}
+#endif
 
 		/* disable I2S output on TFA1 devices without TDM */
 		err = tfa98xx_aec_output(dev, 0);
@@ -4514,6 +4607,7 @@ enum tfa_error tfa_reset(void)
 		err = tfa_cont_open(dev);
 		if (err != TFA98XX_ERROR_OK)
 			break;
+
 		if (tfa98xx_runtime_verbose)
 			pr_debug("resetting device [%s]\n",
 				 tfa_cont_device_name(dev));
@@ -4591,8 +4685,7 @@ tfa_dsp_get_calibration_impedance(tfa98xx_handle_t handle)
 			if ((spkr_count > 1)
 				&& ((handle + 1) < tfa98xx_cnt_max_device())) {
 				dev = handle + 1;
-				if (!tfa98xx_handle_is_open
-				    (dev)) {
+				if (!tfa98xx_handle_is_open(dev)) {
 					/* If handle is not
 					 * open, try to open
 					 */
@@ -4600,11 +4693,15 @@ tfa_dsp_get_calibration_impedance(tfa98xx_handle_t handle)
 					if (error != TFA98XX_ERROR_OK)
 						return error;
 
-					handles_local[handle].mohm[1] =
+					handles_local[dev].mohm[0] =
 						tfa_read_reg(dev, (uint16_t)
 						TFA_MK_BF((0xF5), 0, 16));
 
 					tfa_cont_close(dev);
+				} else {
+					handles_local[dev].mohm[0] =
+						tfa_read_reg(dev, (uint16_t)
+						TFA_MK_BF((0xF5), 0, 16));
 				}
 			}
 		} else {
@@ -4633,12 +4730,12 @@ tfa_dsp_get_calibration_impedance(tfa98xx_handle_t handle)
 				/* second data */
 
 				for (i = 0; i < spkr_count; i++) {
-					handles_local[handle].mohm[i] =
+					handles_local[i].mohm[0] =
 					(scaled_data[i]*1000)/TFA_FW_ReZ_SCALE;
 				}
 			} else {
 				for (i = 0; i < spkr_count; i++)
-					handles_local[handle].mohm[i] = -1;
+					handles_local[i].mohm[0] = -1;
 			}
 		}
 	} else if (TFA_GET_BF(handle, MTPOTC)
@@ -4647,9 +4744,9 @@ tfa_dsp_get_calibration_impedance(tfa98xx_handle_t handle)
 		if (tfa98xx_runtime_verbose)
 			pr_debug("Getting calibration values from MTP\n");
 		for (i = 0; i < spkr_count; i++) {
-			handles_local[handle].mohm[i] =
-				tfa_read_reg(handle,
-					(uint16_t)TFA_MK_BF((0xF4+i), 0, 16));
+			handles_local[i].mohm[0] =
+				tfa_read_reg(handle, (uint16_t)
+				TFA_MK_BF((0xF4 + i), 0, 16));
 		}
 	} else {
 		/* Get values from speakerboost */
@@ -4666,11 +4763,11 @@ tfa_dsp_get_calibration_impedance(tfa98xx_handle_t handle)
 			tfa98xx_convert_bytes2data
 				(nr_bytes, bytes, data);
 			for (i = 0; i < spkr_count; i++)
-				handles_local[handle].mohm[i] =
+				handles_local[i].mohm[0] =
 				   (data[i]*1000)/TFA_FW_ReZ_SCALE;
 		} else {
 			for (i = 0; i < spkr_count; i++)
-				handles_local[handle].mohm[i] = -1;
+				handles_local[i].mohm[0] = -1;
 		}
 	}
 
@@ -5035,7 +5132,7 @@ int tfa_ext_register(dsp_send_message_t tfa_send_message,
 	 *	}
 	 */
 
-		/* assume that external is always device 0,
+		/* master device only: external is always device 0,
 		 * Don't do this for device 1!
 		 */
 		handles_local[0].ext_dsp = 1; /* set cold 1st msg */
@@ -5415,13 +5512,13 @@ tfa_tfadsp_get_calibration_impedance(tfa98xx_handle_t handle)
 			scaled_data[1] = data[2]; /* second data */
 
 			for (i = 0; i < spkr_count; i++) {
-				handles_local[handle].mohm[i] =
+				handles_local[i].mohm[0] =
 					(scaled_data[i] * 1000)
 					/ TFA_FW_ReZ_SCALE;
 			}
 		} else {
 			for (i = 0; i < spkr_count; i++)
-				handles_local[handle].mohm[i] = -1;
+				handles_local[i].mohm[0] = -1;
 		}
 	}
 
@@ -5431,7 +5528,7 @@ tfa_tfadsp_get_calibration_impedance(tfa98xx_handle_t handle)
 enum tfa98xx_error tfa_tfadsp_calibrate(tfa98xx_handle_t handle)
 {
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
-	int cal_prof_idx = 0;
+	int cur_prof_idx = 0, cal_prof_idx = 0;
 
 	if ((handles_local[handle].stream_state & BIT_PSTREAM) != 1) {
 		pr_info("%s: no playback; speaker init calibration fail\n",
@@ -5444,8 +5541,8 @@ enum tfa98xx_error tfa_tfadsp_calibrate(tfa98xx_handle_t handle)
 	if (TFA_GET_BF(handle, MTPEX) == 1) {
 		pr_debug("speaker is already calibrated; reset MTPEX first\n");
 		/* reset MTPEX */
-		err = tfa98xx_set_mtp(handle,
-			0 << TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_POS,
+		err = tfa98xx_set_mtp(handle, 0
+			<< TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_POS,
 			TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_MSK);
 		if (err) {
 			pr_err("%s: setting MPTEX failed, err (%d)\n",
@@ -5454,12 +5551,14 @@ enum tfa98xx_error tfa_tfadsp_calibrate(tfa98xx_handle_t handle)
 		}
 	}
 
+	cur_prof_idx = tfa_get_swprof(handle);
 	cal_prof_idx = tfa_cont_get_cal_profile(handle);
 	if (cal_prof_idx < 0)
 		cal_prof_idx = 0;
 
-	pr_info("%s: set profile for calibration cal_prof_idx %d\n",
-		__func__, cal_prof_idx);
+	/* set cal profile */
+	pr_info("%s: set profile for calibration cal_prof_idx %d (from %d)\n",
+		__func__, cal_prof_idx, cur_prof_idx);
 	err = tfa_cont_write_files(handle);
 	PRINT_ASSERT(err);
 	err =  tfa_cont_write_regs_prof(handle, cal_prof_idx);
@@ -5469,16 +5568,45 @@ enum tfa98xx_error tfa_tfadsp_calibrate(tfa98xx_handle_t handle)
 
 	tfa_set_swprof(handle, (unsigned short)cal_prof_idx);
 
-	pr_info("%s: set_calibration\n", __func__);
-	err = tfa_set_calibration_values(handle); /* SetRe25C with {0, 0} */
+	pr_info("%s: set_calibration (cal)\n", __func__);
+	/* SetRe25C with {0, 0} */
+#if defined(SET_CALIBRATION_AT_ALL_DEVICE_READY)
+	/* force to set calibrate all by calling last device */
+	err = tfa_set_calibration_values(tfa98xx_cnt_max_device() - 1);
+#else
+	err = tfa_set_calibration_values(handle);
+#endif
 	PRINT_ASSERT(err);
 
+	/* run calibration */
 #if defined(WRITE_CALIBRATION_DATA_TO_MTP)
 	if (TFA_GET_BF(handle, MTPEX) == 0)
 		err = tfa_tfadsp_wait_calibrate_done(handle);
 #else
 	err = tfa_tfadsp_wait_calibrate_done(handle);
 #endif
+
+	/* restore profile */
+	pr_info("%s: set profile for restoration cur_prof_idx %d\n",
+		__func__, cur_prof_idx);
+	err = tfa_cont_write_files(handle);
+	PRINT_ASSERT(err);
+	err =  tfa_cont_write_regs_prof(handle, cur_prof_idx);
+	PRINT_ASSERT(err);
+	err = tfa_cont_write_files_prof(handle, cur_prof_idx, 0);
+	PRINT_ASSERT(err);
+
+	tfa_set_swprof(handle, (unsigned short)cur_prof_idx);
+
+	pr_info("%s: set_calibration (post-cal)\n", __func__);
+	/* SetRe25C with {0, 0} */
+#if defined(SET_CALIBRATION_AT_ALL_DEVICE_READY)
+	/* force to set calibrate all by calling last device */
+	err = tfa_set_calibration_values(tfa98xx_cnt_max_device() - 1);
+#else
+	err = tfa_set_calibration_values(handle);
+#endif
+	PRINT_ASSERT(err);
 
 	pr_info("%s: end\n", __func__);
 
@@ -5496,12 +5624,13 @@ tfa_tfadsp_wait_calibrate_done(tfa98xx_handle_t handle)
 	int otc_val = 1;
 	uint16_t readback;
 	int count;
+	int i, spkr_count = 1;
 
 	pr_info("%s: begin\n", __func__);
 
 	controls->calib.wr_value = true;  /* request was triggered from here */
 	controls->calib.rd_valid = false; /* result not available */
-	controls->calib.rd_value = false; /* result not valid (dafault) */
+	controls->calib.rd_value = false; /* result not valid (default) */
 
 	pr_info("%s: wait until calibration is done\n", __func__);
 	for (count = 0;
@@ -5532,114 +5661,127 @@ tfa_tfadsp_wait_calibrate_done(tfa98xx_handle_t handle)
 
 	pr_info("%s: calibration done\n", __func__);
 	calibration_done = 1;
-	pr_info("Prim:%d mOhms", handles_local[handle].mohm[0]);
+
+	err = tfa98xx_supported_speakers(handle, &spkr_count);
+	if (spkr_count == 1)
+		pr_debug("P: %d mOhms\n", handles_local[handle].mohm[0]);
+	else
+		pr_debug("P: %d mOhms, S: %d mOhms\n",
+			handles_local[0].mohm[0], handles_local[1].mohm[0]);
 
 #if defined(CHECK_CALIBRATION_DATA_RANGE)
-	err = tfa_calibration_range_check
-		(handle, handles_local[handle].mohm[0]);
-	if (err) {
-		calibration_done = 0;
-		pr_err("%s: calibration data is out of range\n", __func__);
-		err = TFA98XX_ERROR_BAD_PARAMETER;
-		goto wait_calibrate_done_error_exit;
+	for (i = 0; i < spkr_count; i++) {
+		err = tfa_calibration_range_check
+			(handle, handles_local[handle].mohm[0]);
+		if (err) {
+			calibration_done = 0;
+			pr_err("%s: calibration data is out of range: device %d\n",
+				__func__, i);
+			err = TFA98XX_ERROR_BAD_PARAMETER;
+			goto wait_calibrate_done_error_exit;
+		}
 	}
 #endif
 
 #if defined(WRITE_CALIBRATION_DATA_TO_MTP)
-	if ((handles_local[handle].mohm[0] > 0) && calibration_done) {
-		err = tfa_mtp_set_calibration
-			(handle, handles_local[handle].mohm[0]);
-		if (err) {
-			pr_err("%s: writing calibration data failed to MTP, err (%d)\n",
-				__func__, err);
-			err = TFA98XX_ERROR_RPC_CALIB_FAILED;
-			goto wait_calibrate_done_error_exit;
-		}
-
-		/* readback after writing onto MTP */
-		err = tfa_mtp_get_calibration(handle, &readback);
-		if (err) {
-			pr_err("%s: reading calibration data back failed from MTP, err (%d)\n",
-				__func__, err);
-			err = TFA98XX_ERROR_RPC_CALIB_FAILED;
-			goto wait_calibrate_done_error_exit;
-		}
-
-		/* write again if readback is out of range */
-		pr_info("%s: calibaration data %d, readback from MTP\n",
-			__func__, readback);
-#if defined(CHECK_CALIBRATION_DATA_RANGE)
-		err = tfa_calibration_range_check(handle, readback);
-#else
-		err = (readback == 0) ?
-			TFA98XX_ERROR_BAD_PARAMETER : TFA98XX_ERROR_OK;
-#endif
-		if (err) {
+	for (i = 0; i < spkr_count; i++) {
+		if ((handles_local[i].mohm[0] > 0) && calibration_done) {
 			err = tfa_mtp_set_calibration
-				(handle, handles_local[handle].mohm[0]);
+				(i, handles_local[i].mohm[0]);
 			if (err) {
-				pr_err("%s: writing calibration data failed to MTP (2nd), err (%d)\n",
-				       __func__, err);
+				pr_err("%s: writing calibration data failed to MTP, device %d err (%d)\n",
+					__func__, i, err);
 				err = TFA98XX_ERROR_RPC_CALIB_FAILED;
 				goto wait_calibrate_done_error_exit;
 			}
-		}
 
-		if (controls->otc.deferrable && controls->otc.triggered) {
-			otc_val = controls->otc.wr_value;
-			pr_debug("Deferred writing otc = %d\n", otc_val);
-		} else {
-			otc_val = 1;
-		}
+			/* readback after writing onto MTP */
+			err = tfa_mtp_get_calibration(i, &readback);
+			if (err) {
+				pr_err("%s: reading calibration data back failed from MTP, device %d err (%d)\n",
+					__func__, i, err);
+				err = TFA98XX_ERROR_RPC_CALIB_FAILED;
+				goto wait_calibrate_done_error_exit;
+			}
 
-		/* set OTC <0:always 1:once> */
-		err = tfa98xx_set_mtp(handle,
-			(otc_val & 1) << TFA98XX_KEY2_PROTECTED_MTP0_MTPOTC_POS,
-			TFA98XX_KEY2_PROTECTED_MTP0_MTPOTC_MSK);
-		if (err) {
-			pr_info("%s: setting OTC failed, err (%d)\n",
-				__func__, err);
-			err = TFA98XX_ERROR_RPC_CALIB_FAILED;
-			goto wait_calibrate_done_error_exit;
-		} else {
-			controls->otc.triggered = false;
-			controls->otc.wr_value = otc_val;
-			controls->otc.rd_value = otc_val;
-		}
-
-		/* set MTPEX */
-		err = tfa98xx_set_mtp(handle,
-			1 << TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_POS,
-			TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_MSK);
-		if (err) {
-			pr_err("%s: setting MPTEX failed, err (%d)\n",
-			       __func__, err);
-			err = TFA98XX_ERROR_RPC_CALIB_FAILED;
-			goto wait_calibrate_done_error_exit;
-		}
-
-		/* readback after writing onto MTP and setting MTPEX */
-		err = tfa_mtp_get_calibration(handle, &readback);
-		if (err) {
-			pr_err("%s: reading calibration data back failed from MTP (2nd), err (%d)\n",
-				__func__, err);
-			err = TFA98XX_ERROR_RPC_CALIB_FAILED;
-			goto wait_calibrate_done_error_exit;
-		}
-
-		/* panic if readback is out of range */
-		pr_info("%s: calibaration data %d readback from MTP (2nd)\n",
-			__func__, readback);
+			/* write again if readback is out of range */
+			pr_info("%s: calibaration data %d, readback from MTP, device %d\n",
+				__func__, readback, i);
 #if defined(CHECK_CALIBRATION_DATA_RANGE)
-		err = tfa_calibration_range_check(handle, readback);
+			err = tfa_calibration_range_check(i, readback);
 #else
-		err = (readback == 0) ?
-			TFA98XX_ERROR_BAD_PARAMETER : TFA98XX_ERROR_OK;
+			err = (readback == 0) ?
+				TFA98XX_ERROR_BAD_PARAMETER : TFA98XX_ERROR_OK;
 #endif
-		if (err) {
-			pr_err("%s: calibration data (%d) is out of range, readback from MTP\n",
-				__func__, readback);
-			panic("[AUDIO_BSP] SPK INIT CALIBRATION Fail.");
+			if (err) {
+				err = tfa_mtp_set_calibration
+					(i, handles_local[i].mohm[0]);
+				if (err) {
+					pr_err("%s: writing calibration data failed to MTP (2nd), device %d err (%d)\n",
+						__func__, i, err);
+					err = TFA98XX_ERROR_RPC_CALIB_FAILED;
+					goto wait_calibrate_done_error_exit;
+				}
+			}
+
+			if (controls->otc.deferrable
+				&& controls->otc.triggered) {
+				otc_val = controls->otc.wr_value;
+				pr_debug("Deferred writing otc = %d\n",
+					otc_val);
+			} else {
+				otc_val = 1;
+			}
+
+			/* set OTC <0:always 1:once> */
+			err = tfa98xx_set_mtp(i, (otc_val & 1)
+				<< TFA98XX_KEY2_PROTECTED_MTP0_MTPOTC_POS,
+				TFA98XX_KEY2_PROTECTED_MTP0_MTPOTC_MSK);
+			if (err) {
+				pr_info("%s: setting OTC failed, device %d err (%d)\n",
+					__func__, i, err);
+				err = TFA98XX_ERROR_RPC_CALIB_FAILED;
+				goto wait_calibrate_done_error_exit;
+			} else {
+				controls->otc.triggered = false;
+				controls->otc.wr_value = otc_val;
+				controls->otc.rd_value = otc_val;
+			}
+
+			/* set MTPEX */
+			err = tfa98xx_set_mtp(i, 1
+				<< TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_POS,
+				TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_MSK);
+			if (err) {
+				pr_err("%s: setting MPTEX failed, device %d err (%d)\n",
+					__func__, i, err);
+				err = TFA98XX_ERROR_RPC_CALIB_FAILED;
+				goto wait_calibrate_done_error_exit;
+			}
+
+			/* readback after writing onto MTP and setting MTPEX */
+			err = tfa_mtp_get_calibration(i, &readback);
+			if (err) {
+				pr_err("%s: reading calibration data back failed from MTP (2nd), device %d err (%d)\n",
+					__func__, i, err);
+				err = TFA98XX_ERROR_RPC_CALIB_FAILED;
+				goto wait_calibrate_done_error_exit;
+			}
+
+			/* panic if readback is out of range */
+			pr_info("%s: calibaration data %d readback from MTP (2nd), device %d\n",
+				__func__, readback, i);
+#if defined(CHECK_CALIBRATION_DATA_RANGE)
+			err = tfa_calibration_range_check(i, readback);
+#else
+			err = (readback == 0) ?
+				TFA98XX_ERROR_BAD_PARAMETER : TFA98XX_ERROR_OK;
+#endif
+			if (err) {
+				pr_err("%s: calibration data (%d) is out of range, readback from MTP, device %d\n",
+					__func__, readback, i);
+				panic("[AUDIO_BSP] SPK INIT CALIBRATION Fail.");
+			}
 		}
 	}
 #endif /* WRITE_CALIBRATION_DATA_TO_MTP */
@@ -5653,7 +5795,7 @@ wait_calibrate_done_error_exit:
 		controls->calib.rd_valid = false;
 		/* result not available */
 		controls->calib.rd_value = false;
-		/* result not valid (dafault) */
+		/* result not valid (default) */
 	} else {
 		controls->calib.wr_value = false;
 		/* request was not in triggered state */

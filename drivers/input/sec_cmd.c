@@ -316,6 +316,20 @@ static void sec_cmd_store_function(struct sec_cmd_data *data)
 
 	sec_cmd_ptr->cmd_func(data);
 
+	if (cmd_found && sec_cmd_ptr->cmd_log) {
+		char tbuf[32];
+		unsigned long long t;
+		unsigned long nanosec_rem;
+
+		memset(tbuf, 0x00, sizeof(tbuf));
+		t = local_clock();
+		nanosec_rem = do_div(t, 1000000000);
+		snprintf(tbuf, sizeof(tbuf), "[r:%lu.%06lu]",
+				(unsigned long)t,
+				nanosec_rem / 1000);
+
+		sec_debug_tsp_command_history(tbuf);
+	}
 }
 
 static ssize_t sec_cmd_store(struct device *dev, struct device_attribute *devattr,
@@ -323,6 +337,7 @@ static ssize_t sec_cmd_store(struct device *dev, struct device_attribute *devatt
 {
 	struct sec_cmd_data *data = dev_get_drvdata(dev);
 	struct command cmd = {{0}};
+	struct sec_cmd *sec_cmd_ptr = NULL;
 	int queue_size;
 
 	if (!data) {
@@ -343,6 +358,31 @@ static ssize_t sec_cmd_store(struct device *dev, struct device_attribute *devatt
 	}
 
 	strncpy(cmd.cmd, buf, count);
+
+	list_for_each_entry(sec_cmd_ptr, &data->cmd_list_head, list) {
+		if (!strncmp(cmd.cmd, sec_cmd_ptr->cmd_name, strlen(sec_cmd_ptr->cmd_name))) {
+			if (sec_cmd_ptr->cmd_log) {
+				char task_info[40];
+				char tbuf[32];
+				unsigned long long t;
+				unsigned long nanosec_rem;
+
+				memset(tbuf, 0x00, sizeof(tbuf));
+				t = local_clock();
+				nanosec_rem = do_div(t, 1000000000);
+				snprintf(tbuf, sizeof(tbuf), "[q:%lu.%06lu]",
+						(unsigned long)t,
+						nanosec_rem / 1000);
+
+				snprintf(task_info, 40, "\n[%d:%s]", current->pid, current->comm);
+				sec_debug_tsp_command_history(task_info);
+				sec_debug_tsp_command_history(cmd.cmd);
+				sec_debug_tsp_command_history(tbuf);
+
+			}
+			break;
+		}
+	}
 
 	mutex_lock(&data->fifo_lock);
 	queue_size = (kfifo_len(&data->cmd_queue) / sizeof(struct command));

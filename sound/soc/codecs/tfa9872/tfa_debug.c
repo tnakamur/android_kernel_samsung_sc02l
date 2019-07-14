@@ -64,7 +64,7 @@ const char *tfa98xx_get_error_string(enum tfa98xx_error error)
 		p_err_str = "I2C_NonFatal";
 		break;
 	case TFA98XX_ERROR_STATE_TIMED_OUT:
-	p_err_str = "WaitForState_TimedOut";
+		p_err_str = "WaitForState_TimedOut";
 	break;
 	default:
 		snprintf(latest_errorstr, ERROR_MAX_LENGTH,
@@ -80,7 +80,7 @@ const char *tfa98xx_get_error_string(enum tfa98xx_error error)
  */
 /**
  * lookup bf in table
- *	 return 'unkown' if not found
+ *	 return 'unknown' if not found
  */
 static char *tfa_bf2name(struct tfa_bf_name *table, uint16_t bf)
 {
@@ -91,7 +91,7 @@ static char *tfa_bf2name(struct tfa_bf_name *table, uint16_t bf)
 			return table[n].bf_name;
 	} while (table[n++].bf_enum != 0xffff);
 
-	return table[n-1].bf_name; /* last name says unkown */
+	return table[n-1].bf_name; /* last name says unknown */
 }
 /**
  * lookup name in table
@@ -325,7 +325,6 @@ uint16_t tfa_cont_bf_enum(const char *name, unsigned short rev)
 			bfnum = tfa_name2bf(tfa9912_bit_names, name);
 			/* try long bitname table */
 		break;
-
 	default:
 		pr_err("unknown REVID:0x%0x\n", rev);
 		bfnum = 0xffff;

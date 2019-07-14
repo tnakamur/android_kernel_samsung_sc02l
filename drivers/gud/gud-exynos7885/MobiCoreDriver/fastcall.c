@@ -294,8 +294,8 @@ static int mc_cpu_offline(int cpu)
 	/* Chose the first online CPU and switch! */
 	for_each_online_cpu(i) {
 		if (cpu != i) {
-			mc_dev_devel("CPU %d is dying, switching to %d\n",
-				     cpu, i);
+			mc_dev_info("CPU %d is dying, switching to %d",
+				    cpu, i);
 			return mc_switch_core(i);
 		}
 

@@ -349,9 +349,11 @@ int fimc_is_interface_3aa_probe(struct fimc_is_interface_ischain *itfc,
 
 		gPtr_lib_support.pdev		= pdev;
 
+#if !defined(ENABLE_DYNAMIC_MEM)
 		info_itfc("[ID:%2d] kvaddr for taaisp: 0x%lx\n", hw_id,
 			CALL_BUFOP(gPtr_lib_support.minfo->pb_taaisp, kvaddr,
 					gPtr_lib_support.minfo->pb_taaisp));
+#endif
 	}
 
 	set_bit(IS_CHAIN_IF_STATE_INIT, &itf_3aa->state);
@@ -429,9 +431,11 @@ int fimc_is_interface_isp_probe(struct fimc_is_interface_ischain *itfc,
 
 		gPtr_lib_support.pdev		= pdev;
 
+#if !defined(ENABLE_DYNAMIC_MEM)
 		info_itfc("[ID:%2d] kvaddr for taaisp: 0x%lx\n", hw_id,
 			CALL_BUFOP(gPtr_lib_support.minfo->pb_taaisp, kvaddr,
 					gPtr_lib_support.minfo->pb_taaisp));
+#endif
 	}
 
 	set_bit(IS_CHAIN_IF_STATE_INIT, &itf_isp->state);
@@ -889,7 +893,6 @@ static void wq_func_subdev(struct fimc_is_subdev *leader,
 	struct fimc_is_video_ctx *ldr_vctx, *sub_vctx;
 	struct fimc_is_framemgr *ldr_framemgr, *sub_framemgr;
 	struct fimc_is_frame *ldr_frame;
-	struct camera2_node *capture;
 	int i = 0;
 
 	BUG_ON(!sub_frame);
@@ -932,28 +935,6 @@ static void wq_func_subdev(struct fimc_is_subdev *leader,
 	} else {
 		msrdbgs(1, " DONE(%d)\n", subdev, subdev, ldr_frame, sub_frame->index);
 		sub_frame->stream->fvalid = 1;
-	}
-
-	capture = &ldr_frame->shot_ext->node_group.capture[subdev->cid];
-	if (likely(capture->vid == subdev->vid)) {
-		sub_frame->stream->input_crop_region[0] = capture->input.cropRegion[0];
-		sub_frame->stream->input_crop_region[1] = capture->input.cropRegion[1];
-		sub_frame->stream->input_crop_region[2] = capture->input.cropRegion[2];
-		sub_frame->stream->input_crop_region[3] = capture->input.cropRegion[3];
-		sub_frame->stream->output_crop_region[0] = capture->output.cropRegion[0];
-		sub_frame->stream->output_crop_region[1] = capture->output.cropRegion[1];
-		sub_frame->stream->output_crop_region[2] = capture->output.cropRegion[2];
-		sub_frame->stream->output_crop_region[3] = capture->output.cropRegion[3];
-	} else {
-		mserr("capture vid is changed(%d != %d)", subdev, subdev, subdev->vid, capture->vid);
-		sub_frame->stream->input_crop_region[0] = 0;
-		sub_frame->stream->input_crop_region[1] = 0;
-		sub_frame->stream->input_crop_region[2] = 0;
-		sub_frame->stream->input_crop_region[3] = 0;
-		sub_frame->stream->output_crop_region[0] = 0;
-		sub_frame->stream->output_crop_region[1] = 0;
-		sub_frame->stream->output_crop_region[2] = 0;
-		sub_frame->stream->output_crop_region[3] = 0;
 	}
 
 	clear_bit(subdev->id, &ldr_frame->out_flag);
@@ -1010,6 +991,7 @@ static void wq_func_frame(struct fimc_is_subdev *leader,
 					wq_func_subdev(leader, subdev, frame, fcount, rcount, status);
 					break;
 				} else if (fcount > frame->stream->fcount) {
+					warn("%s : fcnt(%d), f_stream_fcnt(%d)", __func__, fcount, frame->stream->fcount);
 					wq_func_subdev(leader, subdev, frame, frame->stream->fcount, rcount, 0xF);
 
 					/* get next subdev frame */

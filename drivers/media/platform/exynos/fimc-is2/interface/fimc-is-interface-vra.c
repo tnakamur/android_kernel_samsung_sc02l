@@ -15,7 +15,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 
-static struct fimc_is_lib_vra *g_lib_vra;
+struct fimc_is_lib_vra *g_lib_vra;
 
 static void fimc_is_lib_vra_callback_frw_abort(void)
 {
@@ -37,6 +37,7 @@ static void fimc_is_lib_vra_callback_final_output_ready(u32 instance,
 	u32 face_rect[CAMERA2_MAX_FACES][4];
 	u32 face_center[CAMERA2_MAX_FACES][2];
 	bool debug_flag = false;
+	unsigned long flags = 0;
 
 	if (unlikely(!lib_vra)) {
 		err_lib("lib_vra is NULL");
@@ -46,6 +47,12 @@ static void fimc_is_lib_vra_callback_final_output_ready(u32 instance,
 #if defined(VRA_DMA_TEST_BY_IMAGE)
 	info_lib("------ num_all_faces(%d) -------\n", num_all_faces);
 #endif
+
+	/*
+	 * A spinlock is because reading and writing is performed in different thread.
+	 * The read is performed in 3AA for FDAE. And the write is performed in VRA.
+	 */
+	spin_lock_irqsave(&lib_vra->ae_fd_slock[instance], flags);
 
 	memcpy(&lib_vra->out_list_info[instance], (void *)out_list_info_ptr,
 		sizeof(lib_vra->out_list_info[instance]));
@@ -67,6 +74,8 @@ static void fimc_is_lib_vra_callback_final_output_ready(u32 instance,
 				faces_ptr[i].base.score);
 #endif
 	}
+
+	spin_unlock_irqrestore(&lib_vra->ae_fd_slock[instance], flags);
 
 	for (i = 0; i < min_t(u32, lib_vra->all_face_num[instance], MAX_FACE_COUNT); i++) {
 		face_rect[i][0] = faces_ptr[i].base.rect.left;
@@ -142,7 +151,7 @@ static void fimc_is_lib_vra_callback_post_detect_ready(u32 instance,
 				0 : num_all_faces;
 #endif
 
-	for (i = 0; i < min_t(u32, lib_vra->all_face_num[instance], MAX_FACE_COUNT); i++) {
+	for (i = 0; i < min_t(u32, lib_vra->pdt_all_face_num[instance], MAX_FACE_COUNT); i++) {
 		lib_vra->pdt_out_faces[instance][i] = faces_ptr[i];
 		dbg_lib(3, "lib_vra: pdt_id[%d]; left, top, size, score, extra;"
 			 "%d, %d, %d, %d, %d, %d, %d, %d, %d\n",
@@ -199,8 +208,8 @@ int fimc_is_lib_vra_set_post_detect_output(struct fimc_is_lib_vra *lib_vra,
 	/* not supported features : set_post_detect_output */
 	return 0;
 }
-
 #endif
+
 static void fimc_is_lib_vra_callback_end_input(u32 instance,
 		u32 frame_index, unsigned char *base_address)
 {
@@ -459,6 +468,8 @@ int fimc_is_lib_vra_alloc_memory(struct fimc_is_lib_vra *lib_vra, ulong dma_addr
 	alloc_info->max_tr_res_frames = 5;
 #if defined(ENABLE_HYBRID_FD)
 	alloc_info->max_hybrid_faces = MAX_HYBRID_FACES;
+#else
+	alloc_info->max_hybrid_faces = 0;
 #endif
 
 	status = CALL_VRAOP(lib_vra, ex_get_memory_sizes,
@@ -520,6 +531,8 @@ int fimc_is_lib_vra_free_memory(struct fimc_is_lib_vra *lib_vra)
 	for (index = 0; index < VRA_TOTAL_SENSORS; index++)
 		fimc_is_free_vra(lib_vra->frame_desc_heap[index]);
 
+	g_lib_vra = NULL;
+
 	return 0;
 }
 
@@ -549,6 +562,10 @@ int fimc_is_lib_vra_init_frame_work(struct fimc_is_lib_vra *lib_vra,
 	spin_lock_init(&lib_vra->ctl_lock);
 	spin_lock_init(&lib_vra->algs_lock);
 	spin_lock_init(&lib_vra->intr_lock);
+	for (i = 0; i < VRA_TOTAL_SENSORS; i++) {
+		spin_lock_init(&lib_vra->af_fd_slock[i]);
+		spin_lock_init(&lib_vra->ae_fd_slock[i]);
+	}
 
 	lib_vra->dma_out.total_size = lib_vra->dma_out_size;
 	lib_vra->dma_out.base_adr   = lib_vra->dma_out_heap;
@@ -588,7 +605,15 @@ int fimc_is_lib_vra_init_frame_work(struct fimc_is_lib_vra *lib_vra,
 #if defined(ENABLE_HYBRID_FD)
 	callbacks->frw_invoke_hybrid_pr_ptr	= NULL;
 	callbacks->frw_abort_hybrid_pr_ptr	= NULL;
+#ifdef ENABLE_VRA_LIBRARY_IMPROVE
 	callbacks->sen_post_detect_ready_ptr	= fimc_is_lib_vra_callback_post_detect_ready;
+#endif
+#else
+	callbacks->frw_invoke_hybrid_pr_ptr	= NULL;
+	callbacks->frw_abort_hybrid_pr_ptr	= NULL;
+#ifdef ENABLE_VRA_LIBRARY_IMPROVE
+	callbacks->sen_post_detect_ready_ptr	= NULL;
+#endif
 #endif
 
 	lib_vra->fr_work_init.hw_clock_freq_mhz = 533; /* Not used */
@@ -787,6 +812,9 @@ int fimc_is_lib_vra_set_orientation(struct fimc_is_lib_vra *lib_vra,
 			vra_orientation = VRA_ORIENT_TOP_LEFT_TO_RIGHT;
 			break;
 		}
+	} else {
+		err_lib("[%d]%s: wrong direction(%#x)", instance, __func__, status);
+		return -EINVAL;
 	}
 
 	dbg_lib(3, "[%d]scaler_orientation(%d), vra_orientation(%d)\n", instance,
@@ -886,6 +914,28 @@ static int fimc_is_lib_vra_fwalgs_stop(struct fimc_is_lib_vra *lib_vra)
 	return 0;
 }
 
+int fimc_is_lib_vra_stop_instance(struct fimc_is_lib_vra *lib_vra, u32 instance)
+{
+	if (unlikely(!lib_vra)) {
+		err_lib("lib_vra is NULL");
+		return -EINVAL;
+	}
+
+	if (instance >= VRA_TOTAL_SENSORS) {
+		err_lib("invalid instance");
+		return -EINVAL;
+	}
+
+	lib_vra->all_face_num[instance] = 0;
+#ifdef ENABLE_HYBRID_FD
+	lib_vra->pdt_all_face_num[instance] = 0;
+#endif
+	lib_vra->af_all_face_num[instance] = 0;
+	clear_bit(VRA_INST_APPLY_TUNE_SET, &lib_vra->inst_state[instance]);
+
+	return 0;
+}
+
 int fimc_is_lib_vra_stop(struct fimc_is_lib_vra *lib_vra)
 {
 	int ret;
@@ -914,6 +964,7 @@ int fimc_is_lib_vra_stop(struct fimc_is_lib_vra *lib_vra)
 #ifdef ENABLE_HYBRID_FD
 		lib_vra->all_face_num[i] = 0;
 #endif
+		lib_vra->af_all_face_num[i] = 0;
 		clear_bit(VRA_INST_APPLY_TUNE_SET, &lib_vra->inst_state[i]);
 	}
 
@@ -943,7 +994,7 @@ int fimc_is_lib_vra_frame_work_final(struct fimc_is_lib_vra *lib_vra)
 		return ret;
 	}
 
-	if (lib_vra->task_vra.task != NULL) {
+	if (!IS_ERR_OR_NULL(lib_vra->task_vra.task)) {
 		ret = kthread_stop(lib_vra->task_vra.task);
 		if (ret)
 			err_lib("kthread_stop fail (%d)", ret);
@@ -963,8 +1014,8 @@ int fimc_is_lib_vra_frame_work_final(struct fimc_is_lib_vra *lib_vra)
 	return 0;
 }
 
-int fimc_is_lib_vra_update_dm(struct fimc_is_lib_vra *lib_vra, u32 instance,
-	enum facedetect_mode *faceDetectMode, struct camera2_stats_dm *dm)
+static int fimc_is_lib_vra_update_dm(struct fimc_is_lib_vra *lib_vra, u32 instance,
+	struct camera2_stats_dm *dm)
 {
 	int face_num;
 	struct api_vra_face_base_str *base;
@@ -972,11 +1023,6 @@ int fimc_is_lib_vra_update_dm(struct fimc_is_lib_vra *lib_vra, u32 instance,
 
 	if (unlikely(!lib_vra)) {
 		err_lib("lib_vra is NULL");
-		return -EINVAL;
-	}
-
-	if (unlikely(!faceDetectMode)) {
-		err_lib("faceDetectMode is NULL");
 		return -EINVAL;
 	}
 
@@ -1042,8 +1088,8 @@ int fimc_is_lib_vra_update_dm(struct fimc_is_lib_vra *lib_vra, u32 instance,
 }
 
 #ifdef ENABLE_HYBRID_FD
-int fimc_is_lib_vra_update_hfd_dm(struct fimc_is_lib_vra *lib_vra, u32 instance,
-	enum facedetect_mode *faceDetectMode, struct camera2_stats_dm *dm, struct hfd_meta *hfd)
+static int fimc_is_lib_vra_update_hfd_dm(struct fimc_is_lib_vra *lib_vra, u32 instance,
+	struct hfd_meta *hfd)
 {
 	int face_num;
 	struct api_vra_pdt_out_face *face;
@@ -1053,56 +1099,39 @@ int fimc_is_lib_vra_update_hfd_dm(struct fimc_is_lib_vra *lib_vra, u32 instance,
 		return -EINVAL;
 	}
 
-	if (unlikely(!dm)) {
-		err_lib("camera2_stats_dm is NULL");
-		return -EINVAL;
-	}
-
 	if (unlikely(!hfd)) {
 		err_lib("hfd_meta is NULL");
 		return -EINVAL;
 	}
 
-	if (*faceDetectMode == FACEDETECT_MODE_OFF) {
-		dm->faceDetectMode = FACEDETECT_MODE_OFF;
-		return 0;
-	}
-
-	/* TODO: FACEDETECT_MODE_FULL*/
-	dm->faceDetectMode = FACEDETECT_MODE_SIMPLE;
-
 	if (!lib_vra->pdt_all_face_num[instance]) {
-		memset(&dm->faceIds, 0, sizeof(dm->faceIds));
-		memset(&dm->faceRectangles, 0, sizeof(dm->faceRectangles));
-		memset(&dm->faceScores, 0, sizeof(dm->faceScores));
-		memset(&dm->faceLandmarks, 0, sizeof(dm->faceIds));
+		memset(&hfd->faceIds, 0, sizeof(hfd->faceIds));
+		memset(&hfd->faceRectangles, 0, sizeof(hfd->faceRectangles));
+		memset(&hfd->score, 0, sizeof(hfd->score));
 	}
-
-	dm->faceSrcImageSize[0] = lib_vra->pdt_out_list_info[instance].in_sizes.width;
-	dm->faceSrcImageSize[1] = lib_vra->pdt_out_list_info[instance].in_sizes.height;
 
 	for (face_num = 0; face_num < min_t(u32, lib_vra->pdt_all_face_num[instance], MAX_FACE_COUNT); face_num++) {
 		face = &lib_vra->pdt_out_faces[instance][face_num];
 		/* X min */
-		dm->faceRectangles[face_num][0] = face->rect.left;
+		hfd->faceRectangles[face_num][0] = face->rect.left;
 		/* Y min */
-		dm->faceRectangles[face_num][1] = face->rect.top;
+		hfd->faceRectangles[face_num][1] = face->rect.top;
 		/* X max */
-		dm->faceRectangles[face_num][2] = face->rect.left + face->rect.size;
+		hfd->faceRectangles[face_num][2] = face->rect.left + face->rect.size;
 		/* Y max */
-		dm->faceRectangles[face_num][3] = face->rect.top + face->rect.size;
-		/* Score, scale down for RTA (0 ~ 1000) -> (0 ~ 255) */
-		dm->faceScores[face_num] = face->score;
+		hfd->faceRectangles[face_num][3] = face->rect.top + face->rect.size;
+		/* score */
+		hfd->score[face_num] = face->score;
 		/* ID */
-		dm->faceIds[face_num] = face_num;
+		hfd->faceIds[face_num] = face_num + 1;
 
 		dbg_lib(3, "lib_vra_update_hfd_dm[%d]: face position(%d,%d),size(%d),scores(%d),id(%d))\n",
 			instance,
-			dm->faceRectangles[face_num][0],
-			dm->faceRectangles[face_num][1],
-			dm->faceRectangles[face_num][2],
-			dm->faceScores[face_num],
-			dm->faceIds[face_num]);
+			hfd->faceRectangles[face_num][0],
+			hfd->faceRectangles[face_num][1],
+			hfd->faceRectangles[face_num][2],
+			hfd->score[face_num],
+			hfd->faceIds[face_num]);
 
 		hfd->is_rot[face_num] = face->extra.is_rot;
 		hfd->is_yaw[face_num] = face->extra.yaw_type;
@@ -1153,21 +1182,22 @@ int fimc_is_lib_vra_get_meta(struct fimc_is_lib_vra *lib_vra,
 			info_lib("fimc_is_lib_vra_get_meta : fd_bypass is enabled\n");
 			return 0;
 		}
+		return 0;
 	} else {
 		/* TODO: FACEDETECT_MODE_FULL*/
 		stats_dm->faceDetectMode = FACEDETECT_MODE_SIMPLE;
 	}
 
 #ifdef ENABLE_HYBRID_FD
-	if (lib_vra->post_detection_enable[frame->instance])
-		ret = fimc_is_lib_vra_update_hfd_dm(lib_vra, frame->instance,
-			&frame->shot->ctl.stats.faceDetectMode,
-			&frame->shot->dm.stats, &frame->shot_ext->hfd);
-	else
+	ret = fimc_is_lib_vra_update_hfd_dm(lib_vra, frame->instance,
+		&frame->shot_ext->hfd);
+	if (ret) {
+		err_lib("lib_vra_update_hfd_dm is fail (%#x)", ret);
+		return -EINVAL;
+	}
 #endif
-		ret = fimc_is_lib_vra_update_dm(lib_vra, frame->instance,
-				&frame->shot->ctl.stats.faceDetectMode,
-				&frame->shot->dm.stats);
+	ret = fimc_is_lib_vra_update_dm(lib_vra, frame->instance,
+		stats_dm);
 	if (ret) {
 		err_lib("lib_vra_update_dm is fail (%#x)", ret);
 		return -EINVAL;
@@ -1525,6 +1555,8 @@ int fimc_is_lib_vra_apply_tune(struct fimc_is_lib_vra *lib_vra,
 		set_bit(VRA_INST_APPLY_TUNE_SET, &lib_vra->inst_state[instance]);
 	}
 
+	memset(&dbg_tune, 0, sizeof(struct api_vra_tune_data));
+
 	spin_lock_irqsave(&lib_vra->slock, flag);
 	lib_vra->max_face_num = tune.api_tune.max_face_count;
 	lib_vra->orientation[instance] = tune.dir;
@@ -1537,7 +1569,8 @@ int fimc_is_lib_vra_apply_tune(struct fimc_is_lib_vra *lib_vra,
 	if (cnt) {
 		err_lib("[%d]set_parameter is fail, cnt(%d)", instance, cnt);
 		spin_unlock_irqrestore(&lib_vra->slock, flag);
-		goto debug_info;
+
+		goto debug_info_s_param;
 	}
 
 	cnt = CALL_VRAOP(lib_vra, get_parameter, lib_vra->fr_work_heap,
@@ -1547,14 +1580,27 @@ int fimc_is_lib_vra_apply_tune(struct fimc_is_lib_vra *lib_vra,
 		err_lib("[%d]get_parameter is fail, cnt(%d)", instance, cnt);
 		spin_unlock_irqrestore(&lib_vra->slock, flag);
 
-		goto debug_info;
+		goto debug_info_g_param;
 	}
 
 	spin_unlock_irqrestore(&lib_vra->slock, flag);
 
 	return 0;
 
-debug_info:
+debug_info_g_param:
+	info_lib("===== VRA get parameter =====\n"
+		"\t tracking_mode(%#x), enable_features(%#x)\n"
+		"\t min_face_size(%#x), max_face_count(%#x)\n"
+		"\t full_frame_detection_freq(%#x), face_priority(%#x)\n"
+		"\t disable_frontal_rot_mask(%#x), disable_profile_rot_mask(%#x)\n"
+		"\t working_point(%#x), tracking_smoothness(%#x)\n",
+		dbg_tune.tracking_mode, dbg_tune.enable_features,
+		dbg_tune.min_face_size, dbg_tune.max_face_count,
+		dbg_tune.full_frame_detection_freq, dbg_tune.face_priority,
+		dbg_tune.disable_frontal_rot_mask, dbg_tune.disable_profile_rot_mask,
+		dbg_tune.working_point, dbg_tune.tracking_smoothness);
+
+debug_info_s_param:
 	info_lib("===== VRA set parameter =====\n"
 		"\t tracking_mode(%#x), enable_features(%#x)\n"
 		"\t min_face_size(%#x), max_face_count(%#x)\n"
@@ -1570,18 +1616,6 @@ debug_info:
 		info_tune->working_point, info_tune->tracking_smoothness,
 		info_frame->lock_frame_num, info_frame->init_frames_per_lock,
 		info_frame->normal_frames_per_lock);
-
-	info_lib("===== VRA get parameter =====\n"
-		"\t tracking_mode(%#x), enable_features(%#x)\n"
-		"\t min_face_size(%#x), max_face_count(%#x)\n"
-		"\t full_frame_detection_freq(%#x), face_priority(%#x)\n"
-		"\t disable_frontal_rot_mask(%#x), disable_profile_rot_mask(%#x)\n"
-		"\t working_point(%#x), tracking_smoothness(%#x)\n",
-		dbg_tune.tracking_mode, dbg_tune.enable_features,
-		dbg_tune.min_face_size, dbg_tune.max_face_count,
-		dbg_tune.full_frame_detection_freq, dbg_tune.face_priority,
-		dbg_tune.disable_frontal_rot_mask, dbg_tune.disable_profile_rot_mask,
-		dbg_tune.working_point, dbg_tune.tracking_smoothness);
 
 	return 0;
 }
@@ -1619,18 +1653,43 @@ int fimc_is_lib_vra_apply_tune_set(struct fimc_is_lib_vra *lib_vra,
 	u32 index, u32 instance_id)
 {
 	int ret = 0;
+	unsigned long flag;
 
 	if (unlikely(!lib_vra)) {
 		err_lib("lib_vra is NULL");
 		return -EINVAL;
 	}
 
+	spin_lock_irqsave(&lib_vra->slock, flag);
 	ret = CALL_VRAOP(lib_vra, apply_tune_set,
 			lib_vra->frame_desc_heap[instance_id], instance_id, index);
+	spin_unlock_irqrestore(&lib_vra->slock, flag);
 	if (ret) {
 		err_lib("vra_apply_tune_set fail (%d)", ret);
 		return ret;
 	}
+
+	return ret;
+}
+#endif
+
+#ifdef ENABLE_VRA_OVERFLOW_RECOVERY
+int fimc_is_lib_vra_reset_recovery(struct fimc_is_lib_vra *lib_vra,
+		u32 instance_id)
+{
+	int ret = 0;
+
+	if (unlikely(!lib_vra)) {
+		err_lib("lib_vra is NULL");
+		return -EINVAL;
+	}
+
+	ret = CALL_VRAOP(lib_vra, recovery, lib_vra->frame_desc_heap[instance_id]);
+	if (ret) {
+		err_lib("vra_reset_recovery fail (%d)\n", ret);
+		return ret;
+	}
+	minfo_lib("vra_reset_recovery done\n", instance_id);
 
 	return ret;
 }

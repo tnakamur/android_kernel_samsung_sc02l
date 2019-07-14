@@ -215,6 +215,17 @@ static void bq25898s_set_topoff_current(struct bq25898s_charger *charger, int eo
 		data, BQ25898S_CHG_ITERM_MASK);
 }
 
+static void bq25898s_set_vindpm_threshold(struct bq25898s_charger *charger)
+{
+	u8 data = 0x13; /* Default => FORCE_VINDRP : 0, VINDPM : 4.5 V*/
+
+	if (!is_hv_wire_type(charger->cable_type)) {
+		data = 0x92; /* FORCE_VINDRP : 1, VINDPM : 4.4 V*/
+	}
+
+	bq25898s_write_reg(charger->i2c, BQ25898S_CHG_REG_0D, data);
+}
+
 static void bq25898s_charger_initialize(struct bq25898s_charger *charger)
 {
 	bq25898s_set_charger_state(charger, DISABLE);
@@ -346,6 +357,7 @@ static int bq25898s_chg_set_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
 		charger->cable_type = val->intval;
+		bq25898s_set_vindpm_threshold(charger);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 		if (val->intval / 1000 < 10) /* chg_float_voltage_conv = 1 */
@@ -355,7 +367,9 @@ static int bq25898s_chg_set_property(struct power_supply *psy,
 		bq25898s_set_float_voltage(charger, charger->float_voltage);
 		break;
 	case POWER_SUPPLY_PROP_STATUS:
+		break;
 	case POWER_SUPPLY_PROP_CURRENT_FULL:
+		bq25898s_set_topoff_current(charger, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		charger->input_current = val->intval;
@@ -379,9 +393,10 @@ static ssize_t bq25898s_store_addr(struct device *dev,
 			      struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
-	//struct power_supply *psy = dev_get_drvdata(dev);
-	struct bq25898s_charger *charger;
+	struct power_supply *psy = dev_get_drvdata(dev);
+	struct bq25898s_charger *charger = power_supply_get_drvdata(psy);
 	int x;
+
 	if (sscanf(buf, "0x%x\n", &x) == 1) {
 		charger->addr = x;
 	}
@@ -392,8 +407,9 @@ static ssize_t bq25898s_show_addr(struct device *dev,
 				   struct device_attribute *attr,
 				   char *buf)
 {
-	//struct power_supply *psy = dev_get_drvdata(dev);
-	struct bq25898s_charger *charger;
+	struct power_supply *psy = dev_get_drvdata(dev);
+	struct bq25898s_charger *charger = power_supply_get_drvdata(psy);
+
 	return sprintf(buf, "0x%x\n", charger->addr);
 }
 
@@ -401,9 +417,10 @@ static ssize_t bq25898s_store_size(struct device *dev,
 			      struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
-	//struct power_supply *psy = dev_get_drvdata(dev);
-	struct bq25898s_charger *charger;
+	struct power_supply *psy = dev_get_drvdata(dev);
+	struct bq25898s_charger *charger = power_supply_get_drvdata(psy);
 	int x;
+
 	if (sscanf(buf, "%d\n", &x) == 1) {
 		charger->size = x;
 	}
@@ -414,8 +431,9 @@ static ssize_t bq25898s_show_size(struct device *dev,
 				   struct device_attribute *attr,
 				   char *buf)
 {
-	//struct power_supply *psy = dev_get_drvdata(dev);
-	struct bq25898s_charger *charger;
+	struct power_supply *psy = dev_get_drvdata(dev);
+	struct bq25898s_charger *charger = power_supply_get_drvdata(psy);
+
 	return sprintf(buf, "0x%x\n", charger->size);
 }
 
@@ -423,8 +441,8 @@ static ssize_t bq25898s_store_data(struct device *dev,
 			      struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
-	//struct power_supply *psy = dev_get_drvdata(dev);
-	struct bq25898s_charger *charger;
+	struct power_supply *psy = dev_get_drvdata(dev);
+	struct bq25898s_charger *charger = power_supply_get_drvdata(psy);
 	int x;
 
 	if (sscanf(buf, "0x%x", &x) == 1) {
@@ -442,8 +460,8 @@ static ssize_t bq25898s_show_data(struct device *dev,
 				   struct device_attribute *attr,
 				   char *buf)
 {
-	//struct power_supply *psy = dev_get_drvdata(dev);
-	struct bq25898s_charger *charger;
+	struct power_supply *psy = dev_get_drvdata(dev);
+	struct bq25898s_charger *charger = power_supply_get_drvdata(psy);
 	u8 data;
 	int i, count = 0;;
 	if (charger->size == 0)

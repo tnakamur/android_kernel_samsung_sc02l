@@ -458,7 +458,7 @@ static int fimc_is_ssx_video_s_input(struct file *file, void *priv,
 	unsigned int input)
 {
 	int ret = 0;
-	u32 scenario, stream, module, vindex, intype, leader;
+	u32 scenario, stream, position, vindex, intype, leader;
 	struct fimc_is_video_ctx *vctx = file->private_data;
 	struct fimc_is_device_sensor *device;
 	struct fimc_is_framemgr *framemgr;
@@ -469,13 +469,13 @@ static int fimc_is_ssx_video_s_input(struct file *file, void *priv,
 	framemgr = GET_FRAMEMGR(vctx);
 	scenario = (input & SENSOR_SCN_MASK) >> SENSOR_SCN_SHIFT;
 	stream = (input & INPUT_STREAM_MASK) >> INPUT_STREAM_SHIFT;
-	module = (input & INPUT_MODULE_MASK) >> INPUT_MODULE_SHIFT;
+	position = (input & INPUT_POSITION_MASK) >> INPUT_POSITION_SHIFT;
 	vindex = (input & INPUT_VINDEX_MASK) >> INPUT_VINDEX_SHIFT;
 	intype = (input & INPUT_INTYPE_MASK) >> INPUT_INTYPE_SHIFT;
 	leader = (input & INPUT_LEADER_MASK) >> INPUT_LEADER_SHIFT;
 
 	mdbgv_sensor("%s(input : %08X)[%d,%d,%d,%d,%d,%d]\n", vctx, __func__, input,
-			scenario, stream, module, vindex, intype, leader);
+			scenario, stream, position, vindex, intype, leader);
 
 	ret = fimc_is_video_s_input(file, vctx);
 	if (ret) {
@@ -483,7 +483,7 @@ static int fimc_is_ssx_video_s_input(struct file *file, void *priv,
 		goto p_err;
 	}
 
-	ret = fimc_is_sensor_s_input(device, module, scenario, vindex);
+	ret = fimc_is_sensor_s_input(device, position, scenario, vindex);
 	if (ret) {
 		merr("fimc_is_sensor_s_input is fail(%d)", device, ret);
 		goto p_err;
@@ -668,10 +668,13 @@ static int fimc_is_ssx_video_s_ctrl(struct file *file, void *priv,
 	case V4L2_CID_IS_DEBUG_DUMP:
 	case V4L2_CID_IS_DVFS_CLUSTER0:
 	case V4L2_CID_IS_DVFS_CLUSTER1:
+	case V4L2_CID_IS_DVFS_CLUSTER2:
 	case V4L2_CID_IS_DEBUG_SYNC_LOG:
 	case V4L2_CID_HFLIP:
 	case V4L2_CID_VFLIP:
 	case V4L2_CID_IS_INTENT:
+	case V4L2_CID_IS_OPENING_HINT:
+	case V4L2_CID_IS_CLOSING_HINT:
 		ret = fimc_is_video_s_ctrl(file, vctx, ctrl);
 		if (ret) {
 			merr("fimc_is_video_s_ctrl is fail(%d)", device, ret);
@@ -746,6 +749,33 @@ static int fimc_is_ssx_video_s_ctrl(struct file *file, void *priv,
 			goto p_err;
 		}
 		break;
+	}
+
+p_err:
+	return ret;
+}
+
+static int fimc_is_ssx_video_s_ext_ctrls(struct file *file, void *priv,
+				 struct v4l2_ext_controls *ctrls)
+{
+	int ret = 0;
+	struct fimc_is_video_ctx *vctx = file->private_data;
+	struct fimc_is_device_sensor *device;
+
+	BUG_ON(!ctrls);
+	BUG_ON(!vctx);
+
+	device = vctx->device;
+	if (!device) {
+		err("device is NULL");
+		ret = -EINVAL;
+		goto p_err;
+	}
+
+	ret = fimc_is_sensor_s_ext_ctrls(device, ctrls);
+	if (ret) {
+		err("s_ext_ctrl is fail(%d)", ret);
+		goto p_err;
 	}
 
 p_err:
@@ -889,6 +919,7 @@ const struct v4l2_ioctl_ops fimc_is_ssx_video_ioctl_ops = {
 	.vidioc_g_input			= fimc_is_ssx_video_g_input,
 	.vidioc_s_input			= fimc_is_ssx_video_s_input,
 	.vidioc_s_ctrl			= fimc_is_ssx_video_s_ctrl,
+	.vidioc_s_ext_ctrls		= fimc_is_ssx_video_s_ext_ctrls,
 	.vidioc_g_ctrl			= fimc_is_ssx_video_g_ctrl,
 	.vidioc_g_parm			= fimc_is_ssx_video_g_parm,
 	.vidioc_s_parm			= fimc_is_ssx_video_s_parm,

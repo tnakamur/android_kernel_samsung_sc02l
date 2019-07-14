@@ -39,6 +39,8 @@
 #include "fimc-is-cis-4ha.h"
 #include "fimc-is-cis-4ha-setA.h"
 #include "fimc-is-cis-4ha-setB.h"
+#include "fimc-is-cis-4ha-4lane-setA.h"
+#include "fimc-is-cis-4ha-4lane-setB.h"
 
 #include "fimc-is-helper-i2c.h"
 
@@ -692,7 +694,7 @@ int sensor_4ha_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_param
 	u16 long_coarse_int = 0;
 	u16 short_coarse_int = 0;
 	u32 line_length_pck = 0;
-	u32 fine_int = 0;
+	u32 min_fine_int = 0;
 
 #ifdef DEBUG_SENSOR_TIME
 	struct timeval st, end;
@@ -728,10 +730,10 @@ int sensor_4ha_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_param
 
 	vt_pic_clk_freq_mhz = cis_data->pclk / (1000 * 1000);
 	line_length_pck = cis_data->line_length_pck;
-	fine_int = line_length_pck - 0xf0;
+	min_fine_int = cis_data->min_fine_integration_time;
 
-	long_coarse_int = ((target_exposure->long_val * vt_pic_clk_freq_mhz) - fine_int) / line_length_pck;
-	short_coarse_int = ((target_exposure->short_val * vt_pic_clk_freq_mhz) - fine_int) / line_length_pck;
+	long_coarse_int = ((target_exposure->long_val * vt_pic_clk_freq_mhz) - min_fine_int) / line_length_pck;
+	short_coarse_int = ((target_exposure->short_val * vt_pic_clk_freq_mhz) - min_fine_int) / line_length_pck;
 
 	if (long_coarse_int > cis_data->max_coarse_integration_time) {
 		dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), long coarse(%d) max(%d)\n", cis->id, __func__,
@@ -763,18 +765,11 @@ int sensor_4ha_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_param
 		goto p_err;
 	}
 
-	ret = fimc_is_sensor_write16(client, 0x0200, (u16)(fine_int & 0xFFFF));
-	if (ret < 0)
-		goto p_err;
-
 	/* Short exposure */
 	ret = fimc_is_sensor_write16(client, 0x0202, short_coarse_int);
 	if (ret < 0)
 		goto p_err;
 
-	dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), vt_pic_clk_freq_mhz (%d),"
-		KERN_CONT "line_length_pck(%d), fine_int (%d)\n", cis->id, __func__,
-		cis_data->sen_vsync_count, vt_pic_clk_freq_mhz, line_length_pck, fine_int);
 	dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), frame_length_lines(%#x),"
 		KERN_CONT "long_coarse_int %#x, short_coarse_int %#x\n", cis->id, __func__,
 		cis_data->sen_vsync_count, cis_data->frame_length_lines, long_coarse_int, short_coarse_int);
@@ -1717,15 +1712,17 @@ static struct fimc_is_cis_ops cis_ops = {
 	.cis_get_digital_gain = sensor_4ha_cis_get_digital_gain,
 	.cis_get_min_digital_gain = sensor_4ha_cis_get_min_digital_gain,
 	.cis_get_max_digital_gain = sensor_4ha_cis_get_max_digital_gain,
-	.cis_compensate_gain_for_extremely_br = sensor_4ha_cis_compensate_gain_for_extremely_br,
+	.cis_compensate_gain_for_extremely_br = sensor_cis_compensate_gain_for_extremely_br,
 	.cis_wait_streamoff = sensor_cis_wait_streamoff,
 	.cis_wait_streamon = sensor_cis_wait_streamon,
+	.cis_set_initial_exposure = sensor_cis_set_initial_exposure,
 };
 
 int cis_4ha_probe(struct i2c_client *client,
 	const struct i2c_device_id *id)
 {
 	int ret = 0;
+	int num_lanes=CSI_DATA_LANES_3;
 	struct fimc_is_core *core = NULL;
 	struct v4l2_subdev *subdev_cis = NULL;
 	struct fimc_is_cis *cis = NULL;
@@ -1752,6 +1749,14 @@ int cis_4ha_probe(struct i2c_client *client,
 	if (ret) {
 		err("sensor_id read is fail(%d)", ret);
 		goto p_err;
+	}
+
+	ret = of_property_read_u32(dnode, "num_of_lanes", &num_lanes);
+	num_lanes=num_lanes-1;
+	if (ret) {
+		num_lanes=CSI_DATA_LANES_3;
+		probe_info("No of lanes is set default (%d)", num_lanes);
+		ret=0;
 	}
 
 	probe_info("%s sensor_id %d\n", __func__, sensor_id);
@@ -1811,37 +1816,70 @@ int cis_4ha_probe(struct i2c_client *client,
 	cis->use_dgain = true;
 	cis->hdr_ctrl_by_again = false;
 
+	cis->use_initial_ae = of_property_read_bool(dnode, "use_initial_ae");
+	probe_info("%s use_initial_ae(%d)\n", __func__, cis->use_initial_ae);
+
 	ret = of_property_read_string(dnode, "setfile", &setfile);
 	if (ret) {
 		err("setfile index read fail(%d), take default setfile!!", ret);
 		setfile = "default";
 	}
-
-	if (strcmp(setfile, "default") == 0 ||
-			strcmp(setfile, "setA") == 0) {
-		probe_info("%s setfile_A\n", __func__);
-		sensor_4ha_global = sensor_4ha_setfile_A_Global;
-		sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_setfile_A_Global);
-		sensor_4ha_setfiles = sensor_4ha_setfiles_A;
-		sensor_4ha_setfile_sizes = sensor_4ha_setfile_A_sizes;
-		sensor_4ha_pllinfos = sensor_4ha_pllinfos_A;
-		sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_setfiles_A);
-	} else if (strcmp(setfile, "setB") == 0) {
-		probe_info("%s setfile_B\n", __func__);
-		sensor_4ha_global = sensor_4ha_setfile_B_Global;
-		sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_setfile_B_Global);
-		sensor_4ha_setfiles = sensor_4ha_setfiles_B;
-		sensor_4ha_setfile_sizes = sensor_4ha_setfile_B_sizes;
-		sensor_4ha_pllinfos = sensor_4ha_pllinfos_B;
-		sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_setfiles_B);
+	if (num_lanes==CSI_DATA_LANES_4) {
+		if (strcmp(setfile, "default") == 0 ||
+				strcmp(setfile, "setA") == 0) {
+			probe_info("%s setfile_A\n", __func__);
+			sensor_4ha_global = sensor_4ha_4lane_setfile_A_Global;
+			sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_4lane_setfile_A_Global);
+			sensor_4ha_setfiles = sensor_4ha_4lane_setfiles_A;
+			sensor_4ha_setfile_sizes = sensor_4ha_4lane_setfile_A_sizes;
+			sensor_4ha_pllinfos = sensor_4ha_4lane_pllinfos_A;
+			sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_4lane_setfiles_A);
+		} else if (strcmp(setfile, "setB") == 0) {
+			probe_info("%s setfile_B\n", __func__);
+			sensor_4ha_global = sensor_4ha_4lane_setfile_B_Global;
+			sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_4lane_setfile_B_Global);
+			sensor_4ha_setfiles = sensor_4ha_4lane_setfiles_B;
+			sensor_4ha_setfile_sizes = sensor_4ha_4lane_setfile_B_sizes;
+			sensor_4ha_pllinfos = sensor_4ha_4lane_pllinfos_B;
+			sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_4lane_setfiles_B);
+		} else {
+			err("%s setfile index out of bound, take default (setfile_A)", __func__);
+			sensor_4ha_global = sensor_4ha_4lane_setfile_A_Global;
+			sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_4lane_setfile_A_Global);
+			sensor_4ha_setfiles = sensor_4ha_4lane_setfiles_A;
+			sensor_4ha_setfile_sizes = sensor_4ha_4lane_setfile_A_sizes;
+			sensor_4ha_pllinfos = sensor_4ha_4lane_pllinfos_A;
+			sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_4lane_setfiles_A);
+		}
 	} else {
-		err("%s setfile index out of bound, take default (setfile_A)", __func__);
-		sensor_4ha_global = sensor_4ha_setfile_A_Global;
-		sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_setfile_A_Global);
-		sensor_4ha_setfiles = sensor_4ha_setfiles_A;
-		sensor_4ha_setfile_sizes = sensor_4ha_setfile_A_sizes;
-		sensor_4ha_pllinfos = sensor_4ha_pllinfos_A;
-		sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_setfiles_A);
+
+		if (strcmp(setfile, "default") == 0 ||
+				strcmp(setfile, "setA") == 0) {
+			probe_info("%s setfile_A\n", __func__);
+			sensor_4ha_global = sensor_4ha_setfile_A_Global;
+			sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_setfile_A_Global);
+			sensor_4ha_setfiles = sensor_4ha_setfiles_A;
+			sensor_4ha_setfile_sizes = sensor_4ha_setfile_A_sizes;
+			sensor_4ha_pllinfos = sensor_4ha_pllinfos_A;
+			sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_setfiles_A);
+		} else if (strcmp(setfile, "setB") == 0) {
+			probe_info("%s setfile_B\n", __func__);
+			sensor_4ha_global = sensor_4ha_setfile_B_Global;
+			sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_setfile_B_Global);
+			sensor_4ha_setfiles = sensor_4ha_setfiles_B;
+			sensor_4ha_setfile_sizes = sensor_4ha_setfile_B_sizes;
+			sensor_4ha_pllinfos = sensor_4ha_pllinfos_B;
+			sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_setfiles_B);
+		} else {
+			err("%s setfile index out of bound, take default (setfile_A)", __func__);
+			sensor_4ha_global = sensor_4ha_setfile_A_Global;
+			sensor_4ha_global_size = ARRAY_SIZE(sensor_4ha_setfile_A_Global);
+			sensor_4ha_setfiles = sensor_4ha_setfiles_A;
+			sensor_4ha_setfile_sizes = sensor_4ha_setfile_A_sizes;
+			sensor_4ha_pllinfos = sensor_4ha_pllinfos_A;
+			sensor_4ha_max_setfile_num = ARRAY_SIZE(sensor_4ha_setfiles_A);
+		}
+
 	}
 
 	v4l2_i2c_subdev_init(subdev_cis, client, &subdev_ops);

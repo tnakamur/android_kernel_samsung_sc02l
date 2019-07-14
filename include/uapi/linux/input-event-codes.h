@@ -336,8 +336,10 @@
 
 #define KEY_MICMUTE		248	/* Mute / unmute the microphone */
 
+#define KEY_WAKEUP_UNLOCK	253	/* Wake-up to recent view, ex: AOP */
 #define KEY_RECENT   254
-#define KEY_WINK            0x2bf    /* Intelligence Key */
+#define KEY_INT_CANCEL		0x2be	/* for touch event skip */
+#define KEY_WINK            0x2bf	/* Intelligence Key */
 
 /* Dummy touchkey code */
 #define KEY_DUMMY_HOME1		249
@@ -744,6 +746,7 @@
 #define ABS_MT_TOOL_Y		0x3d	/* Center Y tool position */
 
 #define ABS_MT_CUSTOM		0x3e	/* custom event */
+#define ABS_MT_CUSTOM2		0x3f    /* custom event only for sensor */
 #define ABS_MT_PALM		0x3e	/* palm touch */
 #define ABS_MT_GRIP		0x3f	/* grip touch */
 
@@ -772,6 +775,7 @@
 #define SW_LINEIN_INSERT	0x0d  /* set = inserted */
 #define SW_MUTE_DEVICE		0x0e  /* set = device disabled */
 #define SW_GLOVE		0x0f	/* set = glove mode */
+#define SW_PEN_INSERT		0x13  /* set = pen insert, remove */
 #define SW_FLIP                 0x15    /* set = flip cover */
 #define SW_CERTIFYHALL          0x1b    /* set = certify_hall... */
 #define SW_MAX			0x20

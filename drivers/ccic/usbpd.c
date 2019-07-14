@@ -288,6 +288,9 @@ void usbpd_set_ops(struct device *dev, usbpd_phy_ops_type *ops)
 	pd_data->phy_ops.set_otg_control = ops->set_otg_control;
 	pd_data->phy_ops.get_vbus_short_check = ops->get_vbus_short_check;
 	pd_data->phy_ops.set_cc_control = ops->set_cc_control;
+	pd_data->phy_ops.set_rp_control = ops->set_rp_control;
+	pd_data->phy_ops.pr_swap = ops->pr_swap;
+	pd_data->phy_ops.set_pwr_opmode = ops->set_pwr_opmode;
 }
 
 protocol_state usbpd_protocol_rx_layer_reset_for_receive(struct protocol_data *rx)
@@ -579,6 +582,8 @@ int usbpd_init(struct device *dev, void *phy_driver_data)
 	usbpd_init_protocol(pd_data);
 	usbpd_init_policy(pd_data);
 	usbpd_init_manager(pd_data);
+	
+	mutex_init(&pd_data->accept_mutex);
 
 	INIT_WORK(&pd_data->worker, usbpd_policy_work);
 	init_completion(&pd_data->msg_arrived);

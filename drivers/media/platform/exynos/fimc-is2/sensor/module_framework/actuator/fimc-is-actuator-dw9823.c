@@ -23,8 +23,6 @@
 #include "fimc-is-device-sensor-peri.h"
 #include "fimc-is-core.h"
 #include "fimc-is-helper-actuator-i2c.h"
-#include "fimc-is-sec-define.h"
-
 #include "interface/fimc-is-interface-library.h"
 
 #define ACTUATOR_NAME		"DW9823"
@@ -58,9 +56,6 @@ int sensor_dw9823_init(struct i2c_client *client, struct fimc_is_caldata_list_dw
 	int ret = 0;
 	u8 i2c_data[2];
 	u32 pre_scale, sac_time;
-	struct fimc_is_from_info *sysfs_finfo;
-
-	fimc_is_sec_get_sysfs_finfo(&sysfs_finfo);
 
 	if (!cal_data) {
 		u8 val = 0;

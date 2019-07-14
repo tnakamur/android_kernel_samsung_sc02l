@@ -64,7 +64,7 @@ static enum tfa98xx_error
 tfa_tfadsp_wait_calibrate_done(tfa98xx_handle_t handle);
 #endif
 #define SET_CALIBRATION_AT_ALL_DEVICE_READY
-#if defined(USE_TFA9896)
+#if defined(USE_BOOSTING_ONLY)
 /* in case of boosting only on TFA9896 */
 #undef LOAD_PATCH_FOR_FULL_VERSION
 #undef LOAD_FILTERBANK_FOR_TUNING
@@ -406,6 +406,10 @@ static void tfa_set_query_info(int dev_idx)
 	handles_local[dev_idx].temp = 0xffff;
 	handles_local[dev_idx].saam_use_case = 0; /* not in use */
 	handles_local[dev_idx].stream_state = 0; /* not in use */
+#if defined(USE_TFA9896)
+	handles_local[dev_idx].config_crc = 0;
+	handles_local[dev_idx].config_size = 0;
+#endif
 
 	/* TODO use the getfeatures() for retrieving the features [artf103523]
 	 * handles_local[dev_idx].support_drc = SUPPORT_NOT_SET;
@@ -1161,13 +1165,17 @@ void tfa98xx_apply_deferred_calibration(tfa98xx_handle_t handle)
 	}
 
 	if (controls->calib.triggered) {
-		err = tfa_calibrate(handle);
 		controls->calib.wr_value = true;
+		err = tfa_calibrate(handle);
 		if (err) {
 			pr_info("Deferred calibration failed: %d\n", err);
+			controls->calib.rd_valid = true; /* result available */
+			controls->calib.rd_value = false; /* result not valid */
 		} else {
-			pr_debug("Deferred calibration ok\n");
 			controls->calib.triggered = false;
+			pr_debug("Deferred calibration ok\n");
+			controls->calib.rd_valid = true; /* result available */
+			controls->calib.rd_value = true; /* result not valid */
 		}
 	}
 }
@@ -1745,7 +1753,7 @@ tfa98xx_check_ic_rom_version(tfa98xx_handle_t handle,
 #define PATCH_HEADER_LENGTH 6
 enum tfa98xx_error
 tfa_dsp_patch(tfa98xx_handle_t handle, int patch_length,
-		 const unsigned char *patch_bytes)
+	const unsigned char *patch_bytes)
 {
 	enum tfa98xx_error error = TFA98XX_ERROR_OK;
 
@@ -1757,10 +1765,18 @@ tfa_dsp_patch(tfa98xx_handle_t handle, int patch_length,
 	error = tfa98xx_check_ic_rom_version(handle, patch_bytes);
 	if (error != TFA98XX_ERROR_OK)
 		return error;
+	pr_info("%s: write patch for full DSP function\n",
+		__func__);
 	error = tfa98xx_process_patch_file
 		(handle, patch_length - PATCH_HEADER_LENGTH,
 		patch_bytes + PATCH_HEADER_LENGTH);
-#endif
+	if (error != TFA98XX_ERROR_OK)
+		pr_err("%s: error in writing patch (%d)\n",
+			__func__, error);
+#else
+	pr_info("%s: skipped writing patch for boosting only\n",
+		__func__);
+#endif /* (LOAD_PATCH_FOR_FULL_VERSION) */
 
 	return error;
 }
@@ -2953,20 +2969,28 @@ tfa_cont_write_filterbank(int device, struct tfa_filter *filter)
 #if defined(LOAD_FILTERBANK_FOR_TUNING)
 	unsigned char biquad_index;
 
+	pr_info("%s: write filterbank for full DSP function\n",
+		__func__);
 	for (biquad_index = 0; biquad_index < 10; biquad_index++) {
 		if (filter[biquad_index].enabled) {
 			error = tfa_dsp_cmd_id_write
 				(device, MODULE_BIQUADFILTERBANK,
-				 biquad_index+1, /* start @1 */
-				 sizeof(filter[biquad_index].biquad.bytes),
-				 filter[biquad_index].biquad.bytes);
+				biquad_index + 1, /* start @1 */
+				sizeof(filter[biquad_index].biquad.bytes),
+				filter[biquad_index].biquad.bytes);
 		} else {
 			error = tfa98xx_dsp_biquad_disable
-				(device, biquad_index+1);
+				(device, biquad_index + 1);
 		}
-		if (error)
+		if (error) {
+			pr_err("%s: error in writing filterbank (%d)\n",
+				__func__, error);
 			return error;
+		}
 	}
+#else
+	pr_info("%s: skipped writing filterbank for boosting only\n",
+		__func__);
 #endif /* (LOAD_FILTERBANK_FOR_TUNING) */
 
 	return error;
@@ -3810,6 +3834,9 @@ tfa_run_speaker_boost(tfa98xx_handle_t handle, int force, int profile)
 
 	if (force) {
 		handles_local[handle].is_cold = 1;
+#if defined(REDUCED_REGISTER_SETTING)
+		handles_local[handle].first_after_boot = 1;
+#endif
 		err = tfa_run_coldstartup(handle, profile);
 		if (err)
 			return err;
@@ -3864,7 +3891,7 @@ tfa_run_speaker_boost(tfa98xx_handle_t handle, int force, int profile)
 		tfa_set_swprof(handle, (unsigned short)profile);
 		tfa_set_swvstep(handle, 0);
 
-		pr_debug("%s: completed speaker startup\n",
+		pr_info("%s: completed speaker startup\n",
 			__func__);
 #if defined(USE_TFA9896)
 		tfa_status_read(handle);
@@ -3940,6 +3967,29 @@ tfa_run_speaker_startup(tfa98xx_handle_t handle, int force, int profile)
 			return err;
 		}
 
+#if defined(USE_TFA9896)
+		/* TFA9896 loads MTP after cold start */
+		if (TFA_GET_BF(handle, MTPEX) == 0) {
+			int cal_prof_idx = -2;
+
+			cal_prof_idx = tfa_cont_get_cal_profile(handle);
+
+			if (cal_prof_idx >= 0) {
+				pr_info("%s: set profile for calibration cal_prof_idx %d\n",
+					__func__, cal_prof_idx);
+				profile = cal_prof_idx;
+
+				err = tfa_run_startup(handle, profile);
+				PRINT_ASSERT(err);
+				if (err) {
+					pr_info("%s: tfa_run_startup error = %d\n",
+						__func__, err);
+					return err;
+				}
+			}
+		}
+#endif
+
 		/* Startup with CF in bypass then return here */
 		if (tfa_cf_enabled(handle) == 0)
 			return err;
@@ -3960,6 +4010,8 @@ tfa_run_speaker_startup(tfa98xx_handle_t handle, int force, int profile)
 	err = reg_write(handle, 0xA3, 0x20);
 	if (err)
 		return err;
+
+	pr_info("%s: DSP started\n", __func__);
 
 	/* DSP is running now */
 	/* write all the files from the device list */
@@ -4000,6 +4052,8 @@ tfa_run_speaker_startup(tfa98xx_handle_t handle, int force, int profile)
 		return err;
 	}
 
+	pr_info("%s: done\n", __func__);
+
 	return err;
 }
 
@@ -4010,6 +4064,8 @@ enum tfa98xx_error
 tfa_run_speaker_calibration(tfa98xx_handle_t handle, int profile)
 {
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
+	struct tfa98xx_controls *controls =
+		&(handles_local[handle].dev_ops.controls);
 	int calibrate_done, spkr_count = 0;
 	(void)(profile); /* Remove unreferenced warning */
 
@@ -4065,6 +4121,7 @@ tfa_run_speaker_calibration(tfa98xx_handle_t handle, int profile)
 			pr_debug("P: %d mOhms, S:%d mOhms\n",
 						handles_local[0].mohm[0],
 						handles_local[1].mohm[0]);
+		controls->calib.wr_value = false; /* calibration over */
 	}
 
 	/* When MTPOTC is set (cal=once) re-lock key2 */
@@ -4197,11 +4254,6 @@ enum tfa98xx_error tfa_run_coldboot(tfa98xx_handle_t handle, int state)
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
 	int tries = 10;
 
-	handles_local[handle].is_cold = 1;
-#if defined(REDUCED_REGISTER_SETTING)
-	handles_local[handle].first_after_boot = 1;
-#endif
-
 	/* repeat set ACS bit until set as requested */
 	while (state != TFA_GET_BF(handle, ACS)) {
 		/* set colstarted in CF_CONTROL to force ACS */
@@ -4261,6 +4313,94 @@ enum tfa98xx_error tfa_run_start_dsp(tfa98xx_handle_t handle)
 }
 
 /*
+ * load register in dev / prof earlier, to save time in cold start
+ */
+enum tfa98xx_error tfa_load_cnt_regs(tfa98xx_handle_t handle, int profile)
+{
+	enum tfa98xx_error err = TFA98XX_ERROR_OK;
+	struct tfa_device_list *dev = tfa_cont_device(handle);
+	int i, noinit = 0;
+#if defined(REDUCED_REGISTER_SETTING)
+	int is_cold_amp;
+#endif
+
+	if (dev == NULL)
+		return TFA98XX_ERROR_FAIL;
+
+#if defined(REDUCED_REGISTER_SETTING)
+	is_cold_amp = tfa_is_cold_amp(handle);
+	if (handles_local[handle].first_after_boot) {
+#endif
+		/* process the device list
+		 * to see if the user implemented the noinit
+		 */
+		for (i = 0; i < dev->length; i++) {
+			if (dev->list[i].type == dsc_no_init) {
+				noinit = 1;
+				break;
+			}
+		}
+
+		if (!noinit) {
+			/* load the optimal TFA98XX in HW settings */
+			err = tfa98xx_init(handle);
+			PRINT_ASSERT(err);
+		} else {
+			pr_info("Warning: No init keyword found in the cnt file. Init is skipped!\n");
+		}
+
+		/* I2S settings to define the audio input properties
+		 * these must be set before the subsys is up
+		 * this will run the list
+		 * until a non-register item is encountered
+		 */
+		pr_info("%s: writing registers under dev (cold %d: first %d)\n",
+			__func__, is_cold_amp,
+			handles_local[handle].first_after_boot);
+		err = tfa_cont_write_regs_dev(handle);
+		/* write device register settings */
+		PRINT_ASSERT(err);
+#if defined(REDUCED_REGISTER_SETTING)
+	} else {
+		pr_info("%s: skip init and writing registers under dev (cold %d: first %d)\n",
+			__func__, is_cold_amp,
+			handles_local[handle].first_after_boot);
+
+		/* put dsp reset, when skipping tfa98xx_init() */
+		/* in pair of tfa_run_start_dsp() */
+		tfa98xx_dsp_reset(handle, 1);
+	}
+#endif
+
+#if defined(REDUCED_REGISTER_SETTING)
+	if (handles_local[handle].first_after_boot
+		|| (profile != tfa_get_swprof(handle))) {
+#endif
+		/* also write register the settings from the default profile
+		 * NOTE we may still have ACS=1
+		 * so we can switch sample rate here
+		 */
+		pr_info("%s: writing registers under profile (%d)\n",
+			__func__, profile);
+		err = tfa_cont_write_regs_prof(handle, profile);
+		PRINT_ASSERT(err);
+#if defined(REDUCED_REGISTER_SETTING)
+	} else {
+		pr_info("%s: skip writing registers under profile (%d)\n",
+			__func__, profile);
+	}
+#endif
+
+#if defined(REDUCED_REGISTER_SETTING)
+	handles_local[handle].first_after_boot = 0;
+#endif
+
+	tfa_set_swprof(handle, (unsigned short)profile);
+
+	return err;
+}
+
+/*
  * start the clocks and wait until the AMP is switching
  *  on return the DSP sub system will be ready for loading
  */
@@ -4306,6 +4446,9 @@ enum tfa98xx_error tfa_run_startup(tfa98xx_handle_t handle, int profile)
 		 * this will run the list
 		 * until a non-register item is encountered
 		 */
+		pr_info("%s: writing registers under dev (cold %d: first %d)\n",
+			__func__, is_cold_amp,
+			handles_local[handle].first_after_boot);
 		err = tfa_cont_write_regs_dev(handle);
 		/* write device register settings */
 		PRINT_ASSERT(err);
@@ -4329,6 +4472,8 @@ enum tfa98xx_error tfa_run_startup(tfa98xx_handle_t handle, int profile)
 		 * NOTE we may still have ACS=1
 		 * so we can switch sample rate here
 		 */
+		pr_info("%s: writing registers under profile (%d)\n",
+			__func__, profile);
 		err =  tfa_cont_write_regs_prof(handle, profile);
 		PRINT_ASSERT(err);
 #if defined(REDUCED_REGISTER_SETTING)
@@ -4588,9 +4733,7 @@ tfa_run_wait_calibration(tfa98xx_handle_t handle, int *calibrate_done)
 		individual_calibration_results(handle);
 	}
 
-#ifdef CONFIG_DEBUG_FS
 	tfa98xx_deferred_calibration_status(handle, *calibrate_done);
-#endif
 
 	return err;
 }
@@ -4633,6 +4776,7 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 		if (err != TFA98XX_ERROR_OK)
 			goto error_exit;
 
+#if defined(USE_TFA9872)
 		if (TFA_GET_BF(dev, MTPEX) == 0) {
 			int cal_prof_idx = -2;
 
@@ -4644,6 +4788,7 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 				next_profile = cal_prof_idx;
 			}
 		}
+#endif
 
 #if defined(TFA_USE_DEVICE_SPECIFIC_CONTROL)
 #if defined(TFA_PROFILE_ON_DEVICE)
@@ -4670,13 +4815,15 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 				last_handle = dev;
 			}
 		}
+#endif
 #endif /* TFA_USE_DEVICE_SPECIFIC_CONTROL */
 	}
 
+#if defined(TFA_USE_DEVICE_SPECIFIC_CONTROL)
 	pr_info("%s: device to be activated = 0x%x (from %d to %d)\n",
 		__func__, active_handle,
 		first_handle, last_handle);
-#endif
+#endif /* TFA_USE_DEVICE_SPECIFIC_CONTROL */
 
 	for (dev = 0; dev < devcount; dev++) {
 		/* We need to remember the next_profile otherwise
@@ -4714,7 +4861,18 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 		}
 
 		/* Check if we need coldstart or ACS is set */
+#if defined(USE_TFA9896)
+		if ((tfa98xx_log_start_cnt == 1)
+			&& (tfa_is_cold(dev) == 0)) {
+			pr_info("%s: cold start by force at boot-up, even in warm state\n",
+				__func__);
+			err = tfa_run_speaker_boost(dev, 1, profile); /* forced */
+		} else {
+			err = tfa_run_speaker_boost(dev, 0, profile);
+		}
+#else
 		err = tfa_run_speaker_boost(dev, 0, profile);
+#endif
 		if (err != TFA98XX_ERROR_OK)
 			goto error_exit;
 		if (handles_local[dev].is_cold)
@@ -4738,8 +4896,8 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 		 */
 		if (cal_profile >= 0) {
 			next_profile = 0;
-			pr_debug("Loading %s profile!\n",
-				 tfa_cont_profile_name(dev, next_profile));
+			pr_info("Loading %s profile to retore from cal!\n",
+				tfa_cont_profile_name(dev, next_profile));
 		}
 
 #if defined(TFA_USE_DEVICE_SPECIFIC_CONTROL)
@@ -4758,11 +4916,16 @@ enum tfa_error tfa_start(int next_profile, int *vstep)
 		/* check if the profile and steps are the one we want */
 		/* was it not done already */
 		if ((next_profile != active_profile && active_profile >= 0)
-		       || (istap_prof == 1)) {
+		 || (istap_prof == 1)) {
+			pr_info("%s: update profile %d by writing\n",
+				__func__, next_profile);
 			err = tfa_cont_write_profile
 				(dev, next_profile, vstep[dev]);
-			if (err != TFA98XX_ERROR_OK)
+			if (err != TFA98XX_ERROR_OK) {
+				pr_err("%s: failed to update profile\n",
+					__func__);
 				goto error_exit;
+			}
 			if (handles_local[dev].is_cold == 0) {
 				if (handles_local[0].ext_dsp == 1) {
 					pr_debug("%s: flush buffer in blob, in warm start\n",
@@ -5438,6 +5601,9 @@ tfa_dsp_handle_event(tfa98xx_handle_t handle,
 		/* pr_info("set cold\n"); */
 		handles_local[handle].ext_dsp = 1;
 		handles_local[handle].is_cold = 1;
+#if defined(REDUCED_REGISTER_SETTING)
+		handles_local[handle].first_after_boot = 1;
+#endif
 		break;
 	case TFADSP_CMD_READY: /*Ready to receive commands*/
 		/* confirm */

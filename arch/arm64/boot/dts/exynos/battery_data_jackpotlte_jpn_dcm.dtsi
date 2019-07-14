@@ -29,5 +29,6 @@
 
 	battery {
 		battery,fg_cycle_check_value = <1100>;
+		battery,max_input_voltage = <5000>; /* mV */
 	};
 };

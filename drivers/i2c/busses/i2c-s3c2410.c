@@ -34,6 +34,7 @@
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/pinctrl/consumer.h>
+#include "../../pinctrl/core.h"
 
 #include <asm/irq.h>
 
@@ -131,6 +132,8 @@ struct s3c24xx_i2c {
 	enum s3c24xx_i2c_state	state;
 	unsigned long		clkrate;
 
+	int scl_recover_flag;
+	int sda_recover_flag;
 	void __iomem		*regs;
 	struct clk		*rate_clk;
 	struct clk		*clk;
@@ -178,6 +181,98 @@ static const struct of_device_id s3c24xx_i2c_match[] = {
 };
 MODULE_DEVICE_TABLE(of, s3c24xx_i2c_match);
 #endif
+
+static void recover_i2c_gpio(struct s3c24xx_i2c *i2c)
+{
+	int gpio_sda, gpio_scl;
+	int sda_val, scl_val, clk_cnt;
+	unsigned long timeout;
+	struct device_node *np = i2c->dev->of_node;
+	struct pinctrl_state *default_i2c_pins;
+	struct pinctrl *default_i2c_pinctrl;
+	int status = 0;
+
+	dev_err(i2c->dev, "Recover GPIO pins\n");
+
+	gpio_sda = of_get_named_gpio(np, "gpio_sda", 0);
+	if (!gpio_is_valid(gpio_sda)) {
+		dev_err(i2c->dev, "Can't get gpio_sda!!!\n");
+		return;
+	}
+	gpio_scl = of_get_named_gpio(np, "gpio_scl", 0);
+	if (!gpio_is_valid(gpio_scl)) {
+		dev_err(i2c->dev, "Can't get gpio_scl!!!\n");
+		return;
+	}
+
+	sda_val = gpio_get_value(gpio_sda);
+	scl_val = gpio_get_value(gpio_scl);
+
+	dev_err(i2c->dev, "SDA line : %s, SCL line : %s\n",
+			sda_val ? "HIGH" : "LOW", scl_val ? "HIGH" : "LOW");
+
+	if (sda_val == 1)
+		return;
+
+	/* Wait for SCL as high for 500msec */
+	if (scl_val == 0) {
+		timeout = jiffies + msecs_to_jiffies(500);
+		while (time_before(jiffies, timeout)) {
+			if (gpio_get_value(gpio_scl) != 0) {
+				timeout = 0;
+				break;
+			}
+			msleep(10);
+		}
+		if (timeout) {
+			i2c->scl_recover_flag = 1;
+			dev_err(i2c->dev, "SCL line is still LOW!!!\n");
+		} else
+			i2c->scl_recover_flag = 0;
+	}
+
+	sda_val = gpio_get_value(gpio_sda);
+
+	if (sda_val == 0) {
+		gpio_direction_output(gpio_scl, 1);
+		gpio_direction_input(gpio_sda);
+
+		for (clk_cnt = 0; clk_cnt < 100; clk_cnt++) {
+			/* Make clock for slave */
+			gpio_set_value(gpio_scl, 0);
+			udelay(5);
+			gpio_set_value(gpio_scl, 1);
+			udelay(5);
+			if (gpio_get_value(gpio_sda) == 1) {
+				i2c->sda_recover_flag = 0;
+				dev_err(i2c->dev, "SDA line is recovered.\n");
+				break;
+			}
+		}
+		if (clk_cnt == 100) {
+			i2c->sda_recover_flag = 1;
+			dev_err(i2c->dev, "SDA line is not recovered!!!\n");
+		}
+	}
+
+	default_i2c_pinctrl = devm_pinctrl_get(i2c->dev);
+	if (IS_ERR(default_i2c_pinctrl)) {
+		dev_err(i2c->dev, "Can't get i2c pinctrl!!!\n");
+		return;
+	}
+
+	default_i2c_pins = pinctrl_lookup_state(default_i2c_pinctrl,
+				"default");
+	if (!IS_ERR(default_i2c_pins)) {
+		default_i2c_pinctrl->state = NULL;
+		status = pinctrl_select_state(default_i2c_pinctrl, default_i2c_pins);
+		if (status)
+			dev_err(i2c->dev, "Can't set default i2c pins!!!\n");
+	} else {
+		dev_err(i2c->dev, "Can't get default pinstate!!!\n");
+	}
+
+}
 
 static int s3c24xx_i2c_clockrate(struct s3c24xx_i2c *i2c, unsigned int *got);
 
@@ -779,6 +874,12 @@ static int s3c24xx_i2c_doxfer(struct s3c24xx_i2c *i2c,
 	if (i2c->suspended)
 		return -EIO;
 
+	if ((i2c->scl_recover_flag == 1) || (i2c->sda_recover_flag == 1)) {
+		dev_err(i2c->dev, "SCL & SDA line recover failed\n");
+		recover_i2c_gpio(i2c);
+		return -EIO;
+	}
+
 	ret = s3c24xx_i2c_set_master(i2c);
 	if (ret != 0) {
 		dev_err(i2c->dev, "cannot get bus (error %d)\n", ret);
@@ -805,15 +906,17 @@ static int s3c24xx_i2c_doxfer(struct s3c24xx_i2c *i2c,
 		goto out;
 	}
 
-	timeout = wait_event_timeout(i2c->wait, i2c->msg_num == 0, HZ * 5);
+	timeout = wait_event_timeout(i2c->wait, i2c->msg_num == 0, HZ * 1);
 
 	ret = i2c->msg_idx;
 
 	/* having these next two as dev_err() makes life very
 	 * noisy when doing an i2cdetect */
 
-	if (timeout == 0)
+	if (timeout == 0) {
 		dev_err(i2c->dev, "timeout\n");
+		recover_i2c_gpio(i2c);
+	}
 	else if (ret != num)
 		dev_err(i2c->dev, "incomplete xfer (%d)\n", ret);
 
@@ -1357,6 +1460,75 @@ static int s3c24xx_i2c_runtime_resume(struct device *dev)
 	return 0;
 }
 #endif
+
+#ifdef CONFIG_SAMSUNG_TUI
+#ifdef CONFIG_PM_RUNTIME
+static int stui_pm_ret;
+#endif /* CONFIG_PM_RUNTIME */
+int stui_i2c_lock(struct i2c_adapter *adap)
+{
+	int ret = 0;
+	static struct s3c24xx_i2c *stui_i2c;
+
+	if (!adap) {
+		pr_err("cannot get adapter\n");
+		return -1;
+	}
+
+	i2c_lock_adapter(adap);
+	stui_i2c = (struct s3c24xx_i2c *)adap->algo_data;
+
+#ifdef CONFIG_PM_RUNTIME
+	stui_pm_ret = pm_runtime_get_sync(stui_i2c->dev);
+	if (stui_pm_ret < 0) {
+		ret = clk_enable(stui_i2c->clk);
+		if (ret)
+			goto out_err;
+	}
+#else /* CONFIG_PM_RUNTIME */
+	ret = clk_enable(stui_i2c->clk);
+	if (ret)
+		goto out_err;
+#endif /* CONFIG_PM_RUNTIME */
+
+	exynos_update_ip_idle_status(stui_i2c->idle_ip_index, 0);
+
+	return 0;
+
+out_err:
+	i2c_unlock_adapter(adap);
+	return ret;
+}
+
+int stui_i2c_unlock(struct i2c_adapter *adap)
+{
+	static struct s3c24xx_i2c *stui_i2c;
+
+	if (!adap) {
+		pr_err("cannot get adapter\n");
+		return -1;
+	}
+
+	stui_i2c = (struct s3c24xx_i2c *)adap->algo_data;
+
+#ifdef CONFIG_PM_RUNTIME
+	if (stui_pm_ret < 0) {
+		clk_disable(stui_i2c->clk);
+	} else {
+		pm_runtime_mark_last_busy(stui_i2c->dev);
+		pm_runtime_put_autosuspend(stui_i2c->dev);
+	}
+#else /* CONFIG_PM_RUNTIME */
+	clk_disable(stui_i2c->clk);
+#endif /* CONFIG_PM_RUNTIME */
+
+	exynos_update_ip_idle_status(stui_i2c->idle_ip_index, 1);
+
+	i2c_unlock_adapter(adap);
+
+	return 0;
+}
+#endif /* CONFIG_SAMSUNG_TUI */
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops s3c24xx_i2c_dev_pm_ops = {

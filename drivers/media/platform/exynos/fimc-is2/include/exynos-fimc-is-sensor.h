@@ -48,10 +48,11 @@ enum exynos_sensor_position {
 	SENSOR_POSITION_REAR = 0,
 	SENSOR_POSITION_FRONT = 1,
 	SENSOR_POSITION_REAR2 = 2,
-	SENSOR_POSITION_SECURE = 3,
-	SENSOR_POSITION_FRONT2 = 5,
-	SENSOR_POSITION_REAR3 = 6,
-	SENSOR_POSITION_END
+	SENSOR_POSITION_FRONT2 = 3,
+	SENSOR_POSITION_REAR3 = 4,
+	SENSOR_POSITION_FRONT3 = 5,
+	SENSOR_POSITION_MAX,
+	SENSOR_POSITION_SECURE = 100,
 };
 
 enum exynos_sensor_id {
@@ -103,6 +104,8 @@ enum exynos_sensor_id {
 	SENSOR_NAME_S5K2P7SX		 = 45,
 	SENSOR_NAME_S5K4EC		 = 57,
 	SENSOR_NAME_S5K2P6		 = 58, /* TODO */
+	SENSOR_NAME_S5K3L6		 = 59,
+	SENSOR_NAME_S5K2X5		 = 60,
 
 	/* 101~200: SONY sensors */
 	SENSOR_NAME_IMX135		 = 101,
@@ -120,6 +123,9 @@ enum exynos_sensor_id {
 	SENSOR_NAME_IMX241		 = 113,
 	SENSOR_NAME_IMX345		 = 114,
 	SENSOR_NAME_IMX576		 = 115,
+	SENSOR_NAME_IMX316		 = 116,
+	SENSOR_NAME_IMX586		 = 117,
+	SENSOR_NAME_IMX471		 = 118,
 
 	/* 201~255: Other vendor sensors */
 	SENSOR_NAME_SR261		 = 201,
@@ -131,6 +137,7 @@ enum exynos_sensor_id {
 	SENSOR_NAME_VIRTUAL		 = 207,
 	SENSOR_NAME_SR846		 = 208,
 	SENSOR_NAME_SR556		 = 209,
+	SENSOR_NAME_GC5035		 = 210,
 
 	SENSOR_NAME_S5K5E6		 = 254, // IRIS Camera Sensor
 
@@ -209,6 +216,12 @@ enum ois_name {
 	OIS_NAME_RUMBA_S6	= 2,
 	OIS_NAME_END,
 	OIS_NAME_NOTHING	= 100,
+};
+
+enum iris_name {
+	IRIS_NAME_AK7372	= 1,
+	IRIS_NAME_END,
+	IRIS_NAME_NOTHING	= 100,
 };
 
 enum sensor_peri_type {
@@ -292,6 +305,7 @@ struct sensor_open_extended {
 	struct sensor_protocol1 from_con;
 	struct sensor_protocol2 preprocessor_con;
 	struct sensor_protocol1 ois_con;
+	struct sensor_protocol1 iris_con;
 	u32 mclk;
 	u32 mipi_lane_num;
 	u32 mipi_speed;

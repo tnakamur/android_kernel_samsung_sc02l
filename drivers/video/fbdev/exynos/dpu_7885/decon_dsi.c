@@ -416,14 +416,15 @@ static ssize_t decon_show_psr_info(struct device *dev,
 	struct decon_device *decon = dev_get_drvdata(dev);
 	struct decon_lcd *lcd_info = decon->lcd_info;
 	char *p = buf;
+	unsigned int w = MIN_WIN_BLOCK_WIDTH, h = MIN_WIN_BLOCK_HEIGHT;
 
 	p += sprintf(p, "%d\n", decon->dt.psr_mode);
 	p += sprintf(p, "1\n");
 	p += sprintf(p, "%d\n%d\n%d\n%d\n%d\n",
 		decon->lcd_info->xres,
 		decon->lcd_info->yres,
-		MIN_WIN_BLOCK_WIDTH,
-		MIN_WIN_BLOCK_HEIGHT,
+		max(w, lcd_info->update_min_w),
+		max(h, lcd_info->update_min_h),
 		lcd_info->dsc_enabled);
 
 	return (p - buf);
@@ -728,6 +729,11 @@ int decon_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 		decon_err("%s: wait_for_update_timeout\n", __func__);
 
 	decon_hiber_unblock(decon);
+
+#ifdef CONFIG_EXYNOS_SUPPORT_FB_HANDOVER
+	dpu_of_reserved_mem_device_release(decon);
+#endif
+
 	return ret;
 }
 EXPORT_SYMBOL(decon_pan_display);

@@ -1237,6 +1237,33 @@ device_initcall_sync(dpp_register);
 module_exit(dpp_unregister);
 
 #ifdef CONFIG_EXYNOS_SUPPORT_FB_HANDOVER
+void dpu_of_reserved_mem_device_release(struct decon_device *decon)
+{
+	int i;
+
+	if (likely(decon->reserved_release))
+		return;
+
+	for (i = 0; i < MAX_DPP_SUBDEV; i++) {
+		struct v4l2_subdev *sd = NULL;
+		struct dpp_device *dpp = NULL;
+
+		sd = decon->dpp_sd[i];
+		dpp = v4l2_get_subdevdata(sd);
+
+		if (dpp && dpp->bl_fb_info.phy_addr && dpp->bl_fb_info.size > 0) {
+			iovmm_unmap_oto(dpp->dev, dpp->bl_fb_info.phy_addr);
+			dpp_info("dpp%d one to one unmapping: 0x%x\n",
+				dpp->id,
+				dpp->bl_fb_info.phy_addr);
+			memset(&dpp->bl_fb_info, 0, sizeof(struct bootloader_fb_info));
+			of_reserved_mem_device_release(dpp->dev);
+		}
+	}
+
+	decon->reserved_release = 1;
+}
+
 static int rmem_dpu_device_init(struct reserved_mem *rmem, struct device *dev)
 {
 	/* do nothing */
@@ -1252,6 +1279,7 @@ static void rmem_dpu_device_release(struct reserved_mem *rmem, struct device *de
 
 	dpp_info("%s: base=%pa, size=%pa, first=%pa, last=%pa\n",
 			__func__, &rmem->base, &rmem->size, first, last);
+	free_memsize_reserved(rmem->base, rmem->size);
 
 	for (page = first; page != last; page++) {
 		__ClearPageReserved(page);

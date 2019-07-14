@@ -157,6 +157,7 @@ typedef struct _manager_data_t {
 	int dp_is_connect;
 	int dp_hs_connect;
 	int dp_check_done;
+	struct notifier_block manager_external_notifier_nb;
 }manager_data_t;
 
 

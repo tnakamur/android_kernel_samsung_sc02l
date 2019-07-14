@@ -43,11 +43,14 @@
 #define INPUT_STREAM_SHIFT			24
 
 /*
- * module id
- * [x] : module id, this stream uses
+ * senosr position
+ * [0] : rear
+ * [1] : front
+ * [2] : rear2
+ * [3] : secure
  */
-#define INPUT_MODULE_MASK			0x00FF0000
-#define INPUT_MODULE_SHIFT			16
+#define INPUT_POSITION_MASK			0x00FF0000
+#define INPUT_POSITION_SHIFT			16
 
 /*
  * video index

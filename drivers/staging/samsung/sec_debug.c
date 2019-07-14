@@ -721,6 +721,50 @@ out:
 }
 __setup("sec_debug.base=", sec_debug_base_setup);
 
+#if defined(CONFIG_SEC_DEBUG_SUPPORT_FORCE_UPLOAD)
+static long __force_upload;
+
+static int sec_debug_get_force_upload(void)
+{
+	if (__force_upload == 1)
+		/* enabled */
+		return 1;
+	else if (__force_upload == 0)
+		/* disabled */
+		return 0;
+
+	return -1;
+}
+
+static int __init sec_debug_force_upload(char *str)
+{
+	unsigned long val = memparse(str, &str);
+
+	pr_err("%s: start %lx\n", __func__, val);
+
+	if (!val) {
+		pr_err("%s: disabled (%lx)\n", __func__, val);
+		__force_upload = 0;
+		/* Unlocked or Disabled */
+		return 1;
+	} else {
+		pr_err("%s: enabled (%lx)\n", __func__, val);
+		__force_upload = 1;
+		/* Locked */
+		return 1;
+	}
+}
+__setup("androidboot.force_upload=", sec_debug_force_upload);
+#endif
+
+int sec_debug_enter_upload(void)
+{
+#if defined(CONFIG_SEC_DEBUG_SUPPORT_FORCE_UPLOAD)
+	return sec_debug_get_force_upload();
+#else
+	return sec_debug_get_debug_level();
+#endif
+}
 #endif /* CONFIG_SEC_DEBUG */
 
 #if defined(CONFIG_SEC_DUMP_SUMMARY)

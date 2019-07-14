@@ -111,6 +111,9 @@ struct exynos_platform_fimc_is_module {
 	u32 af_product_name;
 	u32 af_i2c_addr;
 	u32 af_i2c_ch;
+	u32 iris_product_name;
+	u32 iris_i2c_addr;
+	u32 iris_i2c_ch;
 	u32 ois_product_name;
 	u32 ois_i2c_addr;
 	u32 ois_i2c_ch;

@@ -176,7 +176,7 @@ struct vm_area_struct;
  *   node.
  */
 #define __GFP_COLD	((__force gfp_t)___GFP_COLD)
-#define __GFP_NOWARN	((__force gfp_t)___GFP_NOWARN)
+#define __GFP_NOWARN ((__force gfp_t)___GFP_NOWARN)
 #define __GFP_COMP	((__force gfp_t)___GFP_COMP)
 #define __GFP_ZERO	((__force gfp_t)___GFP_ZERO)
 #define __GFP_NOTRACK	((__force gfp_t)___GFP_NOTRACK)

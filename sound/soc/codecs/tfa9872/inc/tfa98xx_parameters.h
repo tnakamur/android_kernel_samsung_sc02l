@@ -66,9 +66,9 @@ struct tfa_header {
 	char subversion[2];  /* "vv" : vv=subversion */
 	uint16_t size;	/* data size in bytes following CRC */
 	uint32_t crc;	 /* 32-bits CRC for following data */
-	char customer[8];	/* “name of customer” */
-	char application[8]; /* “application name” */
-	char type[8];		 /* “application type name” */
+	char customer[8];	/* "name of customer" */
+	char application[8]; /* "application name" */
+	char type[8];		 /* "application type name" */
 };
 
 enum tfa_sample_rate {
@@ -509,7 +509,7 @@ struct tfa_old_volume_step2_file {
  */
 struct tfa_spk_header {
 	struct tfa_header hdr;
-	char name[8]; /* speaker nick name (e.g. “dumbo”) */
+	char name[8]; /* speaker nick name (e.g. "dumbo") */
 	char vendor[16];
 	char type[8];
 	/* dimensions (mm) */
@@ -526,7 +526,7 @@ struct tfa_spk_header {
 #define NXPTFA_SP_SUBVERSION "00"
 struct tfa_speaker_file {
 	struct tfa_header hdr;
-	char name[8];	/* speaker nick name (e.g. “dumbo”) */
+	char name[8];	/* speaker nick name (e.g. "dumbo") */
 	char vendor[16];
 	char type[8];
 	/* dimensions (mm) */
@@ -573,7 +573,7 @@ struct tfa_livedata {
 #define NXPTFA_SP3_SUBVERSION "00"
 struct tfa_speaker_file_max2  {
 	struct tfa_header hdr;
-	char name[8];	/* speaker nick name (e.g. “dumbo”) */
+	char name[8];	/* speaker nick name (e.g. "dumbo") */
 	char vendor[16];
 	char type[8];
 	/* dimensions (mm) */
@@ -742,9 +742,9 @@ struct tfa_container {
 	uint32_t size;	/* data size in bytes following CRC */
 	uint32_t crc;	/* 32-bits CRC for following data */
 	uint16_t rev;	/* "extra chars for rev nr" */
-	char customer[8];	/* “name of customer” */
-	char application[8];	/* “application name” */
-	char type[8];	/* “application type name” */
+	char customer[8];	/* "name of customer" */
+	char application[8];	/* "application name" */
+	char type[8];	/* "application type name" */
 	uint16_t ndev;	/* "nr of device lists" */
 	uint16_t nprof;	/* "nr of profile lists" */
 	uint16_t nlivedata;	/* "nr of livedata lists" */

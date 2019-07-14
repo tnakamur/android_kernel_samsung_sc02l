@@ -20,6 +20,30 @@ config CCIC_S2MU004
 	  If you say yes here you will get support for
 	  for the S2MU004 USBPD chip.
 
+config CCIC_S2MU106
+	bool "Using S2MU106 USB PD"
+	depends on USE_CCIC
+	default n
+	help
+	  If you say yes here you will get support for
+	  for the S2MU106 USBPD chip.
+
+config CCIC_MANUAL_QBAT
+	bool "Using S2MU106 USB PD QBAT Manual Control"
+	depends on USE_CCIC
+	default n
+	help
+	  If you say yes here you will get support for
+	  for the S2MU106 USBPD chip.
+
+config CCIC_S2MU205
+	bool "Using S2MU205 USB PD"
+	depends on USE_CCIC
+	default n
+	help
+	  If you say yes here you will get support for
+	  for the S2MU205 USBPD chip.
+
 config CCIC_VDM
 	bool "Using S2MU004 USB PD VDM Message"
 	depends on USE_CCIC
@@ -68,3 +92,10 @@ config CCIC_WATER_DETECT
 	  If you say yes here you will get support for
 	  water detect Enable
 
+config CCIC_EXTERNAL_CAPACITOR
+	bool "support WATER DETECT tuning for ext cc cap"
+	depends on USE_CCIC
+	default n
+	help
+	  If you say yes here you will get support for
+	  water detect tuning for external cc capacitor.

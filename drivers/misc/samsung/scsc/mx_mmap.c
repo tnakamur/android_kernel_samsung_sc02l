@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (c) 2014 - 2016 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2014 - 2017 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
 
@@ -20,6 +20,7 @@
 #include <asm/page.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
+#include <linux/uaccess.h>
 #include <scsc/scsc_logring.h>
 #include <scsc/scsc_mx.h>
 #include "scsc_mif_abs.h"
@@ -37,8 +38,9 @@
 #define VER_MAJOR               0
 #define VER_MINOR               0
 
-#define SCSC_MMAP_NODE          1
-#define SCSC_GDB_NODE           1
+#define SCSC_MMAP_NODE		1
+#define SCSC_GDB_NODE		1
+#define SCSC_GDB_DEF_BUF_SZ	64
 
 #define SCSC_MAX_INTERFACES     (5 * (SCSC_MMAP_NODE + SCSC_GDB_NODE))
 
@@ -82,6 +84,8 @@ int mx_mmap_open(struct inode *inode, struct file *filp)
 
 	dev = container_of(inode->i_cdev, struct mx_mmap_dev, cdev);
 
+	SCSC_TAG_INFO(MX_MMAP, "open %p\n", filp);
+
 	filp->private_data = dev;
 
 	return 0;
@@ -90,7 +94,7 @@ int mx_mmap_open(struct inode *inode, struct file *filp)
 /*
  * This function maps the contiguous device mapped area
  * to user space. This is specfic to device which is called though fd.
- * */
+ */
 int mx_mmap_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	int                err;
@@ -124,6 +128,8 @@ int mx_mmap_mmap(struct file *filp, struct vm_area_struct *vma)
 
 int mx_mmap_release(struct inode *inode, struct file *filp)
 {
+	SCSC_TAG_INFO(MX_MMAP, "close %p\n", filp);
+
 	/* TODO : Unmap pfn_range */
 	return 0;
 }
@@ -142,6 +148,8 @@ int mx_gdb_open(struct inode *inode, struct file *filp)
 
 	mx_dev = container_of(inode->i_cdev, struct mx_mmap_dev, cdev);
 
+	SCSC_TAG_INFO(MX_MMAP, "open %p\n", filp);
+
 	filp->private_data = mx_dev;
 	mx_dev->filp = filp;
 	ret = kfifo_alloc(&mx_dev->fifo, GDB_TRANSPORT_BUF_LENGTH, GFP_KERNEL);
@@ -151,13 +159,31 @@ int mx_gdb_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static ssize_t mx_gdb_write(struct file *filp, const char __user *buf, size_t len, loff_t *offset)
+static ssize_t mx_gdb_write(struct file *filp, const char __user *ubuf, size_t len, loff_t *offset)
 {
 	struct mx_mmap_dev *mx_dev;
+	char *wbuf = NULL, *lbuf = NULL, buf[SCSC_GDB_DEF_BUF_SZ] = {};
 
 	mx_dev = filp->private_data;
+	/* When write_req do NOT fit inside the auto array just dyn-alloc */
+	if (len <= SCSC_GDB_DEF_BUF_SZ) {
+		wbuf = buf;
+	} else {
+		wbuf = kzalloc(len, GFP_KERNEL);
+		if (!wbuf)
+			return -ENOMEM;
+		/* Use the freshly dyn-allocated buf */
+		SCSC_TAG_DEBUG(MX_MMAP, "Allocated GDB write dyn-buffer [%zd]\n", len);
+		lbuf = wbuf;
+	}
 
-	gdb_transport_send(mx_dev->gdb_transport, (void *)buf, len);
+	if (copy_from_user(wbuf, ubuf, len)) {
+		kfree(lbuf);
+		return -EINVAL;
+	}
+
+	gdb_transport_send(mx_dev->gdb_transport, (void *)wbuf, len);
+	kfree(lbuf);
 
 	return len;
 }
@@ -218,7 +244,7 @@ void gdb_read_callback(const void *message, size_t length, void *data)
 			     length);
 }
 
-static unsigned mx_gdb_poll(struct file *filp, poll_table *wait)
+static unsigned int mx_gdb_poll(struct file *filp, poll_table *wait)
 {
 	struct mx_mmap_dev *mx_dev;
 
@@ -237,6 +263,8 @@ int mx_gdb_release(struct inode *inode, struct file *filp)
 	struct mx_mmap_dev *mx_dev;
 
 	mx_dev = container_of(inode->i_cdev, struct mx_mmap_dev, cdev);
+
+	SCSC_TAG_INFO(MX_MMAP, "close %p\n", filp);
 
 	if (mx_dev->filp == NULL) {
 		SCSC_TAG_ERR(MX_MMAP, "Device already closed\n");

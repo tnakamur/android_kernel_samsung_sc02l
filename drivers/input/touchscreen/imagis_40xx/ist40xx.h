@@ -169,24 +169,27 @@ struct ts_test_result {
 #define IST40XX_AOD					(1 << 1)
 #define IST40XX_GETURE_CTRL_SPAY	(1 << 1)
 #define IST40XX_GETURE_CTRL_AOD		(1 << 2)
-#define IST40XX_GETURE_CTRL_WAKEUP	(1 << 3)
+#define IST40XX_GETURE_CTRL_STAP	(1 << 3)
 #define IST40XX_GETURE_EVT_SPAY		(1 << 1)
 #define IST40XX_GETURE_EVT_AOD		(1 << 2)
-#define IST40XX_GETURE_EVT_WAKEUP	(1 << 3)
+#define IST40XX_GETURE_EVT_STAP		(1 << 3)
 #define IST40XX_GETURE_SET_SPAY		(1 << 4)
 #define IST40XX_GETURE_SET_AOD		(1 << 5)
-#define IST40XX_GETURE_SET_WAKEUP	(1 << 6)
+#define IST40XX_GETURE_SET_STAP		(1 << 6)
 
 #define EID_GESTURE					(2)
 
 #define GESTURE_SWIPE				(0)
 #define GESTURE_TAP					(1)
 #define GESTURE_PRESSURE			(2)
+#define GESTURE_PRESS				(3)
+#define GESTURE_SINGLETAB			(4)
 
 #define GESTURE_SWIPE_UP			(0)
 #define GESTURE_TAP_DOUBLE			(0)
 #define GESTURE_PRESSURE_PRESS		(0)
 #define GESTURE_PRESSURE_RELEASE	(1)
+#define GESTURE_TAP_SINGLE			(0)
 
 #define NOISE_MODE_TA				(0)
 #define NOISE_MODE_CALL				(1)
@@ -194,6 +197,7 @@ struct ts_test_result {
 #define NOISE_MODE_GLOVE			(3)
 #define NOISE_MODE_EDGE				(4)
 #define NOISE_MODE_SENSITIVITY		(5)
+#define NOISE_MODE_TOUCHABLE		(6)
 #define NOISE_MODE_POWER			(8)
 
 /* retry count */
@@ -208,7 +212,7 @@ struct ts_test_result {
 #define DEV_VERB					(6)
 
 #define IST40XX_LOG_TAG				("[ TSP ]")
-#define IST40XX_LOG_LEVEL			DEV_VERB
+#define IST40XX_LOG_LEVEL			DEV_NOTI
 
 #ifdef CONFIG_SEC_DEBUG_TSP_LOG
 #include <linux/sec_debug.h>
@@ -385,7 +389,7 @@ enum ist40xx_read_commands {
 	eHCOM_GET_FW_INTEGRITY	= IST40XX_CMD_ADDR(0x09),
 
 	eHCOM_GET_SELF_CDC_BASE	= IST40XX_CMD_ADDR(0x0B),
-
+	eHCOM_GET_MAX_DCM		= IST40XX_CMD_ADDR(0x0C),
 	eHCOM_GET_REC_INFO_BASE	= IST40XX_CMD_ADDR(0x0D),
 	eHCOM_GET_DBG_INFO_BASE	= IST40XX_CMD_ADDR(0x0E),
 
@@ -645,6 +649,9 @@ struct ist40xx_dt_data {
 	bool tkey_use_sec_sysfs;
 #endif
 	int item_version;
+	u32 area_indicator;
+	u32 area_navigation;
+	u32 area_edge;
 };
 
 struct ist40xx_data {
@@ -703,6 +710,7 @@ struct ist40xx_data {
 	int idle_rate;
 	bool spay;
 	bool aod;
+	bool singletab;
 #ifdef USE_SPONGE_LIB
 	u8 lpm_mode;
 	u16 rect_data[4];
@@ -777,11 +785,16 @@ struct ist40xx_data {
 	unsigned int scrub_y;
 	char node_buf[MAX_BUF_SIZE];
 	int node_cnt;
+
+	u16 p_x[IST40XX_MAX_FINGERS];
+	u16 p_y[IST40XX_MAX_FINGERS];
+	u16 r_x[IST40XX_MAX_FINGERS];
+	u16 r_y[IST40XX_MAX_FINGERS];
 };
 
 typedef enum {
 	SPONGE_EVENT_TYPE_SPAY = 0x04,
-	SPONGE_EVENT_TYPE_AOD = 0x08,
+	SPONGE_EVENT_TYPE_SINGLE_TAP = 0x08,
 	SPONGE_EVENT_TYPE_AOD_PRESS = 0x09,
 	SPONGE_EVENT_TYPE_AOD_LONGPRESS = 0x0A,
 	SPONGE_EVENT_TYPE_AOD_DOUBLETAB = 0x0B,

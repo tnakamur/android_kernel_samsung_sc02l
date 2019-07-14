@@ -45,7 +45,7 @@
 #ifdef CONFIG_USE_DIRECT_IS_CONTROL
 #include "fimc-is-interface-wrap.h"
 #endif
-#if defined(CONFIG_COMPANION_DIRECT_USE) || defined(USE_AP_PDAF) || defined(USE_SENSOR_WDR)
+#if defined(CONFIG_COMPANION_DIRECT_USE) || defined(USE_AP_PDAF) || defined(USE_SENSOR_WDR) || defined (USE_MS_PDAF)
 #include "fimc-is-interface-sensor.h"
 #include "fimc-is-device-sensor-peri.h"
 #endif
@@ -53,6 +53,9 @@
 /* sysfs variable for debug */
 extern struct fimc_is_sysfs_debug sysfs_debug;
 extern struct pm_qos_request exynos_isp_qos_mem;
+#ifdef CHAIN_SKIP_GFRAME_FOR_VRA
+static struct fimc_is_group_frame dummy_gframe;
+#endif
 
 static inline void smp_shot_init(struct fimc_is_group *group, u32 value)
 {
@@ -176,6 +179,7 @@ static int fimc_is_gframe_check(struct fimc_is_group *gprev,
 
 	device = group->device;
 
+#ifndef DISABLE_CHECK_PERFRAME_FMT_SIZE
 	/*
 	 * perframe check
 	 * 1. perframe size can't exceed s_format size
@@ -190,6 +194,7 @@ static int fimc_is_gframe_check(struct fimc_is_group *gprev,
 		frame->shot_ext->node_group.leader.input.cropRegion[2] = incrop->w;
 		frame->shot_ext->node_group.leader.input.cropRegion[3] = incrop->h;
 	}
+#endif
 
 	for (capture_id = 0; capture_id < CAPTURE_NODE_MAX; ++capture_id) {
 		node = &gframe->group_cfg[group->slot].capture[capture_id];
@@ -206,6 +211,7 @@ static int fimc_is_gframe_check(struct fimc_is_group *gprev,
 			goto p_err;
 		}
 
+#ifndef DISABLE_CHECK_PERFRAME_FMT_SIZE
 		if ((otcrop->w * otcrop->h) > (subdev->output.width * subdev->output.height)) {
 			mrwarn("[V%d][req:%d] the output size is invalid(perframe:%dx%d > subdev:%dx%d)", group, gframe,
 				node->vid, node->request,
@@ -215,7 +221,7 @@ static int fimc_is_gframe_check(struct fimc_is_group *gprev,
 			frame->shot_ext->node_group.capture[capture_id].output.cropRegion[2] = otcrop->w;
 			frame->shot_ext->node_group.capture[capture_id].output.cropRegion[3] = otcrop->h;
 		}
-
+#endif
 		subdev->cid = capture_id;
 	}
 
@@ -1319,8 +1325,21 @@ int fimc_is_groupmgr_init(struct fimc_is_groupmgr *groupmgr,
 			fimc_is_pipe_create(&device->pipe, next->gprev, next);
 #endif
 		} else {
-			sibling->gnext = next;
-			next->gprev = sibling;
+#ifdef CHAIN_SKIP_GFRAME_FOR_VRA
+			/**
+			 * HACK: Put VRA group as a isolated group.
+			 * There is some case that user skips queueing VRA buffer,
+			 * even though DMA out request of junction node is set.
+			 * To prevent the gframe stuck issue,
+			 * VRA group must not receive gframe from previous group.
+			 */
+			if (next->id != GROUP_ID_VRA0)
+#endif
+			{
+				sibling->gnext = next;
+				next->gprev = sibling;
+			}
+
 			sibling = next;
 		}
 
@@ -1855,7 +1874,10 @@ p_err:
 	return ret;
 }
 
-void set_group_shots(struct fimc_is_group *group, u32 hal_version, u32 framerate)
+static void set_group_shots(struct fimc_is_group *group,
+	u32 hal_version,
+	u32 framerate,
+	enum fimc_is_ex_mode ex_mode)
 {
 #ifdef ENABLE_IS_CORE
 	if (hal_version == IS_HAL_VER_3_2) {
@@ -1896,13 +1918,18 @@ void set_group_shots(struct fimc_is_group *group, u32 hal_version, u32 framerate
 		group->skip_shots = group->asyn_shots;
 	}
 #else
+	if (ex_mode == EX_DUALFPS) {
+		group->asyn_shots = MIN_OF_ASYNC_SHOTS + 1;
+		group->sync_shots = MIN_OF_SYNC_SHOTS;
+	} else {
 #ifdef REDUCE_COMMAND_DELAY
-	group->asyn_shots = MIN_OF_ASYNC_SHOTS + 1;
-	group->sync_shots = 0;
+		group->asyn_shots = MIN_OF_ASYNC_SHOTS + 1;
+		group->sync_shots = 0;
 #else
-	group->asyn_shots = MIN_OF_ASYNC_SHOTS;
-	group->sync_shots = MIN_OF_SYNC_SHOTS;
+		group->asyn_shots = MIN_OF_ASYNC_SHOTS + 0;
+		group->sync_shots = MIN_OF_SYNC_SHOTS;
 #endif
+	}
 	group->init_shots = group->asyn_shots;
 	group->skip_shots = group->asyn_shots;
 #endif
@@ -1920,7 +1947,7 @@ int fimc_is_group_start(struct fimc_is_groupmgr *groupmgr,
 	struct fimc_is_group_task *gtask;
 	u32 sensor_fcount;
 	u32 framerate;
-	u32 shot_inc;
+	enum fimc_is_ex_mode ex_mode;
 
 	BUG_ON(!groupmgr);
 	BUG_ON(!group);
@@ -1963,10 +1990,11 @@ int fimc_is_group_start(struct fimc_is_groupmgr *groupmgr,
 	} else {
 		sensor = device->sensor;
 		framerate = fimc_is_sensor_g_framerate(sensor);
+		ex_mode = fimc_is_sensor_g_ex_mode(sensor);
 
 		if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &group->state)) {
 			resourcemgr = device->resourcemgr;
-			set_group_shots(group, resourcemgr->hal_version, framerate);
+			set_group_shots(group, resourcemgr->hal_version, framerate, ex_mode);
 
 			/* frame count */
 			sensor_fcount = fimc_is_sensor_g_fcount(sensor) + 1;
@@ -1977,14 +2005,8 @@ int fimc_is_group_start(struct fimc_is_groupmgr *groupmgr,
 			memset(&group->intent_ctl, 0, sizeof(struct camera2_aa_ctl));
 
 			/* shot resource */
-			if ((group->init_shots + group->sync_shots) > smp_shot_get(group)) {
-				shot_inc = (group->init_shots + group->sync_shots) - smp_shot_get(group);
-				while (shot_inc > 0) {
-					up(&gtask->smp_resource);
-					smp_shot_inc(group);
-					shot_inc--;
-				}
-			}
+			sema_init(&gtask->smp_resource, group->asyn_shots + group->sync_shots);
+			smp_shot_init(group, group->asyn_shots + group->sync_shots);
 		} else {
 			if (framerate > 120)
 				group->asyn_shots = MIN_OF_ASYNC_SHOTS_240FPS;
@@ -2293,15 +2315,12 @@ int fimc_is_group_buffer_queue(struct fimc_is_groupmgr *groupmgr,
 	struct fimc_is_device_ischain *device;
 	struct fimc_is_framemgr *framemgr;
 	struct fimc_is_frame *frame;
-#if defined(CONFIG_COMPANION_DIRECT_USE) || defined(USE_AP_PDAF) || defined(USE_SENSOR_WDR)
+#if defined(CONFIG_COMPANION_DIRECT_USE) || defined(USE_AP_PDAF) || defined(USE_SENSOR_WDR) || defined (USE_MS_PDAF)
 	struct fimc_is_module_enum *module = NULL;
 	struct fimc_is_device_sensor *sensor = NULL;
 	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
 	cis_shared_data *cis_data = NULL;
 #endif
-	u32 orientation;
-	enum mcsc_port backup_mcsc_blk_port[INTERFACE_TYPE_MAX];
-	int i = 0;
 
 	BUG_ON(!groupmgr);
 	BUG_ON(!group);
@@ -2315,7 +2334,7 @@ int fimc_is_group_buffer_queue(struct fimc_is_groupmgr *groupmgr,
 	framemgr = &queue->framemgr;
 
 	BUG_ON(index >= framemgr->num_frames);
-#if defined(CONFIG_COMPANION_DIRECT_USE) || defined(USE_AP_PDAF) || defined(USE_SENSOR_WDR)
+#if defined(CONFIG_COMPANION_DIRECT_USE) || defined(USE_AP_PDAF) || defined(USE_SENSOR_WDR) || defined (USE_MS_PDAF)
 	sensor = device->sensor;
 	BUG_ON(!sensor);
 
@@ -2357,15 +2376,6 @@ int fimc_is_group_buffer_queue(struct fimc_is_groupmgr *groupmgr,
 				}
 		}
 
-		/* orientation is set by user */
-		orientation = frame->shot->uctl.scalerUd.orientation;
-		for (i = 0; i < INTERFACE_TYPE_MAX; i++)
-			backup_mcsc_blk_port[i] = frame->shot->uctl.scalerUd.mcsc_sub_blk_port[i];
-		memset(&frame->shot->uctl.scalerUd, 0, sizeof(struct camera2_scaler_uctl));
-		frame->shot->uctl.scalerUd.orientation = orientation;
-		for (i = 0; i < INTERFACE_TYPE_MAX; i++)
-			frame->shot->uctl.scalerUd.mcsc_sub_blk_port[i] = backup_mcsc_blk_port[i];
-
 		frame->lindex = 0;
 		frame->hindex = 0;
 		frame->result = 0;
@@ -2397,14 +2407,14 @@ int fimc_is_group_buffer_queue(struct fimc_is_groupmgr *groupmgr,
 		}
 #endif
 
-#ifdef SENSOR_CONTROL_DELAY
+#ifdef SENSOR_REQUEST_DELAY
 		if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &group->state) &&
-			((frame->shot->uctl.opMode == CAMERA_OP_MODE_HAL3_GED) ||
-			(frame->shot->uctl.opMode == CAMERA_OP_MODE_HAL3_TW))) {
+			(frame->shot->uctl.opMode == CAMERA_OP_MODE_HAL3_GED
+			|| frame->shot->uctl.opMode == CAMERA_OP_MODE_HAL3_SDK)) {
 			int req_cnt = 0;
 			struct fimc_is_frame *prev;
 			list_for_each_entry_reverse(prev, &framemgr->queued_list[FS_REQUEST], list) {
-				if (++req_cnt > SENSOR_CONTROL_DELAY)
+				if (++req_cnt > SENSOR_REQUEST_DELAY)
 					break;
 
 				if (frame->shot->ctl.aa.aeMode == AA_AEMODE_OFF
@@ -2416,9 +2426,33 @@ int fimc_is_group_buffer_queue(struct fimc_is_groupmgr *groupmgr,
 					prev->shot->ctl.aa.vendor_isoMode	= frame->shot->ctl.aa.vendor_isoMode;
 					prev->shot->ctl.aa.aeMode		= frame->shot->ctl.aa.aeMode;
 				}
+
+				/*
+				 * Flash capture has 2 Frame delays due to DDK constraints.
+				 * N + 1: The DDK uploads the best shot and streams off.
+				 * N + 2: HAL used the buffer of the next of best shot as a flash image.
+				 */
+				if (frame->shot->ctl.aa.vendor_aeflashMode == AA_FLASHMODE_CAPTURE) {
+					prev->shot->ctl.aa.vendor_aeflashMode	= frame->shot->ctl.aa.vendor_aeflashMode;
+				}
 				prev->shot->ctl.aa.aeExpCompensation		= frame->shot->ctl.aa.aeExpCompensation;
 				prev->shot->ctl.aa.aeLock			= frame->shot->ctl.aa.aeLock;
 				prev->shot->ctl.lens.opticalStabilizationMode	= frame->shot->ctl.lens.opticalStabilizationMode;
+			}
+		}
+#endif
+
+#ifdef ENABLE_REMOSAIC_CAPTURE_WITH_ROTATION
+		if ((GET_DEVICE_TYPE_BY_GRP(group->id) == FIMC_IS_DEVICE_SENSOR)
+			&& (device->sensor && !test_bit(FIMC_IS_SENSOR_FRONT_START, &device->sensor->state))) {
+			device->sensor->mode_chg_frame = NULL;
+
+			if (CHK_REMOSAIC_SCN(frame->shot->ctl.aa.captureIntent)) {
+				clear_bit(FIMC_IS_SENSOR_OTF_OUTPUT, &device->sensor->state);
+				device->sensor->mode_chg_frame = frame;
+			} else {
+				if (group->child)
+					set_bit(FIMC_IS_SENSOR_OTF_OUTPUT, &device->sensor->state);
 			}
 		}
 #endif
@@ -2434,47 +2468,55 @@ int fimc_is_group_buffer_queue(struct fimc_is_groupmgr *groupmgr,
 #ifdef CONFIG_COMPANION_DIRECT_USE
 	if (test_bit(FIMC_IS_SENSOR_PREPROCESSOR_AVAILABLE, &sensor_peri->peri_state)) {
 		/* PAF */
-		if (cis_data->companion_data.paf_stat_enable == false) {
-			frame->shot->uctl.companionUd.paf_mode = COMPANION_PAF_OFF;
+		if (cis_data->is_data.paf_stat_enable == false) {
+			frame->shot->uctl.isModeUd.paf_mode = CAMERA_PAF_OFF;
 		}
 
 		/* CAF */
-		if (cis_data->companion_data.caf_stat_enable == false) {
-			frame->shot->uctl.companionUd.caf_mode = COMPANION_CAF_OFF;
+		if (cis_data->is_data.caf_stat_enable == false) {
+			frame->shot->uctl.isModeUd.caf_mode = CAMERA_PAF_OFF;
 		}
 
 		/* WDR */
-		if (cis_data->companion_data.wdr_enable == false) {
-			frame->shot->uctl.companionUd.wdr_mode = COMPANION_WDR_OFF;
+		if (cis_data->is_data.wdr_enable == false) {
+			frame->shot->uctl.isModeUd.wdr_mode = CAMERA_WDR_OFF;
 		}
 	}
 #endif
 #if defined (USE_AP_PDAF)
 	/* PAF */
-	if ((cis_data->companion_data.paf_stat_enable == false) &&
+	if ((cis_data->is_data.paf_stat_enable == false) &&
 		(sensor_peri->cis.use_pdaf == true )) {
-		frame->shot->uctl.companionUd.paf_mode = COMPANION_PAF_OFF;
+		frame->shot->uctl.isModeUd.paf_mode = CAMERA_PAF_OFF;
 	}
 #else
-	frame->shot->uctl.companionUd.paf_mode = COMPANION_PAF_OFF;
+	frame->shot->uctl.isModeUd.paf_mode = CAMERA_PAF_OFF;
 #endif
+
+#if defined (USE_MS_PDAF)
+	if (sensor_peri->cis.use_pdaf) {
+		frame->shot->uctl.isModeUd.paf_mode  = CAMERA_PAF_ON;
+	} else {
+		frame->shot->uctl.isModeUd.paf_mode = CAMERA_PAF_OFF;
+	}
+#endif /* USE_MS_PDAF */
+
 #if defined(USE_SENSOR_WDR)
 	/* WDR */
-	if ((cis_data->companion_data.wdr_enable == false) &&
+	if ((cis_data->is_data.wdr_enable == false) &&
 		(sensor->position == SENSOR_POSITION_REAR)){
-		frame->shot->uctl.companionUd.wdr_mode = COMPANION_WDR_OFF;
+		frame->shot->uctl.isModeUd.wdr_mode = CAMERA_WDR_OFF;
 	}
 #else
 #ifdef USE_WDR_INTERFACE
-	if (frame->shot->uctl.companionUd.wdr_mode == COMPANION_WDR_ON) {
-		frame->shot->uctl.companionUd.wdr_mode = COMPANION_WDR_ON;
-	} else if (frame->shot->uctl.companionUd.wdr_mode == COMPANION_WDR_AUTO) {
-		frame->shot->uctl.companionUd.wdr_mode = COMPANION_WDR_AUTO;
-	} else {
-		frame->shot->uctl.companionUd.wdr_mode = COMPANION_WDR_OFF;
+	if ((frame->shot->uctl.isModeUd.wdr_mode != CAMERA_WDR_ON) &&
+		(frame->shot->uctl.isModeUd.wdr_mode != CAMERA_WDR_AUTO) &&
+		(frame->shot->uctl.isModeUd.wdr_mode != CAMERA_WDR_AUTO_LIKE))
+	{
+		frame->shot->uctl.isModeUd.wdr_mode = CAMERA_WDR_OFF;
 	}
 #else
-	frame->shot->uctl.companionUd.wdr_mode = COMPANION_WDR_OFF;
+	frame->shot->uctl.isModeUd.wdr_mode = CAMERA_WDR_OFF;
 #endif
 #endif
 	fimc_is_group_start_trigger(groupmgr, group, frame);
@@ -2581,11 +2623,11 @@ static int fimc_is_group_check_pre(struct fimc_is_groupmgr *groupmgr,
 		/* tailer */
 		fimc_is_gframe_group_head(group, &gframe);
 		if (unlikely(!gframe)) {
-			mgrerr("gframe is NULL3", device, group, frame);
-			fimc_is_stream_status(groupmgr, group_leader);
+			mgrerr("gframe is NULL1", device, group, frame);
 			fimc_is_gframe_print_free(gframemgr);
 			fimc_is_gframe_print_group(group_leader);
 			spin_unlock_irqrestore(&gframemgr->gframe_slock, flags);
+			fimc_is_stream_status(groupmgr, group_leader);
 			ret = -EINVAL;
 			goto p_err;
 		}
@@ -2613,10 +2655,10 @@ static int fimc_is_group_check_pre(struct fimc_is_groupmgr *groupmgr,
 		fimc_is_gframe_free_head(gframemgr, &gframe);
 		if (unlikely(!gframe)) {
 			mgerr("gframe is NULL2", device, group);
-			fimc_is_stream_status(groupmgr, group_leader);
 			fimc_is_gframe_print_free(gframemgr);
 			fimc_is_gframe_print_group(group_leader);
 			spin_unlock_irqrestore(&gframemgr->gframe_slock, flags);
+			fimc_is_stream_status(groupmgr, group_leader);
 			group->fcount -= frame->num_buffers;
 			ret = -EINVAL;
 			goto p_err;
@@ -2646,10 +2688,10 @@ static int fimc_is_group_check_pre(struct fimc_is_groupmgr *groupmgr,
 		fimc_is_gframe_group_head(group, &gframe);
 		if (unlikely(!gframe)) {
 			mgrerr("gframe is NULL3", device, group, frame);
-			fimc_is_stream_status(groupmgr, group_leader);
 			fimc_is_gframe_print_free(gframemgr);
 			fimc_is_gframe_print_group(group_leader);
 			spin_unlock_irqrestore(&gframemgr->gframe_slock, flags);
+			fimc_is_stream_status(groupmgr, group_leader);
 			ret = -EINVAL;
 			goto p_err;
 		}
@@ -2668,41 +2710,60 @@ static int fimc_is_group_check_pre(struct fimc_is_groupmgr *groupmgr,
 		fimc_is_gframe_s_info(gframe, group->slot, frame);
 		fimc_is_gframe_check(gprev, group, gnext, gframe, frame);
 	} else {
-		/* single */
-		if (atomic_read(&group->scount))
-			group->fcount += frame->num_buffers;
-		else
-			group->fcount++;
+#ifdef CHAIN_SKIP_GFRAME_FOR_VRA
+		if (group->id == GROUP_ID_VRA0) {
+			/* VRA: Skip gframe logic. */
+			struct fimc_is_crop *incrop
+				= (struct fimc_is_crop *)frame->shot_ext->node_group.leader.input.cropRegion;
+			struct fimc_is_subdev *subdev = &group->leader;
 
-		fimc_is_gframe_free_head(gframemgr, &gframe);
-		if (unlikely(!gframe)) {
-			mgerr("gframe is NULL4", device, group);
-			fimc_is_stream_status(groupmgr, group_leader);
-			fimc_is_gframe_print_free(gframemgr);
-			fimc_is_gframe_print_group(group_leader);
-			spin_unlock_irqrestore(&gframemgr->gframe_slock, flags);
-			ret = -EINVAL;
-			goto p_err;
-		}
+			if ((incrop->w * incrop->h) > (subdev->input.width * subdev->input.height)) {
+				mrwarn("the input size is invalid(%dx%d > %dx%d)", group, frame,
+						incrop->w, incrop->h,
+						subdev->input.width, subdev->input.height);
+				incrop->w = subdev->input.width;
+				incrop->h = subdev->input.height;
+			}
 
-		if (unlikely(!test_bit(FIMC_IS_ISCHAIN_REPROCESSING, &device->state) &&
-			(frame->fcount != group->fcount))) {
-			if (frame->fcount > group->fcount) {
-				mgwarn("shot mismatch(%d != %d)", device, group,
-					frame->fcount, group->fcount);
-				group->fcount = frame->fcount;
-			} else {
+			gframe = &dummy_gframe;
+		} else
+#endif
+		{
+			/* single */
+			if (atomic_read(&group->scount))
+				group->fcount += frame->num_buffers;
+			else
+				group->fcount++;
+
+			fimc_is_gframe_free_head(gframemgr, &gframe);
+			if (unlikely(!gframe)) {
+				mgerr("gframe is NULL4", device, group);
+				fimc_is_gframe_print_free(gframemgr);
+				fimc_is_gframe_print_group(group_leader);
 				spin_unlock_irqrestore(&gframemgr->gframe_slock, flags);
-				mgerr("shot mismatch(%d, %d)", device, group,
-					frame->fcount, group->fcount);
-				group->fcount -= frame->num_buffers;
+				fimc_is_stream_status(groupmgr, group_leader);
 				ret = -EINVAL;
 				goto p_err;
 			}
-		}
+			if (unlikely(!test_bit(FIMC_IS_ISCHAIN_REPROCESSING, &device->state) &&
+						(frame->fcount != group->fcount))) {
+				if (frame->fcount > group->fcount) {
+					mgwarn("shot mismatch(%d != %d)", device, group,
+							frame->fcount, group->fcount);
+					group->fcount = frame->fcount;
+				} else {
+					spin_unlock_irqrestore(&gframemgr->gframe_slock, flags);
+					mgerr("shot mismatch(%d, %d)", device, group,
+							frame->fcount, group->fcount);
+					group->fcount -= frame->num_buffers;
+					ret = -EINVAL;
+					goto p_err;
+				}
+			}
 
-		fimc_is_gframe_s_info(gframe, group->slot, frame);
-		fimc_is_gframe_check(gprev, group, gnext, gframe, frame);
+			fimc_is_gframe_s_info(gframe, group->slot, frame);
+			fimc_is_gframe_check(gprev, group, gnext, gframe, frame);
+		}
 	}
 
 	*result = gframe;
@@ -2781,8 +2842,12 @@ static int fimc_is_group_check_post(struct fimc_is_groupmgr *groupmgr,
 			}
 		}
 	} else {
-		/* single */
-		gframe->fcount = frame->fcount;
+#ifdef CHAIN_SKIP_GFRAME_FOR_VRA
+		/* VRA: Skip gframe logic. */
+		if (group->id != GROUP_ID_VRA0)
+#endif
+			/* single */
+			gframe->fcount = frame->fcount;
 	}
 
 	spin_unlock_irqrestore(&gframemgr->gframe_slock, flags);
@@ -2840,19 +2905,7 @@ int fimc_is_group_shot(struct fimc_is_groupmgr *groupmgr,
 	}
 	try_rdown = true;
 
-	if (device->sensor && !test_bit(FIMC_IS_SENSOR_FRONT_START, &device->sensor->state)
-		&& !test_bit(FIMC_IS_ISCHAIN_REPROCESSING, &device->state)) {
-#ifdef ENABLE_REMOSAIC_CAPTURE_WITH_ROTATION
-		if (CHK_REMOSAIC_SCN(frame->shot->ctl.aa.sceneMode)) {
-			clear_bit(FIMC_IS_SENSOR_OTF_OUTPUT, &device->sensor->state);
-			device->sensor->mode_chg_frame = frame;
-		} else {
-			if (group->child)
-				set_bit(FIMC_IS_SENSOR_OTF_OUTPUT, &device->sensor->state);
-
-			device->sensor->mode_chg_frame = NULL;
-		}
-#endif
+	if (device->sensor && !test_bit(FIMC_IS_SENSOR_FRONT_START, &device->sensor->state)) {
 		/*
 		 * this statement is execued only at initial.
 		 * automatic increase the frame count of sensor
@@ -3011,7 +3064,7 @@ p_skip_sync:
 			 * HACK: Happen to CSIS_ERR_DMA_ERR_DMAFIFO_FULL when remosaic capture
 			 * 4MB -> 16MB captreu setting to MIF MAX level when 16MB scenario
 			 */
-			if (frame->shot_ext->setfile == ISS_SUB_SCENARIO_FRONT_REMOSAIC_CAPTURE_WDR_AUTO) {
+			if (frame->shot_ext->setfile == ISS_SUB_SCENARIO_REMOSAIC_CAPTURE_WDR_AUTO) {
 				mif_qos = fimc_is_get_qos(core, FIMC_IS_DVFS_MIF, FIMC_IS_SN_MAX);
 				pm_qos_update_request(&exynos_isp_qos_mem, mif_qos);
 				info("[REMOSAIC]: setting to max MIF(%d)\n", mif_qos);
@@ -3132,6 +3185,14 @@ int fimc_is_group_done(struct fimc_is_groupmgr *groupmgr,
 				frame->shot->udm.ni.nextNextFrameNoiseIndex;
 		}
 
+#ifdef ENABLE_INIT_AWB
+		/* wb gain backup for initial AWB */
+		if (device->sensor && ((child == &device->group_isp) || (child->subdev[ENTRY_ISP])))
+			memcpy(device->sensor->last_wb, frame->shot->dm.color.gains,
+				sizeof(float) * WB_GAIN_COUNT);
+#endif
+
+#if !defined(FAST_FDAE)
 		if ((child == &device->group_vra) || (child->subdev[ENTRY_VRA])) {
 #ifdef ENABLE_FD_SW
 			fimc_is_vra_trigger(device, &group->leader, frame);
@@ -3140,6 +3201,7 @@ int fimc_is_group_done(struct fimc_is_groupmgr *groupmgr,
 			memcpy(&device->fdUd, &frame->shot->dm.stats,
 				sizeof(struct camera2_fd_uctl));
 		}
+#endif
 		child = child->child;
 	}
 #endif

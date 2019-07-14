@@ -35,7 +35,7 @@
 #define MAX_ACCEL_1G			8192
 #define SA_DYNAMIC_THRESHOLD		50 /* mg */
 
-#define LSM6DSL_FIFO_TEST_DEPTH		32
+#define LSM6DSL_FIFO_TEST_DEPTH		128
 
 /* Selftest: 90~1700mg @ 2G */
 #define LSM6DSL_ACC_MIN_ST              ((int)(90/0.061f))
@@ -50,10 +50,9 @@
 #define GYR_DA_RETRY_COUNT              5
 
 /* ZRL: 40dps @ 2000dps */
-#define LSM6DSL_GYR_MIN_ZRL             ((int)(-40/0.07f) - 1)
-#define LSM6DSL_GYR_MAX_ZRL             ((int)(40/0.07f) + 1)
-#define LSM6DSL_GYR_ZRL_DELTA           ((int)(6/0.07f) + 1)
-
+#define LSM6DSL_GYR_MIN_ZRL             (-572)
+#define LSM6DSL_GYR_MAX_ZRL             (572)
+#define LSM6DSL_GYR_ZRL_DELTA           72// 5dps @ FS2000dps
 #define LSM6DSL_DELAY_DEFAULT           200000000LL
 #define LSM6DSL_DELAY_MIN               5000000LL
 
@@ -295,7 +294,7 @@ struct lsm6dsl_data {
 	struct mutex bank_registers_lock;
 	const struct lsm6dsl_transfer_function *tf;
 	struct lsm6dsl_transfer_buffer tb;
-
+	struct notifier_block dump_nb;
 	int lsm6dsl_ldo_pin;
 };
 

@@ -400,29 +400,6 @@ error:
 	return value;
 }
 
-#if 0
-/* Function can be called from BH context */
-static u8 hip4_read_vif_peer_status(struct slsi_hip4 *hip, u16 vif, u16 peer)
-{
-	struct hip4_priv    *hip_priv = hip->hip_priv;
-	u32                 value;
-
-	read_lock_bh(&hip_priv->rw_scoreboard);
-	if (hip->hip_priv->version == 3 || hip->hip_priv->version == 4) {
-		value = *((u8 *)(hip->hip_priv->scbrd_base + ((vif*8) + FW_OWN_VIF)));
-		value = (value & (0x3 << (peer % 4)*0x2)) >> (peer % 4)*0x2;
-	} else {
-		SLSI_ERR_NODEV("Incorrect version\n");
-	}
-
-	/* Memory barrier when reading shared mailbox/memory */
-	smp_rmb();
-
-	read_unlock_bh(&hip_priv->rw_scoreboard);
-	return value;
-}
-#endif
-
 static void hip4_dump_dbg(struct slsi_hip4 *hip, struct mbulk *m, struct sk_buff *skb, struct scsc_service *service)
 {
 	unsigned int        i = 0;
@@ -444,10 +421,10 @@ static void hip4_dump_dbg(struct slsi_hip4 *hip, struct mbulk *m, struct sk_buff
 		if (scsc_mx_service_mif_ptr_to_addr(service, m, &ref))
 			return;
 		SLSI_ERR_NODEV("m: %p 0x%x\n", m, ref);
-		print_hex_dump(KERN_ERR, "mbulk ", DUMP_PREFIX_NONE, 16, 1, m, sizeof(struct mbulk), 0);
+		print_hex_dump(KERN_ERR, SCSC_PREFIX "mbulk ", DUMP_PREFIX_NONE, 16, 1, m, sizeof(struct mbulk), 0);
 	}
 	if (skb)
-		print_hex_dump(KERN_ERR, "skb   ", DUMP_PREFIX_NONE, 16, 1, skb->data, skb->len & 0xff, 0);
+		print_hex_dump(KERN_ERR, SCSC_PREFIX "skb   ", DUMP_PREFIX_NONE, 16, 1, skb->data, skb->len > 0xff ? 0xff : skb->len, 0);
 
 	SLSI_ERR_NODEV("time: wdt     %lld\n", ktime_to_ns(wdt));
 	SLSI_ERR_NODEV("time: send    %lld\n", ktime_to_ns(send));
@@ -623,7 +600,7 @@ static struct mbulk *hip4_skb_to_mbulk(struct hip4_priv *hip, struct sk_buff *sk
 }
 
 /* Transform mbulk to skb (fapi_signal + payload) */
-static struct sk_buff *hip4_mbulk_to_skb(struct scsc_service *service, struct mbulk *m, scsc_mifram_ref *to_free, bool cfm)
+static struct sk_buff *hip4_mbulk_to_skb(struct scsc_service *service, struct hip4_priv *hip_priv, struct mbulk *m, scsc_mifram_ref *to_free, bool atomic)
 {
 	struct slsi_skb_cb        *cb;
 	struct mbulk              *next_mbulk[MBULK_MAX_CHAIN];
@@ -681,7 +658,13 @@ static struct sk_buff *hip4_mbulk_to_skb(struct scsc_service *service, struct mb
 	}
 
 cont:
-	skb = alloc_skb(bytes_to_alloc, GFP_ATOMIC);
+	if (atomic)
+		skb = slsi_alloc_skb(bytes_to_alloc, GFP_ATOMIC);
+	else {
+		spin_unlock_bh(&hip_priv->rx_lock);
+		skb = slsi_alloc_skb(bytes_to_alloc, GFP_KERNEL);
+		spin_lock_bh(&hip_priv->rx_lock);
+	}
 	if (!skb) {
 		SLSI_ERR_NODEV("Error allocating skb\n");
 		return NULL;
@@ -695,8 +678,8 @@ cont:
 	p = mbulk_get_signal(m);
 	if (!p) {
 		SLSI_ERR_NODEV("No signal in Mbulk\n");
-		print_hex_dump(KERN_ERR, "mbulk ", DUMP_PREFIX_NONE, 16, 1, m, sizeof(struct mbulk), 0);
-		kfree_skb(skb);
+		print_hex_dump(KERN_ERR, SCSC_PREFIX "mbulk ", DUMP_PREFIX_NONE, 16, 1, m, sizeof(struct mbulk), 0);
+		slsi_kfree_skb(skb);
 		return NULL;
 	}
 	/* Remove 4Bytes offset coming from FW */
@@ -767,7 +750,6 @@ static void hip4_watchdog(unsigned long data)
 		return;
 
 	spin_lock_irqsave(&hip->hip_priv->watchdog_lock, flags);
-
 	if (!atomic_read(&hip->hip_priv->watchdog_timer_active))
 		goto exit;
 
@@ -779,10 +761,12 @@ static void hip4_watchdog(unsigned long data)
 		goto exit;
 	}
 
-	/* Check that wdt is actually > 1 HZ intr */
+	/* Check that wdt is > 1 HZ intr */
 	intr_ov = ktime_add_ms(intr_received, jiffies_to_msecs(HZ));
-	if (ktime_compare(intr_ov, wdt) > 0) {
+	if (!(ktime_compare(intr_ov, wdt) < 0)) {
 		wdt = ktime_set(0, 0);
+		/* Retrigger WDT to check flags again in the future */
+		mod_timer(&hip->hip_priv->watchdog, jiffies + HZ / 2);
 		goto exit;
 	}
 
@@ -871,7 +855,7 @@ static void hip4_wq(struct work_struct *data)
 	bool                    update = false;
 	bool			no_change = true;
 	u8                      retry;
-    bool                    rx_flowcontrol = false;
+	bool                    rx_flowcontrol = false;
 
 #if defined(CONFIG_SCSC_WLAN_HIP4_PROFILING) || defined(CONFIG_SCSC_WLAN_DEBUG)
 	int                     id;
@@ -881,14 +865,19 @@ static void hip4_wq(struct work_struct *data)
 		WARN_ON(1);
 		return;
 	}
-    if (slsi_check_rx_flowcontrol(sdev))
-        rx_flowcontrol = true;
+
 	service = sdev->service;
+
+	atomic_set(&hip->hip_priv->in_rx, 1);
+	if (slsi_check_rx_flowcontrol(sdev))
+		rx_flowcontrol = true;
+
+	atomic_set(&hip->hip_priv->in_rx, 2);
 
 #ifndef TASKLET
 	spin_lock_bh(&hip_priv->rx_lock);
 #endif
-	atomic_set(&hip->hip_priv->in_rx, 1);
+	atomic_set(&hip->hip_priv->in_rx, 3);
 	SCSC_HIP4_SAMPLER_INT(hip_priv->minor);
 
 	bh_init = ktime_get();
@@ -913,9 +902,8 @@ static void hip4_wq(struct work_struct *data)
 #endif
 		mem = scsc_mx_service_mif_addr_to_ptr(service, ref);
 		m = (struct mbulk *)mem;
-
 		if (!m) {
-			SLSI_ERR_NODEV("FB: Mbulk is NULL\n");
+			SLSI_ERR_NODEV("FB: Mbulk is NULL 0x%x\n", ref);
 			goto consume_fb_mbulk;
 		}
 		/* colour is defined as: */
@@ -957,6 +945,8 @@ consume_fb_mbulk:
 	if (update)
 		hip4_update_index(hip, HIP4_MIF_Q_FH_RFB, ridx, idx_r);
 
+	atomic_set(&hip->hip_priv->in_rx, 4);
+
 	idx_r = hip4_read_index(hip, HIP4_MIF_Q_TH_CTRL, ridx);
 	idx_w = hip4_read_index(hip, HIP4_MIF_Q_TH_CTRL, widx);
 	update = false;
@@ -984,9 +974,13 @@ consume_fb_mbulk:
 #endif
 		mem = scsc_mx_service_mif_addr_to_ptr(service, ref);
 		m = (struct mbulk *)(mem);
+		if (!m) {
+			SLSI_ERR_NODEV("Ctrl: Mbulk is NULL 0x%x\n", ref);
+			goto consume_ctl_mbulk;
+		}
 		/* Process Control Signal */
 
-		skb = hip4_mbulk_to_skb(service, m, to_free, false);
+		skb = hip4_mbulk_to_skb(service, hip_priv, m, to_free, true);
 		if (!skb) {
 			SLSI_ERR_NODEV("Ctrl: Error parsing skb\n");
 			hip4_dump_dbg(hip, m, skb, service);
@@ -996,11 +990,11 @@ consume_fb_mbulk:
 #ifdef CONFIG_SCSC_WLAN_DEBUG
 		if (m->flag & MBULK_F_WAKEUP) {
 			SLSI_INFO(sdev, "WIFI wakeup by MLME frame 0x%x:\n", fapi_get_sigid(skb));
-			SCSC_BIN_TAG_INFO(BIN_WIFI_CTRL_RX, skb->data, skb->len > 128 ? 128 : skb->len);
+			SCSC_BIN_TAG_INFO(BINARY, skb->data, skb->len > 128 ? 128 : skb->len);
 		}
 #else
 		if (m->flag & MBULK_F_WAKEUP)
-			SLSI_INFO(sdev, "WIFI wakeup by MLME frame 0x%x:\n", fapi_get_sigid(skb));
+			SLSI_INFO(sdev, "WIFI wakeup by MLME frame 0x%x\n", fapi_get_sigid(skb));
 #endif
 
 #if defined(CONFIG_SCSC_WLAN_HIP4_PROFILING) || defined(CONFIG_SCSC_WLAN_DEBUG)
@@ -1051,8 +1045,10 @@ consume_ctl_mbulk:
 	if (update)
 		hip4_update_index(hip, HIP4_MIF_Q_TH_CTRL, ridx, idx_r);
 
-    if (rx_flowcontrol)
-        goto skip_data_q;
+	if (rx_flowcontrol)
+		goto skip_data_q;
+
+	atomic_set(&hip->hip_priv->in_rx, 5);
 
 	idx_r = hip4_read_index(hip, HIP4_MIF_Q_TH_DAT, ridx);
 	idx_w = hip4_read_index(hip, HIP4_MIF_Q_TH_DAT, widx);
@@ -1081,7 +1077,12 @@ consume_ctl_mbulk:
 #endif
 		mem = scsc_mx_service_mif_addr_to_ptr(service, ref);
 		m = (struct mbulk *)(mem);
-		skb = hip4_mbulk_to_skb(service, m, to_free, false);
+		if (!m) {
+			SLSI_ERR_NODEV("Dat: Mbulk is NULL 0x%x\n", ref);
+			goto consume_dat_mbulk;
+		}
+
+		skb = hip4_mbulk_to_skb(service, hip_priv, m, to_free, true);
 		if (!skb) {
 			SLSI_ERR_NODEV("Dat: Error parsing skb\n");
 			hip4_dump_dbg(hip, m, skb, service);
@@ -1091,12 +1092,12 @@ consume_ctl_mbulk:
 #ifdef CONFIG_SCSC_WLAN_DEBUG
 		if (m->flag & MBULK_F_WAKEUP) {
 			SLSI_INFO(sdev, "WIFI wakeup by DATA frame:\n");
-			SCSC_BIN_TAG_INFO(BIN_WIFI_DATA_RX, skb->data, skb->len > 128 ? 128 : skb->len);
+			SCSC_BIN_TAG_INFO(BINARY, skb->data, skb->len > 128 ? 128 : skb->len);
 		}
 #else
 		if (m->flag & MBULK_F_WAKEUP) {
 			SLSI_INFO(sdev, "WIFI wakeup by DATA frame:\n");
-			SCSC_BIN_TAG_INFO(BIN_WIFI_DATA_RX, skb->data, fapi_get_siglen(skb) + ETH_HLEN);
+			SCSC_BIN_TAG_INFO(BINARY, skb->data, fapi_get_siglen(skb) + ETH_HLEN);
 		}
 #endif
 #ifdef CONFIG_SCSC_WLAN_DEBUG
@@ -1142,7 +1143,7 @@ consume_dat_mbulk:
 	if (no_change)
 		atomic_inc(&hip->hip_priv->stats.spurious_irqs);
 
-    skip_data_q:
+skip_data_q:
 	if (!atomic_read(&hip->hip_priv->closing)) {
 		/* Reset status variable. DO THIS BEFORE UNMASKING!!!*/
 		atomic_set(&hip->hip_priv->watchdog_timer_active, 0);
@@ -1186,19 +1187,31 @@ static void hip4_irq_handler(int irq, void *data)
 		SCSC_WLOG_WAKELOCK(WLOG_LAZY, WL_TAKEN, "hip4_wake_lock", WL_REASON_RX);
 	}
 
-	atomic_set(&hip->hip_priv->watchdog_timer_active, 1);
-	mod_timer(&hip->hip_priv->watchdog, jiffies + HZ);
+	/* if wd timer is active system might be in trouble as it should be
+	 * cleared in the BH. Ignore updating the timer
+	 */
+	if (!atomic_read(&hip->hip_priv->watchdog_timer_active)) {
+		atomic_set(&hip->hip_priv->watchdog_timer_active, 1);
+		mod_timer(&hip->hip_priv->watchdog, jiffies + HZ);
+	} else {
+		SLSI_ERR_NODEV("INT triggered while WDT is active\n");
+		SLSI_ERR_NODEV("bh_init %lld\n", ktime_to_ns(bh_init));
+		SLSI_ERR_NODEV("bh_end  %lld\n", ktime_to_ns(bh_end));
+#ifndef TASKLET
+		SLSI_ERR_NODEV("hip4_wq work_busy %d\n", work_busy(&hip->hip_priv->intr_wq));
+#endif
+		SLSI_ERR_NODEV("hip4_priv->in_rx %d\n", atomic_read(&hip->hip_priv->in_rx));
+	}
 	/* If system is not in suspend, mask interrupt to avoid interrupt storm and let BH run */
 	if (!atomic_read(&hip->hip_priv->in_suspend)) {
 		scsc_service_mifintrbit_bit_mask(sdev->service, hip->hip_priv->rx_intr_tohost);
 		hip->hip_priv->storm_count = 0;
 	} else if (++hip->hip_priv->storm_count >= MAX_STORM) {
 		/* A MAX_STORM number of interrupts has been received
-		 * when platform was in suspend, force the resume to unblock
-		 * the suspend state and avoid the interrupt storm by masking
-		 * again the to_host interrupt.
+		 * when platform was in suspend. This indicates FW interrupt activity
+		 * that should resume the hip4, so it is safe to mask to avoid
+		 * interrupt storm.
 		 */
-		hip4_resume(hip);
 		hip->hip_priv->storm_count = 0;
 		scsc_service_mifintrbit_bit_mask(sdev->service, hip->hip_priv->rx_intr_tohost);
 	}
@@ -1223,6 +1236,9 @@ int hip4_init(struct slsi_hip4 *hip)
 	scsc_mifram_ref         ref, ref_scoreboard;
 	int                     i;
 	int                     ret;
+	u32                     total_mib_len;
+	u32                     mib_file_offset;
+
 
 	if (!sdev || !sdev->service)
 		return -EINVAL;
@@ -1322,6 +1338,10 @@ int hip4_init(struct slsi_hip4 *hip)
 	if (scsc_mx_service_mif_ptr_to_addr(service, &hip_control->scoreboard, &ref_scoreboard))
 		return -EFAULT;
 
+	/* Calculate total space used by wlan*.hcf files */
+	for (i = 0, total_mib_len = 0; i < SLSI_WLAN_MAX_MIB_FILE; i++)
+		total_mib_len += sdev->mib[i].mib_len;
+
 	/* Initialize hip_control table for version 4 */
 	/***** VERSION 4 *******/
 	hip_control->config_v4.magic_number = 0xcaba0401;
@@ -1336,15 +1356,26 @@ int hip4_init(struct slsi_hip4 *hip)
 	/* Copy MIB content in shared memory if any */
 	/* Clear the area to avoid picking up old values */
 	memset(hip_ptr + IMG_MGR_SEC_WLAN_MIB_OFFSET, 0, IMG_MGR_SEC_WLAN_MIB_SIZE);
-	if (sdev->mib_len > IMG_MGR_SEC_WLAN_MIB_SIZE) {
-		SLSI_ERR_NODEV("MIB size (%d), is bigger than the MIB AREA (%d). Aborting memcpy\n", sdev->mib_len, IMG_MGR_SEC_WLAN_MIB_SIZE);
+
+	if (total_mib_len > IMG_MGR_SEC_WLAN_MIB_SIZE) {
+		SLSI_ERR_NODEV("MIB size (%d), is bigger than the MIB AREA (%d). Aborting memcpy\n", total_mib_len, IMG_MGR_SEC_WLAN_MIB_SIZE);
 		hip_control->config_v4.mib_loc      = 0;
 		hip_control->config_v4.mib_sz       = 0;
-	} else if (sdev->mib_len) {
-		SLSI_INFO_NODEV("Loading MIB into shared memory, size (%d)\n", sdev->mib_len);
-		memcpy((u8 *)hip_ptr + IMG_MGR_SEC_WLAN_MIB_OFFSET, sdev->mib_data, sdev->mib_len);
+		total_mib_len = 0;
+	} else if (total_mib_len) {
+		SLSI_INFO_NODEV("Loading MIB into shared memory, size (%d)\n", total_mib_len);
+		/* Load each MIB file into shared DRAM region */
+		for (i = 0, mib_file_offset = 0;
+		     i < SLSI_WLAN_MAX_MIB_FILE;
+		     i++) {
+			SLSI_INFO_NODEV("Loading MIB %d into shared memory, offset (%d), size (%d), total (%d)\n", i, mib_file_offset, sdev->mib[i].mib_len, total_mib_len);
+			if (sdev->mib[i].mib_len) {
+				memcpy((u8 *)hip_ptr + IMG_MGR_SEC_WLAN_MIB_OFFSET + mib_file_offset, sdev->mib[i].mib_data, sdev->mib[i].mib_len);
+				mib_file_offset += sdev->mib[i].mib_len;
+			}
+		}
 		hip_control->config_v4.mib_loc      = hip->hip_ref + IMG_MGR_SEC_WLAN_MIB_OFFSET;
-		hip_control->config_v4.mib_sz       = sdev->mib_len;
+		hip_control->config_v4.mib_sz       = total_mib_len;
 	} else {
 		hip_control->config_v4.mib_loc      = 0;
 		hip_control->config_v4.mib_sz       = 0;
@@ -1362,9 +1393,9 @@ int hip4_init(struct slsi_hip4 *hip)
 			return -EFAULT;
 		hip_control->config_v4.q_loc[i] = (u32)ref;
 	}
-	/***** END VERSION 2 *******/
+	/***** END VERSION 4 *******/
 
-	/* Initialize hip_control table for version 2 */
+	/* Initialize hip_control table for version 3 */
 	/***** VERSION 3 *******/
 	hip_control->config_v3.magic_number = 0xcaba0401;
 	hip_control->config_v3.hip_config_ver = 3;
@@ -1374,18 +1405,29 @@ int hip4_init(struct slsi_hip4 *hip)
 	hip_control->config_v3.host_buf_sz  = IMG_MGR_SEC_WLAN_TX_SIZE;
 	hip_control->config_v3.fw_buf_loc   = hip->hip_ref + IMG_MGR_SEC_WLAN_RX_OFFSET;
 	hip_control->config_v3.fw_buf_sz    = IMG_MGR_SEC_WLAN_RX_SIZE;
+
 	/* Copy MIB content in shared memory if any */
 	/* Clear the area to avoid picking up old values */
 	memset(hip_ptr + IMG_MGR_SEC_WLAN_MIB_OFFSET, 0, IMG_MGR_SEC_WLAN_MIB_SIZE);
-	if (sdev->mib_len > IMG_MGR_SEC_WLAN_MIB_SIZE) {
-		SLSI_ERR_NODEV("MIB size (%d), is bigger than the MIB AREA (%d). Aborting memcpy\n", sdev->mib_len, IMG_MGR_SEC_WLAN_MIB_SIZE);
+
+	if (total_mib_len > IMG_MGR_SEC_WLAN_MIB_SIZE) {
+		SLSI_ERR_NODEV("MIB size (%d), is bigger than the MIB AREA (%d). Aborting memcpy\n", total_mib_len, IMG_MGR_SEC_WLAN_MIB_SIZE);
 		hip_control->config_v3.mib_loc      = 0;
 		hip_control->config_v3.mib_sz       = 0;
-	} else if (sdev->mib_len) {
-		SLSI_INFO_NODEV("Loading MIB into shared memory, size (%d)\n", sdev->mib_len);
-		memcpy((u8 *)hip_ptr + IMG_MGR_SEC_WLAN_MIB_OFFSET, sdev->mib_data, sdev->mib_len);
+	} else if (total_mib_len) {
+		SLSI_INFO_NODEV("Loading MIB into shared memory, size (%d)\n", total_mib_len);
+		/* Load each MIB file into shared DRAM region */
+		for (i = 0, mib_file_offset = 0;
+		     i < SLSI_WLAN_MAX_MIB_FILE;
+		     i++) {
+			SLSI_INFO_NODEV("Loading MIB %d into shared memory, offset (%d), size (%d), total (%d)\n", i, mib_file_offset, sdev->mib[i].mib_len, total_mib_len);
+			if (sdev->mib[i].mib_len) {
+				memcpy((u8 *)hip_ptr + IMG_MGR_SEC_WLAN_MIB_OFFSET + mib_file_offset, sdev->mib[i].mib_data, sdev->mib[i].mib_len);
+				mib_file_offset += sdev->mib[i].mib_len;
+			}
+		}
 		hip_control->config_v3.mib_loc      = hip->hip_ref + IMG_MGR_SEC_WLAN_MIB_OFFSET;
-		hip_control->config_v3.mib_sz       = sdev->mib_len;
+		hip_control->config_v3.mib_sz       = total_mib_len;
 	} else {
 		hip_control->config_v3.mib_loc      = 0;
 		hip_control->config_v3.mib_sz       = 0;
@@ -1447,6 +1489,15 @@ int hip4_init(struct slsi_hip4 *hip)
 	wake_lock_init(&hip->hip_priv->hip4_wake_lock, WAKE_LOCK_SUSPEND, "hip4_wake_lock");
 
 	return 0;
+}
+
+/**
+ * This function returns the number of free slots available to
+ * transmit control packet.
+ */
+int hip4_free_ctrl_slots_count(struct slsi_hip4 *hip)
+{
+	return mbulk_pool_get_free_count(MBULK_CLASS_FROM_HOST_CTL);
 }
 
 /**
@@ -1630,6 +1681,9 @@ void hip4_suspend(struct slsi_hip4 *hip)
 /* TH interrupts can be masked/unmasked */
 void hip4_resume(struct slsi_hip4 *hip)
 {
+	if (!hip || !hip->hip_priv)
+		return;
+
 	atomic_set(&hip->hip_priv->in_suspend, 0);
 }
 

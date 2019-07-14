@@ -9,7 +9,9 @@ obj-$(CONFIG_USE_DIRECT_IS_CONTROL) += module_framework/ \
 					module_framework/modules/ \
 					module_framework/cis/ \
 					module_framework/actuator/ \
-					module_framework/flash/
+					module_framework/flash/ \
+					module_framework/pdp/ \
+					module_framework/iris/
 
 obj-$(CONFIG_CAMERA_FPGA_DPHY) += module_framework/dphy/
 

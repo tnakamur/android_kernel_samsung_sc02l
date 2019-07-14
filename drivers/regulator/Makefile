@@ -84,6 +84,7 @@ obj-$(CONFIG_REGULATOR_S2MPS17) += s2mps17.o s2mps17_powermeter.o
 obj-$(CONFIG_REGULATOR_S2MPU07) += s2mpu07.o
 obj-$(CONFIG_REGULATOR_S2MPU08) += s2mpu08.o
 obj-$(CONFIG_REGULATOR_S2MPB02) += s2mpb02-regulator.o
+obj-$(CONFIG_REGULATOR_S2MPB03) += s2mpb03.o
 obj-$(CONFIG_REGULATOR_S2DOS03) += s2dos03.o
 obj-$(CONFIG_REGULATOR_S5M8767) += s5m8767.o
 obj-$(CONFIG_REGULATOR_SKY81452) += sky81452-regulator.o

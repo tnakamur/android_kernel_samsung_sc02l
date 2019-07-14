@@ -37,6 +37,9 @@
 #if defined(CONFIG_LEDS_S2MU005_FLASH)
 #include <linux/leds-s2mu005.h>
 #endif
+#if defined(CONFIG_LEDS_RT8547)
+#include <linux/leds-rt8547.h>
+#endif
 
 extern int fimc_is_create_sysfs(struct fimc_is_core *core);
 extern bool crc32_check;
@@ -50,10 +53,10 @@ extern bool crc32_check_rear3;
 extern bool crc32_header_check_rear3;
 
 static u32  rear_sensor_id;
-static u32  rear_second_sensor_id;
-static u32  rear_3rd_sensor_id;
+static u32  rear2_sensor_id;
+static u32  rear3_sensor_id;
 static u32  front_sensor_id;
-static u32  front_second_sensor_id;
+static u32  front2_sensor_id;
 static bool check_sensor_vendor;
 static bool skip_cal_loading;
 static bool use_ois_hsi2c;
@@ -315,9 +318,9 @@ int fimc_is_vender_probe(struct fimc_is_vender *vender)
 
 	specific->rear_sensor_id = rear_sensor_id;
 	specific->front_sensor_id = front_sensor_id;
-	specific->rear_second_sensor_id = rear_second_sensor_id;
-	specific->front_second_sensor_id = front_second_sensor_id;
-	specific->rear_3rd_sensor_id = rear_3rd_sensor_id;
+	specific->rear2_sensor_id = rear2_sensor_id;
+	specific->front2_sensor_id = front2_sensor_id;
+	specific->rear3_sensor_id = rear3_sensor_id;
 	specific->check_sensor_vendor = check_sensor_vendor;
 	specific->use_ois = use_ois;
 	specific->use_ois_hsi2c = use_ois_hsi2c;
@@ -350,23 +353,36 @@ p_err:
 }
 
 #ifdef CAMERA_SYSFS_V2
+/***
+ * parse_sysfs_caminfo:
+ *  store caminfo items to cam_infos[] indexed with position property. 
+ *  If the property doesn't exist, the camera_num is used as index 
+ *  for backwards compatiblility.
+ */
 static int parse_sysfs_caminfo(struct device_node *np,
 				struct fimc_is_cam_info *cam_infos, int camera_num)
 {
 	u32 temp;
+	u32 position;
 	char *pprop;
 
-	DT_READ_U32(np, "isp", cam_infos[camera_num].isp);
-	DT_READ_U32(np, "cal_memory", cam_infos[camera_num].cal_memory);
-	DT_READ_U32(np, "read_version", cam_infos[camera_num].read_version);
-	DT_READ_U32(np, "core_voltage", cam_infos[camera_num].core_voltage);
-	DT_READ_U32(np, "upgrade", cam_infos[camera_num].upgrade);
-	DT_READ_U32(np, "fw_write", cam_infos[camera_num].fw_write);
-	DT_READ_U32(np, "fw_dump", cam_infos[camera_num].fw_dump);
-	DT_READ_U32(np, "companion", cam_infos[camera_num].companion);
-	DT_READ_U32(np, "ois", cam_infos[camera_num].ois);
-	DT_READ_U32(np, "valid", cam_infos[camera_num].valid);
-	DT_READ_U32(np, "dual_open", cam_infos[camera_num].dual_open);
+	DT_READ_U32_DEFAULT(np, "position", position, camera_num);
+	if (position >= CAM_INFO_MAX) {
+		probe_err("invalid postion %u for camera info", position);
+		return -EOVERFLOW;
+	}
+
+	DT_READ_U32(np, "isp", cam_infos[position].isp);
+	DT_READ_U32(np, "cal_memory", cam_infos[position].cal_memory);
+	DT_READ_U32(np, "read_version", cam_infos[position].read_version);
+	DT_READ_U32(np, "core_voltage", cam_infos[position].core_voltage);
+	DT_READ_U32(np, "upgrade", cam_infos[position].upgrade);
+	DT_READ_U32(np, "fw_write", cam_infos[position].fw_write);
+	DT_READ_U32(np, "fw_dump", cam_infos[position].fw_dump);
+	DT_READ_U32(np, "companion", cam_infos[position].companion);
+	DT_READ_U32(np, "ois", cam_infos[position].ois);
+	DT_READ_U32(np, "valid", cam_infos[position].valid);
+	DT_READ_U32(np, "dual_open", cam_infos[position].dual_open);
 
 	return 0;
 }
@@ -394,19 +410,19 @@ int fimc_is_vender_dt(struct device_node *np)
 		probe_err("front_sensor_id read is fail(%d)", ret);
 	}
 
-	ret = of_property_read_u32(np, "rear_second_sensor_id", &rear_second_sensor_id);
+	ret = of_property_read_u32(np, "rear2_sensor_id", &rear2_sensor_id);
 	if (ret) {
-		probe_err("rear_second_sensor_id read is fail(%d)", ret);
+		probe_err("rear2_sensor_id read is fail(%d)", ret);
 	}
 
-	ret = of_property_read_u32(np, "front_second_sensor_id", &front_second_sensor_id);
+	ret = of_property_read_u32(np, "front2_sensor_id", &front2_sensor_id);
 	if (ret) {
-		probe_err("front_second_sensor_id read is fail(%d)", ret);
+		probe_err("front2_sensor_id read is fail(%d)", ret);
 	}
 
-	ret = of_property_read_u32(np, "rear_3rd_sensor_id", &rear_3rd_sensor_id);
+	ret = of_property_read_u32(np, "rear3_sensor_id", &rear3_sensor_id);
 	if (ret) {
-		probe_err("rear_3rd_sensor_id read is fail(%d)", ret);
+		probe_err("rear3_sensor_id read is fail(%d)", ret);
 	}
 
 #ifdef CONFIG_SECURE_CAMERA_USE
@@ -1809,6 +1825,8 @@ int fimc_is_vender_set_torch(u32 aeflashMode, u32 frontFlashMode)
 	case AA_FLASHMODE_ON_ALWAYS: /*TORCH(MOVIE) mode*/
 #if defined(CONFIG_LEDS_S2MU005_FLASH)
 		s2mu005_led_mode_ctrl(S2MU005_FLED_MODE_MOVIE);
+#elif defined(CONFIG_LEDS_RT8547)
+		rt8547_led_mode_ctrl(RT8547_ENABLE_MOVIE_MODE);
 #endif
 		break;
 	case AA_FLASHMODE_START: /*Pre flash mode*/
@@ -1816,13 +1834,20 @@ int fimc_is_vender_set_torch(u32 aeflashMode, u32 frontFlashMode)
 #if defined(CONFIG_LEDS_S2MU005_FLASH) && defined(CONFIG_LEDS_SUPPORT_FRONT_FLASH)
 		if(frontFlashMode == CAM2_FLASH_MODE_LCD)
 			s2mu005_led_mode_ctrl(S2MU005_FLED_MODE_FLASH);
+#elif defined(CONFIG_LEDS_RT8547)
+		rt8547_led_mode_ctrl(RT8547_ENABLE_PRE_FLASH_MODE);
 #endif
 		break;
 	case AA_FLASHMODE_CAPTURE: /*Main flash mode*/
+#if defined(CONFIG_LEDS_RT8547)
+		rt8547_led_mode_ctrl(RT8547_ENABLE_FLASH_MODE);
+#endif
 		break;
 	case AA_FLASHMODE_OFF: /*OFF mode*/
 #if defined(CONFIG_LEDS_S2MU005_FLASH)
 		s2mu005_led_mode_ctrl(S2MU005_FLED_MODE_OFF);
+#elif defined(CONFIG_LEDS_RT8547)
+		rt8547_led_mode_ctrl(RT8547_DISABLES_MOVIE_FLASH_MODE);
 #endif
 		break;
 	default:
@@ -1844,6 +1869,8 @@ int fimc_is_vender_set_torch(u32 aeflashMode)
 		s2mpb02_set_torch_current(true);
 #elif defined(CONFIG_LEDS_S2MU005_FLASH)
 		s2mu005_led_mode_ctrl(S2MU005_FLED_MODE_MOVIE);
+#elif defined(CONFIG_LEDS_RT8547)
+		rt8547_led_mode_ctrl(RT8547_ENABLE_MOVIE_MODE);
 #endif
 		break;
 	case AA_FLASHMODE_START: /*Pre flash mode*/
@@ -1854,15 +1881,22 @@ int fimc_is_vender_set_torch(u32 aeflashMode)
 #endif
 #if defined(CONFIG_TORCH_CURRENT_CHANGE_SUPPORT) && defined(CONFIG_LEDS_S2MPB02)
 		s2mpb02_set_torch_current(false);
+#elif defined(CONFIG_LEDS_RT8547)
+		rt8547_led_mode_ctrl(RT8547_ENABLE_PRE_FLASH_MODE);
 #endif
 		break;
 	case AA_FLASHMODE_CAPTURE: /*Main flash mode*/
+#if defined(CONFIG_LEDS_RT8547)
+		rt8547_led_mode_ctrl(RT8547_ENABLE_FLASH_MODE);
+#endif
 		break;
 	case AA_FLASHMODE_OFF: /*OFF mode*/
 #ifdef CONFIG_LEDS_SKY81296
 		sky81296_torch_ctrl(0);
 #elif defined(CONFIG_LEDS_S2MU005_FLASH)
 		s2mu005_led_mode_ctrl(S2MU005_FLED_MODE_OFF);
+#elif defined(CONFIG_LEDS_RT8547)
+		rt8547_led_mode_ctrl(RT8547_DISABLES_MOVIE_FLASH_MODE);
 #endif
 		break;
 	default:
@@ -1897,7 +1931,11 @@ int fimc_is_vender_video_s_ctrl(struct v4l2_control *ctrl,
 		captureIntent = (value >> 16) & 0x0000FFFF;
 		if (captureIntent == AA_CAPTURE_INTENT_STILL_CAPTURE_DEBLUR_DYNAMIC_SHOT
 			|| captureIntent == AA_CAPTURE_INTENT_STILL_CAPTURE_OIS_DYNAMIC_SHOT
-			|| captureIntent == AA_CAPTURE_INTENT_STILL_CAPTURE_EXPOSURE_DYNAMIC_SHOT) {
+			|| captureIntent == AA_CAPTURE_INTENT_STILL_CAPTURE_EXPOSURE_DYNAMIC_SHOT
+			|| captureIntent == AA_CAPTURE_INTENT_STILL_CAPTURE_MFHDR_DYNAMIC_SHOT
+			|| captureIntent == AA_CAPTURE_INTENT_STILL_CAPTURE_LLHDR_DYNAMIC_SHOT
+			|| captureIntent == AA_CAPTURE_INTENT_STILL_CAPTURE_SUPER_NIGHT_SHOT_HANDHELD
+			|| captureIntent == AA_CAPTURE_INTENT_STILL_CAPTURE_SUPER_NIGHT_SHOT_TRIPOD) {
 			captureCount = value & 0x0000FFFF;
 		} else {
 			captureIntent = ctrl->value;
@@ -1971,17 +2009,17 @@ bool fimc_is_vender_wdr_mode_on(void *cis_data)
 {
 	bool ret = false;
 #ifndef USE_WDR_INTERFACE
-	ret = (((cis_shared_data *)cis_data)->companion_data.wdr_mode != COMPANION_WDR_OFF ? true : false);
+	ret = (((cis_shared_data *)cis_data)->is_data.wdr_mode != CAMERA_WDR_OFF ? true : false);
 #endif
 	return ret;
 }
 
 bool fimc_is_vender_enable_wdr(void *cis_data)
 {
-	return (((cis_shared_data *)cis_data)->companion_data.wdr_enable);
+	return (((cis_shared_data *)cis_data)->is_data.wdr_enable);
 }
 
 int fimc_is_vender_fsync_mode_on(void *cis_data)
 {
-	return (((cis_shared_data *)cis_data)->companion_data.masterCam);
+	return (((cis_shared_data *)cis_data)->is_data.masterCamera);
 }

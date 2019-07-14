@@ -123,27 +123,42 @@ static int s2mu004_read_reg(struct i2c_client *client, int reg, u8 *buf)
 
 static void s2mu004_fg_test_read(struct i2c_client *client)
 {
+	static int reg_list[] = {
+		0x03, 0x0E, 0x0F, 0x10, 0x11, 0x1E, 0x1F, 0x21, 0x24, 0x25,
+		0x26, 0x27, 0x44, 0x45, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
+		0x4E, 0x4F, 0x54, 0x55, 0x56, 0x57
+	};
 	u8 data;
 	char str[1016] = {0,};
-	int i;
+	int i = 0, reg_list_size = 0;
 
-	/* address 0x00 ~ 0x1f */
-	for (i = 0x0; i <= 0x1F; i++) {
-		s2mu004_read_reg_byte(client, i, &data);
-		sprintf(str+strlen(str), "0x%02x:0x%02x, ", i, data);
+	reg_list_size = ARRAY_SIZE(reg_list);
+	for (i = 0; i < reg_list_size; i++) {
+		s2mu004_read_reg_byte(client, reg_list[i], &data);
+		sprintf(str+strlen(str), "0x%02x:0x%02x, ", reg_list[i], data);
 	}
-	
-	/* address 0x25 */
-	s2mu004_read_reg_byte(client, 0x25, &data);
-	sprintf(str+strlen(str),"0x25:0x%02x, ",data);
-
-	/* address 0x27 */
-	s2mu004_read_reg_byte(client, 0x27, &data);
-	sprintf(str+strlen(str),"0x27:0x%02x, ",data);
 
 	/* print buffer */
 	pr_info("[FG]%s: %s\n", __func__, str);
 }
+
+#if defined(CONFIG_S2MU004_MODE_CHANGE_BY_TOPOFF)
+int check_current_level(struct s2mu004_fuelgauge_data *fuelgauge)
+{
+	int ret_val = 500;
+	int temp = 0;
+
+	if (fuelgauge->cable_type == SEC_BATTERY_CABLE_USB) {
+		return ret_val;
+	}
+
+	/* topoff current * 1.6 except USB */
+	temp = fuelgauge->topoff_current * 16;
+	ret_val = temp / 10;
+
+	return ret_val;
+}
+#endif
 
 static void WA_0_issue_at_init(struct s2mu004_fuelgauge_data *fuelgauge)
 {
@@ -442,6 +457,10 @@ static void s2mu004_reset_fg(struct s2mu004_fuelgauge_data *fuelgauge)
 		fuelgauge->age_data_info[fuelgauge->fg_age_step].batcap[2]);
 	s2mu004_write_reg_byte(fuelgauge->i2c, 0x11,
 		fuelgauge->age_data_info[fuelgauge->fg_age_step].batcap[3]);
+#if defined(CONFIG_S2MU004_MODE_CHANGE_BY_TOPOFF)
+	s2mu004_write_reg_byte(fuelgauge->i2c, 0x13,
+		fuelgauge->age_data_info[fuelgauge->fg_age_step].volt_mode_tunning);
+#endif
 
 	for (i = 0x92; i <= 0xe9; i++) {
 		s2mu004_write_reg_byte(fuelgauge->i2c, i,
@@ -862,6 +881,20 @@ static int s2mu004_get_rawsoc(struct s2mu004_fuelgauge_data *fuelgauge)
 	psy_do_property("battery", get, POWER_SUPPLY_PROP_CAPACITY, value);
 	dev_info(&fuelgauge->i2c->dev, "%s: UI SOC = %d\n", __func__, value.intval);
 
+#if defined(CONFIG_S2MU004_MODE_CHANGE_BY_TOPOFF)
+	if (fuelgauge->is_charging == true) {
+		if ((value.intval >= 98) ||
+		((avg_vbat > float_voltage) && (avg_current < check_current_level(fuelgauge)))) {
+			if (fuelgauge->mode == CURRENT_MODE) { /* switch to VOLTAGE_MODE */
+				fuelgauge->mode = HIGH_SOC_VOLTAGE_MODE;
+
+				s2mu004_write_reg_byte(fuelgauge->i2c, 0x4A, 0xFF);
+
+				dev_info(&fuelgauge->i2c->dev, "%s: FG is in high soc voltage mode\n", __func__);
+			}
+		}
+	} else if (avg_current < -50 || (avg_current >= (check_current_level(fuelgauge) + 50))) {
+#else
 	if ((value.intval >= 98) ||
 		((fuelgauge->is_charging == true) &&
 		(avg_vbat > float_voltage) && avg_current < 500)) {
@@ -875,6 +908,7 @@ static int s2mu004_get_rawsoc(struct s2mu004_fuelgauge_data *fuelgauge)
 	}
 	else if (((avg_current > 550) && (value.intval < 97)) ||
 				((avg_current < 10) && (value.intval < 97))) {
+#endif
 		if (fuelgauge->mode == HIGH_SOC_VOLTAGE_MODE) {
 			fuelgauge->mode = CURRENT_MODE;
 
@@ -1396,6 +1430,9 @@ static int s2mu004_fg_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_STATUS:
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
 		return -ENODATA;
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+			val->intval = fuelgauge->pdata->capacity_full * fuelgauge->raw_capacity;
+			break;
 	case POWER_SUPPLY_PROP_ENERGY_NOW:
 		switch (val->intval) {
 		case SEC_BATTERY_CAPACITY_DESIGNED:
@@ -1466,6 +1503,7 @@ static int s2mu004_fg_get_property(struct power_supply *psy,
 			 */
 			if (val->intval > 1000)
 				val->intval = 1000;
+			fuelgauge->raw_capacity = val->intval;
 			if (val->intval < 0)
 				val->intval = 0;
 
@@ -1573,6 +1611,10 @@ static int s2mu004_fg_set_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_STATUS:
+#if defined(CONFIG_BATTERY_AGE_FORECAST)
+		if (val->intval == POWER_SUPPLY_STATUS_FULL)
+			s2mu004_fg_aging_check(fuelgauge, fuelgauge->change_step);
+#endif
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
 		if (fuelgauge->pdata->capacity_calculation_type &
@@ -1626,6 +1668,11 @@ static int s2mu004_fg_set_property(struct power_supply *psy,
 		else
 			s2mu004_write_reg_byte(fuelgauge->i2c, 0x41, 0x04); /* charger end */
 		break;
+#if defined(CONFIG_S2MU004_MODE_CHANGE_BY_TOPOFF)
+	case POWER_SUPPLY_PROP_CURRENT_FULL:
+		fuelgauge->topoff_current = val->intval;
+		break;
+#endif
 	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
 		switch (ext_psp) {
 		case POWER_SUPPLY_EXT_PROP_INBAT_VOLTAGE_FGSRC_SWITCHING:
@@ -1663,7 +1710,7 @@ static int s2mu004_fg_set_property(struct power_supply *psy,
 			break;
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 		case POWER_SUPPLY_EXT_PROP_UPDATE_BATTERY_DATA:
-			s2mu004_fg_aging_check(fuelgauge, val->intval);
+			fuelgauge->change_step = val->intval;
 			break;
 #endif
 		default:
@@ -1815,6 +1862,21 @@ static int s2mu004_fuelgauge_parse_dt(struct s2mu004_fuelgauge_data *fuelgauge)
 		pr_info("%s : SW VBAT_L recovery (%d)mV\n",
 			__func__, fuelgauge->sw_vbat_l_recovery_vol);
 
+#if defined(CONFIG_S2MU004_MODE_CHANGE_BY_TOPOFF)
+		/* get topoff info */
+		np = of_find_node_by_name(NULL, "cable-info");
+		if (!np) {
+			pr_err("%s np NULL\n", __func__);
+		} else {
+			ret = of_property_read_u32(np, "full_check_current_1st",
+					&fuelgauge->topoff_current);
+			if (ret < 0) {
+				pr_err("%s fail to get topoff current %d\n", __func__, ret);
+				fuelgauge->topoff_current = 500;
+			}
+		}
+#endif
+
 		/* get battery_params node */
 		np = of_find_node_by_name(NULL, "battery_params");
 		if (!np) {
@@ -1864,6 +1926,17 @@ static int s2mu004_fuelgauge_parse_dt(struct s2mu004_fuelgauge_data *fuelgauge)
 				__func__, fuelgauge->fg_num_age_step);
 
 			for (i = 0; i < fuelgauge->fg_num_age_step; i++) {
+#if defined(CONFIG_S2MU004_MODE_CHANGE_BY_TOPOFF)
+				pr_err("%s: [Long life] age_step = %d, table3[0] %d, table4[0] %d, batcap[0] %02x, accum[0] %02x, soc_arr[0] %d, ocv_arr[0] %d, volt_tun : %02x\n",
+					__func__, i,
+					fuelgauge->age_data_info[i].battery_table3[0],
+					fuelgauge->age_data_info[i].battery_table4[0],
+					fuelgauge->age_data_info[i].batcap[0],
+					fuelgauge->age_data_info[i].accum[0],
+					fuelgauge->age_data_info[i].soc_arr_val[0],
+					fuelgauge->age_data_info[i].ocv_arr_val[0],
+					fuelgauge->age_data_info[i].volt_mode_tunning);
+#else
 				pr_err("%s: [Long life] age_step = %d, table3[0] %d, table4[0] %d, batcap[0] %02x, accum[0] %02x, soc_arr[0] %d, ocv_arr[0] %d\n",
 					__func__, i,
 					fuelgauge->age_data_info[i].battery_table3[0],
@@ -1872,6 +1945,7 @@ static int s2mu004_fuelgauge_parse_dt(struct s2mu004_fuelgauge_data *fuelgauge)
 					fuelgauge->age_data_info[i].accum[0],
 					fuelgauge->age_data_info[i].soc_arr_val[0],
 					fuelgauge->age_data_info[i].ocv_arr_val[0]);
+#endif
 			}
 #if defined(CONFIG_FUELGAUGE_ASOC_FROM_CYCLES)
 			p = of_get_property(np, "battery,cycles_to_asoc_mapping", &len);

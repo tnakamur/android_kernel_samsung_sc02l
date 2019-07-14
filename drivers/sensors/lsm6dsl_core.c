@@ -202,6 +202,9 @@
 #define LSM6DSL_FIFO_DATA_ADDR 0x3e
 
 /* CUSTOM VALUES FOR TILT SENSOR */
+#define LSM6DSL_TILT_EMB_CTRL_10 0x10
+#define LSM6DSL_TILT_EMB_CTRL_11 0x11
+#define LSM6DSL_TILT_EMB_CTRL_12 0x12
 #define LSM6DSL_TILT_EN_ADDR		0x19
 #define LSM6DSL_TILT_EN_MASK		0x08
 #define LSM6DSL_TILT_DRDY_IRQ_MASK	0x02
@@ -1074,6 +1077,9 @@ static int lsm6dsl_disable_sensors(struct lsm6dsl_data *cdata, int sindex)
 
 	switch (sindex) {
 	case LSM6DSL_ACCEL:
+		hrtimer_cancel(&cdata->acc_timer);
+		cancel_work_sync(&cdata->acc_work);
+
 		if ((cdata->enabled & LSM6DSL_EXTRA_DEPENDENCY)
 		    || (cdata->sa_flag)) {
 			err = lsm6dsl_write_data_with_mask(cdata,
@@ -1089,10 +1095,15 @@ static int lsm6dsl_disable_sensors(struct lsm6dsl_data *cdata, int sindex)
 		if (err < 0)
 			return err;
 
-		hrtimer_cancel(&cdata->acc_timer);
-		cancel_work_sync(&cdata->acc_work);
 		break;
 	case LSM6DSL_GYRO:
+		hrtimer_cancel(&cdata->gyro_timer);
+#ifdef CONFIG_SENSORS_LSM6DSL_SUPPORT_VDIS
+		flush_kthread_work(&cdata->gyro_work);
+#else
+		cancel_work_sync(&cdata->gyro_work);
+#endif
+
 		err = lsm6dsl_write_data_with_mask(cdata,
 				lsm6dsl_odr_table.addr[LSM6DSL_GYRO],
 				lsm6dsl_odr_table.mask[LSM6DSL_GYRO],
@@ -1100,12 +1111,6 @@ static int lsm6dsl_disable_sensors(struct lsm6dsl_data *cdata, int sindex)
 		if (err < 0)
 			return err;
 
-		hrtimer_cancel(&cdata->gyro_timer);
-#ifdef CONFIG_SENSORS_LSM6DSL_SUPPORT_VDIS
-		flush_kthread_work(&cdata->gyro_work);
-#else
-		cancel_work_sync(&cdata->gyro_work);
-#endif
 		break;
 	case LSM6DSL_SIGN_MOTION:
 		err = lsm6dsl_write_data_with_mask(cdata,
@@ -1933,6 +1938,7 @@ static ssize_t lsm6dsl_smart_alert_store(struct device *dev,
 		return size;
 	}
 
+	mutex_lock(&cdata->mutex_enable);
 	if ((enable == 1) && (cdata->sa_flag == 0)) {
 		cdata->sa_irq_state = 0;
 		cdata->sa_flag = 1;
@@ -1941,7 +1947,7 @@ static ssize_t lsm6dsl_smart_alert_store(struct device *dev,
 					   LSM6DSL_ACCEL_ODR_ADDR,
 					   LSM6DSL_ACCEL_ODR_MASK,
 					   LSM6DSL_ACCEL_ODR_POWER_DOWN, true);
-		mdelay(100);
+		mdelay(50);
 
 		if (factory_mode == 1) {
 			threshold = 0;
@@ -1962,6 +1968,7 @@ static ssize_t lsm6dsl_smart_alert_store(struct device *dev,
 				fs = 16000;
 				break;
 			default:
+				mutex_unlock(&cdata->mutex_enable);
 				return size;
 			}
 
@@ -1999,7 +2006,7 @@ static ssize_t lsm6dsl_smart_alert_store(struct device *dev,
 					   LSM6DSL_ACCEL_ODR_ADDR,
 					   LSM6DSL_ACCEL_ODR_MASK,
 					   odr, true);
-		mdelay(100);
+		mdelay(50);
 
 		lsm6dsl_set_irq(cdata, 1);
 		SENSOR_INFO("smart alert is on!\n");
@@ -2037,6 +2044,7 @@ static ssize_t lsm6dsl_smart_alert_store(struct device *dev,
 		SENSOR_INFO("smart alert is off! irq = %d, odr 0x%x\n",
 						cdata->sa_irq_state, odr);
 	}
+	mutex_unlock(&cdata->mutex_enable);
 
 	return size;
 }
@@ -2359,7 +2367,7 @@ static int lsm6dsl_gyro_fifo_test(struct lsm6dsl_data *cdata,
 		return err;
 
 	err = lsm6dsl_write_data_with_mask(cdata,
-			LSM6DSL_CTRL2_ADDR, 0xf0, LSM6DSL_ODR_104HZ_VAL, true);
+			LSM6DSL_CTRL2_ADDR, 0xf0, LSM6DSL_ODR_208HZ_VAL, true);
 	if (err < 0)
 		return err;
 
@@ -2953,22 +2961,32 @@ static ssize_t lsm6dsl_write_register_store(struct device *dev,
 	return count;
 }
 
+static void lsm6dsl_read_register(struct lsm6dsl_data *cdata)
+{
+	u8 reg;
+	u8 reg_value[16] = {0x00,};
+	u8 i, unit = 16;
+	s8 ret;
+	char buf[84] = {0,};
+
+	for (reg = 0x00; reg <= 0x7f; reg+=unit) {
+		ret = cdata->tf->read(cdata, reg, unit, reg_value, true);
+		if (ret < 0) {
+			SENSOR_ERR("[0x%02x-0x%02x]: fail %d\n", reg, reg+unit-1, ret);
+		}
+		else {
+			for (i = 0; i < unit; i++)
+				snprintf(buf+5*i, 84, "0x%02x ", reg_value[i]);
+			SENSOR_INFO("[0x%02x-0x%02x]:%s\n", reg, reg+unit-1, buf);
+		}
+	}
+}
+
 static ssize_t lsm6dsl_read_register_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	struct lsm6dsl_data *cdata = dev_get_drvdata(dev);
-
-	u8 reg;
-	u8 reg_value = 0x00;
-	int ret;
-
-	for (reg = 0x00; reg <= 0x7f; reg++) {
-		ret = cdata->tf->read(cdata, reg, 1, &reg_value, true);
-	if (ret < 0)
-		SENSOR_ERR("failed %d\n", ret);
-	else
-		SENSOR_INFO("Read Reg: 0x%x Value: 0x%x\n", reg, reg_value);
-	}
+	lsm6dsl_read_register(cdata);
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", 1);
 }
@@ -3092,6 +3110,7 @@ err_create_sysfs_group:
 err_create_sensor_symlink:
 	input_unregister_device(dev);
 err_register_input_dev:
+	dev = NULL;
 	return ret;
 }
 
@@ -3137,6 +3156,7 @@ err_create_sysfs_group:
 err_create_sensor_symlink:
 	input_unregister_device(dev);
 err_register_input_dev:
+	dev = NULL;
 	return ret;
 }
 
@@ -3180,6 +3200,7 @@ err_create_sysfs_group:
 err_create_sensor_symlink:
 	input_unregister_device(dev);
 err_register_input_dev:
+	dev = NULL;
 	return ret;
 }
 
@@ -3223,6 +3244,7 @@ err_create_sysfs_group:
 err_create_sensor_symlink:
 	input_unregister_device(dev);
 err_register_input_dev:
+	dev = NULL;
 	return ret;
 }
 
@@ -3268,6 +3290,7 @@ err_create_sysfs_group:
 err_create_sensor_symlink:
 	input_unregister_device(dev);
 err_register_input_dev:
+	dev = NULL;
 	return ret;
 }
 
@@ -3313,6 +3336,7 @@ err_create_sysfs_group:
 err_create_sensor_symlink:
 	input_unregister_device(dev);
 err_register_input_dev:
+	dev = NULL;
 	return ret;
 }
 
@@ -3441,6 +3465,29 @@ static int lsm6dsl_init_sensors(struct lsm6dsl_data *cdata)
 	if (err < 0)
 		goto lsm6dsl_init_sensor_mutex_unlock;
 
+	/* TILT SETTING */
+	default_reg_value = 0x60;
+	err = cdata->tf->write(cdata,
+		LSM6DSL_TILT_EMB_CTRL_10,
+		1, &default_reg_value, false);
+	if (err < 0)
+		goto lsm6dsl_init_sensor_mutex_unlock;
+
+	/* 35 degree, the bigger value the smaller */
+	default_reg_value = 0x69;
+	err = cdata->tf->write(cdata,
+		LSM6DSL_TILT_EMB_CTRL_11,
+		1, &default_reg_value, false);
+	if (err < 0)
+		goto lsm6dsl_init_sensor_mutex_unlock;
+
+	default_reg_value = 0x12;
+	err = cdata->tf->write(cdata,
+		LSM6DSL_TILT_EMB_CTRL_12,
+		1, &default_reg_value, false);
+	if (err < 0)
+		goto lsm6dsl_init_sensor_mutex_unlock;
+
 	/* 4G, 14*32mg=448mg, threshold could adjust 0x8E~0x90 */
 	default_reg_value = 0x8e;
 	err = cdata->tf->write(cdata,
@@ -3538,6 +3585,16 @@ static int lsm6dsl_parse_dt(struct lsm6dsl_data *cdata)
 	return 0;
 }
 
+int lsm6dsl_dump_register_data_notify(struct notifier_block *nb,
+	unsigned long val, void *v)
+{
+	struct lsm6dsl_data *cdata = container_of(nb, struct lsm6dsl_data, dump_nb);
+
+	if(val == 1) {
+		lsm6dsl_read_register(cdata);
+	}
+	return 0;
+}
 
 int lsm6dsl_common_probe(struct lsm6dsl_data *cdata, int irq, u16 bustype)
 {
@@ -3726,6 +3783,10 @@ int lsm6dsl_common_probe(struct lsm6dsl_data *cdata, int irq, u16 bustype)
 		SENSOR_INFO("Smart alert init, irq = %d\n", cdata->irq);
 	}
 
+	cdata->dump_nb.notifier_call = lsm6dsl_dump_register_data_notify;
+	cdata->dump_nb.priority = 1;
+	sensordump_notifier_register(&cdata->dump_nb);
+
 	SENSOR_INFO(" Done!\n");
 	return 0;
 
@@ -3830,6 +3891,7 @@ int lsm6dsl_common_resume(struct lsm6dsl_data *cdata)
 		lsm6dsl_enable_sensors(cdata, LSM6DSL_GYRO);
 
 	if (cdata->enabled & LSM6DSL_STEP_COUNTER_DEPENDENCY) {
+		msleep(100);
 		mutex_lock(&cdata->mutex_read);
 		lsm6dsl_get_step_c_data_fifo(cdata);
 		mutex_unlock(&cdata->mutex_read);

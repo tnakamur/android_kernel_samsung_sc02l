@@ -33,8 +33,6 @@
 #endif
 #include "camerapp-video.h"
 
-/* #define ENABLE_USE_INTERNAL_BUFFER */
-
 extern int gdc_log_level;
 #define gdc_dbg(fmt, args...)						\
 	do {								\
@@ -67,6 +65,9 @@ extern int gdc_log_level;
 #define CTX_SRC_FMT	5
 #define CTX_DST_FMT	6
 #define CTX_INT_FRAME	7 /* intermediate frame available */
+
+#define GRID_X_SIZE		9
+#define GRID_Y_SIZE		7
 
 #define fh_to_gdc_ctx(__fh)	container_of(__fh, struct gdc_ctx, fh)
 #define gdc_fmt_is_rgb888(x)	((x == V4L2_PIX_FMT_RGB32) || \
@@ -212,6 +213,9 @@ struct gdc_crop_param {
 	u32 crop_height;
 	bool is_crop_dzoom;
 	bool is_scaled;
+	bool use_calculated_grid;
+	int calculated_grid_x[7][9];
+	int calculated_grid_y[7][9];
 	int reserved[32];
 };
 
@@ -306,12 +310,6 @@ struct gdc_dev {
 	s32				qosreq_int_level;
 	int				dev_id;
 	u32				version;
-
-#ifdef ENABLE_USE_INTERNAL_BUFFER
-	struct vb2_alloc_ctx		*alloc_ctx_priv;
-	struct gdc_priv_buf		grid_x_buf;
-	struct gdc_priv_buf		grid_y_buf;
-#endif
 };
 
 static inline struct gdc_frame *ctx_get_frame(struct gdc_ctx *ctx,

@@ -43,12 +43,6 @@ module_param_named(gdc_log_level, gdc_log_level, uint, S_IRUGO | S_IWUSR);
 int __gdc_measure_hw_latency;
 module_param_named(gdc_measure_hw_latency, __gdc_measure_hw_latency, int, S_IRUGO | S_IWUSR);
 
-#ifdef ENABLE_USE_INTERNAL_BUFFER
-dma_addr_t tpu_grid_x_addr;
-dma_addr_t tpu_grid_y_addr;
-bool grid_addr_alloc_done = false;
-#endif
-
 struct vb2_gdc_buffer {
 	struct v4l2_m2m_buffer mb;
 	struct gdc_ctx *ctx;
@@ -76,6 +70,24 @@ static const struct gdc_fmt gdc_formats[] = {
 		.h_shift	= 1,
 		.v_shift	= 1,
 	}, {
+		.name		= "YUV 4:2:0 contiguous 2-planar, Y/CbCr",
+		.pixelformat	= V4L2_PIX_FMT_NV12,
+		.cfg_val	= GDC_CFG_FMT_YCBCR420_2P,
+		.bitperpixel	= { 12 },
+		.num_planes = 1,
+		.num_comp	= 2,
+		.h_shift	= 1,
+		.v_shift	= 1,
+	}, {
+		.name		= "YUV 4:2:0 contiguous 2-planar, Y/CrCb",
+		.pixelformat	= V4L2_PIX_FMT_NV21,
+		.cfg_val	= GDC_CFG_FMT_YCRCB420_2P,
+		.bitperpixel	= { 12 },
+		.num_planes = 1,
+		.num_comp	= 2,
+		.h_shift	= 1,
+		.v_shift	= 1,
+	}, {
 		.name		= "YUV 4:2:2 packed, YCrYCb",
 		.pixelformat	= V4L2_PIX_FMT_YVYU,
 		.cfg_val	= GDC_CFG_FMT_YVYU,
@@ -91,8 +103,39 @@ static const struct gdc_fmt gdc_formats[] = {
 		.num_planes = 1,
 		.num_comp	= 1,
 		.h_shift	= 1,
+	}, {
+		.name		= "YUV 4:2:2 contiguous 2-planar, Y/CbCr",
+		.pixelformat	= V4L2_PIX_FMT_NV16,
+		.cfg_val	= GDC_CFG_FMT_YCBCR422_2P,
+		.bitperpixel	= { 16 },
+		.num_planes = 1,
+		.num_comp	= 2,
+		.h_shift	= 1,
+	}, {
+		.name		= "YUV 4:2:2 contiguous 2-planar, Y/CrCb",
+		.pixelformat	= V4L2_PIX_FMT_NV61,
+		.cfg_val	= GDC_CFG_FMT_YCRCB422_2P,
+		.bitperpixel	= { 16 },
+		.num_planes = 1,
+		.num_comp	= 2,
+		.h_shift	= 1,
+	}, {
+		.name		= "YUV 4:2:2 non-contiguous 2-planar, Y/CbCr",
+		.pixelformat	= V4L2_PIX_FMT_NV16M,
+		.cfg_val	= GDC_CFG_FMT_YCBCR422_2P,
+		.bitperpixel	= { 8, 8 },
+		.num_planes = 2,
+		.num_comp	= 2,
+		.h_shift	= 1,
+	}, {
+		.name		= "YUV 4:2:2 non-contiguous 2-planar, Y/CrCb",
+		.pixelformat	= V4L2_PIX_FMT_NV61M,
+		.cfg_val	= GDC_CFG_FMT_YCRCB422_2P,
+		.bitperpixel	= { 8, 8 },
+		.num_planes = 2,
+		.num_comp	= 2,
+		.h_shift	= 1,
 	},
-
 };
 
 static const struct gdc_variant gdc_variant[] = {
@@ -129,68 +172,6 @@ static const struct gdc_fmt *gdc_find_format(struct gdc_dev *gdc,
 
 	return NULL;
 }
-
-#ifdef ENABLE_USE_INTERNAL_BUFFER
-static int gdc_init_internal_buffer(struct gdc_dev *gdc)
-{
-	int ret = 0;
-
-	gdc->alloc_ctx_priv = (struct vb2_alloc_ctx *)vb2_ion_create_context(
-					gdc->dev, SZ_4K, VB2ION_CTX_IOMMU | VB2ION_CTX_VMCONTIG);
-	if (IS_ERR_OR_NULL(gdc->alloc_ctx_priv)) {
-		pr_err("failed to internal buff init. allocation context");
-		ret = PTR_ERR(gdc->alloc_ctx_priv);
-		goto err_ion_init;
-	}
-
-err_ion_init:
-
-	return ret;
-
-}
-
-static int gdc_alloc_grid_internal_buffer(struct gdc_dev *gdc, u32 size)
-{
-	void *alloc_ctx_priv;
-
-	alloc_ctx_priv = gdc->alloc_ctx_priv;
-
-	gdc->grid_x_buf.cookie = vb2_ion_private_alloc(alloc_ctx_priv, size);
-	if (IS_ERR_OR_NULL(gdc->grid_x_buf.cookie)) {
-		gdc->grid_x_buf.cookie = NULL;
-		pr_err("Alloc grid_x buffer failed\n");
-		return -ENOMEM;
-	}
-	BUG_ON(vb2_ion_dma_address(gdc->grid_x_buf.cookie, &gdc->grid_x_buf.daddr) != 0);
-	tpu_grid_x_addr = gdc->grid_x_buf.daddr;
-
-	gdc->grid_y_buf.cookie = vb2_ion_private_alloc(alloc_ctx_priv, size);
-	if (IS_ERR_OR_NULL(gdc->grid_y_buf.cookie)) {
-		gdc->grid_y_buf.cookie = NULL;
-		pr_err("Alloc grid_y buffer failed\n");
-		return -ENOMEM;
-	}
-	BUG_ON(vb2_ion_dma_address(gdc->grid_y_buf.cookie, &gdc->grid_y_buf.daddr) != 0);
-	tpu_grid_y_addr = gdc->grid_y_buf.daddr;
-
-	return 0;;
-}
-
-void gdc_release_internal_buffer(struct gdc_dev *gdc)
-{
-	vb2_ion_private_free(gdc->grid_x_buf.cookie);
-	gdc->grid_x_buf.vaddr = NULL;
-	gdc->grid_x_buf.daddr = 0;
-	gdc->grid_x_buf.cookie = NULL;
-
-	vb2_ion_private_free(gdc->grid_y_buf.cookie);
-	gdc->grid_y_buf.vaddr = NULL;
-	gdc->grid_y_buf.daddr = 0;
-	gdc->grid_y_buf.cookie = NULL;
-
-	return;
-}
-#endif
 
 static int gdc_v4l2_querycap(struct file *file, void *fh,
 			     struct v4l2_capability *cap)
@@ -584,7 +565,9 @@ static int gdc_v4l2_s_ext_ctrls(struct file * file, void * priv,
 				struct gdc_crop_param *crop_param =
 					(struct gdc_crop_param *)&ctx->crop_param;
 				ret = copy_from_user(crop_param, ext_ctrl->ptr, sizeof(struct gdc_crop_param));
-				gdc_dbg("crop_width:%d\n", crop_param->crop_width);
+				gdc_dbg("sensor_num: %d, sensor_size: %dx%d, crop_width:%d\n",
+					crop_param->sensor_num, crop_param->sensor_width,
+					crop_param->sensor_height, crop_param->crop_width);
 
 				ctx->grid_param.is_valid = false;
 				crop_param->is_crop_dzoom = false;
@@ -869,7 +852,7 @@ static int gdc_open(struct file *file)
 {
 	struct gdc_dev *gdc = video_drvdata(file);
 	struct gdc_ctx *ctx;
-	int ret;
+	int ret = 0;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx) {
@@ -878,7 +861,6 @@ static int gdc_open(struct file *file)
 	}
 
 	atomic_inc(&gdc->m2m.in_use);
-	gdc_dbg("gdc open\n");
 
 	ctx->context_type = GDC_CTX_V4L2_TYPE;
 	INIT_LIST_HEAD(&ctx->node);
@@ -917,6 +899,7 @@ static int gdc_open(struct file *file)
 		goto err_ctx;
 	}
 
+	gdc_dbg("gdc open = %d\n", ret);
 	return 0;
 
 err_ctx:
@@ -943,13 +926,6 @@ static int gdc_release(struct file *file)
 
 	atomic_dec(&gdc->m2m.in_use);
 
-#ifdef ENABLE_USE_INTERNAL_BUFFER
-	if(grid_addr_alloc_done == true) {
-		gdc_release_internal_buffer(gdc);
-		gdc_dbg("gdc tpu grid addr free done\n");
-		grid_addr_alloc_done = false;
-	}
-#endif
 	gdc_dbg("gdc close\n");
 
 	v4l2_m2m_ctx_release(ctx->m2m_ctx);
@@ -1148,17 +1124,6 @@ static int gdc_run_next_job(struct gdc_dev *gdc)
 	camerapp_hw_gdc_sw_reset(gdc->regs_base);
 
 	gdc_dbg("gdc sw reset\n");
-#ifdef ENABLE_USE_INTERNAL_BUFFER
-	if (grid_addr_alloc_done == false) {
-		ret = gdc_alloc_grid_internal_buffer(gdc, 4096);
-		gdc_dbg("gdc tpu grid addr alloc done\n");
-		grid_addr_alloc_done = true;
-		if (ret) {
-			grid_addr_alloc_done = false;
-			gdc_dbg("fail internal buffer alloc\n");
-		}
-	}
-#endif
 
 	camerapp_gdc_grid_setting(gdc);
 
@@ -1302,8 +1267,11 @@ static int gdc_get_bufaddr(struct gdc_dev *gdc, struct gdc_ctx *ctx,
 	int ret;
 	unsigned int pixsize, bytesize;
 	void *cookie;
+	unsigned int w = frame->width;
+	unsigned int h = frame->height;
+	unsigned int c_span;
 
-	pixsize = frame->width * frame->height;
+	pixsize = w * h;
 	bytesize = (pixsize * frame->gdc_fmt->bitperpixel[0]) >> 3;
 
 	cookie = vb2_plane_cookie(vb2buf, 0);
@@ -1325,26 +1293,13 @@ static int gdc_get_bufaddr(struct gdc_dev *gdc, struct gdc_ctx *ctx,
 		break;
 	case 2:
 		if (frame->gdc_fmt->num_planes == 1) {
-			if (frame->gdc_fmt->pixelformat == V4L2_PIX_FMT_NV12N) {
-				unsigned int w = frame->width;
-				unsigned int h = frame->height;
-				frame->addr.cb =
-					NV12N_CBCR_BASE(frame->addr.y, w, h);
-				frame->addr.ysize = NV12N_Y_SIZE(w, h);
-				frame->addr.cbsize = NV12N_CBCR_SIZE(w, h);
-			} else if (frame->gdc_fmt->pixelformat == V4L2_PIX_FMT_NV12N_10B) {
-				unsigned int w = frame->width;
-				unsigned int h = frame->height;
-				frame->addr.cb =
-					NV12N_10B_CBCR_BASE(frame->addr.y, w, h);
-				frame->addr.ysize = NV12N_Y_SIZE(w, h);
-				frame->addr.cbsize = NV12N_CBCR_SIZE(w, h);
-			} else {
-				frame->addr.cb = frame->addr.y + pixsize;
-				frame->addr.ysize = pixsize;
-				frame->addr.cbsize = bytesize - pixsize;
-			}
+			/* V4L2_PIX_FMT_NV12, V4L2_PIX_FMT_NV21,  V4L2_PIX_FMT_NV61, V4L2_PIX_FMT_NV16 */
+			frame->addr.cb = frame->addr.y + pixsize;
+			frame->addr.ysize = pixsize;
+			frame->addr.cbsize = bytesize - pixsize;
 		} else if (frame->gdc_fmt->num_planes == 2) {
+			/* V4L2_PIX_FMT_NV21M, V4L2_PIX_FMT_NV12M */
+			/* V4L2_PIX_FMT_NV61M, V4L2_PIX_FMT_NV16M */
 			cookie = vb2_plane_cookie(vb2buf, 1);
 			if (!cookie)
 				return -EINVAL;
@@ -1361,17 +1316,14 @@ static int gdc_get_bufaddr(struct gdc_dev *gdc, struct gdc_ctx *ctx,
 	case 3:
 		if (frame->gdc_fmt->num_planes == 1) {
 			if (gdc_fmt_is_ayv12(frame->gdc_fmt->pixelformat)) {
-				unsigned int c_span;
-				c_span = ALIGN(frame->width >> 1, 16);
+				c_span = ALIGN(w >> 1, 16);
 				frame->addr.ysize = pixsize;
-				frame->addr.cbsize = c_span * (frame->height >> 1);
+				frame->addr.cbsize = c_span * (h >> 1);
 				frame->addr.crsize = frame->addr.cbsize;
 				frame->addr.cb = frame->addr.y + pixsize;
 				frame->addr.cr = frame->addr.cb + frame->addr.cbsize;
 			} else if (frame->gdc_fmt->pixelformat ==
 					V4L2_PIX_FMT_YUV420N) {
-				unsigned int w = frame->width;
-				unsigned int h = frame->height;
 				frame->addr.ysize = YUV420N_Y_SIZE(w, h);
 				frame->addr.cbsize = YUV420N_CB_SIZE(w, h);
 				frame->addr.crsize = YUV420N_CR_SIZE(w, h);
@@ -1450,6 +1402,8 @@ static void gdc_m2m_device_run(void *priv)
 	gdc_get_bufaddr(gdc, ctx, v4l2_m2m_next_src_buf(ctx->m2m_ctx), s_frame);
 	gdc_get_bufaddr(gdc, ctx, v4l2_m2m_next_dst_buf(ctx->m2m_ctx), d_frame);
 
+	gdc_dbg("gdc_src : format = %d, w = %d, h = %d\n", s_frame->gdc_fmt->cfg_val, s_frame->width, s_frame->height);
+	gdc_dbg("gdc_dst : format = %d, w = %d, h = %d\n", d_frame->gdc_fmt->cfg_val, d_frame->width, d_frame->height);
 	gdc_add_context_and_run(gdc, ctx);
 }
 
@@ -2159,11 +2113,6 @@ static int gdc_probe(struct platform_device *pdev)
 		}
 	}
 
-#ifdef ENABLE_USE_INTERNAL_BUFFER
-	gdc_init_internal_buffer(gdc);
-	gdc_dbg("alloc internal buffint_e\n");
-#endif
-
 	gdc->version = 0;	/* no version register in GDCv1.0 */
 
 	gdc->variant = &gdc_variant[0];
@@ -2211,10 +2160,6 @@ static int gdc_remove(struct platform_device *pdev)
 	vb2_ion_detach_iommu(gdc->alloc_ctx);
 
 	vb2_ion_destroy_context(gdc->alloc_ctx);
-
-#ifdef ENABLE_USE_INTERNAL_BUFFER
-	vb2_ion_destroy_context(gdc->alloc_ctx_priv);
-#endif
 
 	gdc_clk_put(gdc);
 

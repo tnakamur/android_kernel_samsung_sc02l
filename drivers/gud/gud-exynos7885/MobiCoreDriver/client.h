@@ -24,7 +24,7 @@ struct tee_client;
 /* Client */
 struct tee_client *client_create(bool is_from_kernel);
 void client_get(struct tee_client *client);
-void client_put(struct tee_client *client);
+int client_put(struct tee_client *client);
 bool client_has_sessions(struct tee_client *client);
 void client_close(struct tee_client *client);
 
@@ -81,10 +81,10 @@ int client_cbuf_free(struct tee_client *client, uintptr_t addr);
 
 /* GP internal */
 struct client_gp_operation {
+	struct list_head	list;
 	u32			started;
 	u32			slot;
-	bool			cancelled;
-	struct list_head	list;
+	int			cancelled;
 };
 
 /* Called from session when a new operation starts/ends */

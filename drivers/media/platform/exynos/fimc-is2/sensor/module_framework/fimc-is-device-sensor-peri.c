@@ -19,6 +19,16 @@
 #include "fimc-is-device-sensor.h"
 #include "fimc-is-video.h"
 
+#if defined(CONFIG_LEDS_S2MU106_FLASH)
+#include <linux/leds-s2mu106.h>
+#include <linux/mfd/samsung/s2mu106.h>
+/* MUIC header file */
+#include <linux/muic/muic.h>
+#include <linux/muic/s2mu106-muic.h>
+#include <linux/muic/s2mu106-muic-hv.h>
+#include <linux/ccic/usbpd_ext.h>
+#endif
+
 extern struct device *fimc_is_dev;
 #ifdef FIXED_SENSOR_DEBUG
 extern struct fimc_is_sysfs_sensor sysfs_sensor;
@@ -188,7 +198,8 @@ static void fimc_is_sensor_init_expecting_dm(struct fimc_is_device_sensor *devic
 	int i = 0;
 	u32 m_fcount;
 	u32 sensitivity;
-	u64 exposureTime;
+	u64 exposureTime, long_exposure, short_exposure;
+	u32 long_dgain, long_again, short_dgain, short_again;
 	struct fimc_is_sensor_ctl *module_ctl;
 	camera2_sensor_ctl_t *sensor_ctrl = NULL;
 	camera2_sensor_uctl_t *sensor_uctrl = NULL;
@@ -206,6 +217,12 @@ static void fimc_is_sensor_init_expecting_dm(struct fimc_is_device_sensor *devic
 
 	sensitivity = sensor_uctrl->sensitivity;
 	exposureTime = sensor_uctrl->exposureTime;
+	long_exposure = sensor_uctrl->longExposureTime;
+	short_exposure = sensor_uctrl->shortExposureTime;
+	long_dgain = sensor_uctrl->longDigitalGain;
+	long_again = sensor_uctrl->longAnalogGain;
+	short_dgain = sensor_uctrl->shortDigitalGain;
+	short_again = sensor_uctrl->shortAnalogGain;
 
 	if (module_ctl->valid_sensor_ctrl == true) {
 		if (sensor_ctrl->sensitivity)
@@ -218,6 +235,15 @@ static void fimc_is_sensor_init_expecting_dm(struct fimc_is_device_sensor *devic
 	for (i = m_fcount + 2; i < m_fcount + EXPECT_DM_NUM; i++) {
 		cis->expecting_sensor_dm[i % EXPECT_DM_NUM].sensitivity = sensitivity;
 		cis->expecting_sensor_dm[i % EXPECT_DM_NUM].exposureTime = exposureTime;
+
+		cis->expecting_sensor_udm[i % EXPECT_DM_NUM].longExposureTime = long_exposure;
+		cis->expecting_sensor_udm[i % EXPECT_DM_NUM].shortExposureTime = short_exposure;
+		cis->expecting_sensor_udm[i % EXPECT_DM_NUM].digitalGain = long_dgain;
+		cis->expecting_sensor_udm[i % EXPECT_DM_NUM].analogGain = long_dgain;
+		cis->expecting_sensor_udm[i % EXPECT_DM_NUM].longDigitalGain = long_dgain;
+		cis->expecting_sensor_udm[i % EXPECT_DM_NUM].longAnalogGain = long_dgain;
+		cis->expecting_sensor_udm[i % EXPECT_DM_NUM].shortDigitalGain = short_dgain;
+		cis->expecting_sensor_udm[i % EXPECT_DM_NUM].shortAnalogGain = short_again;
 	}
 
 p_err:
@@ -373,6 +399,11 @@ void fimc_is_sensor_set_cis_uctrl_list(struct fimc_is_device_sensor_peri *sensor
 	BUG_ON(!sensor_peri);
 
 	for (i = 0; i < CAM2P0_UCTL_LIST_SIZE; i++) {
+		if (sensor_peri->cis.sensor_ctls[i].force_update) {
+			dbg_sensor(1, "skip uctl_list set, sensor_ctl[%d]->force_update\n", i);
+			continue;
+		}
+
 		sensor_uctl = &sensor_peri->cis.sensor_ctls[i].cur_cam20_sensor_udctrl;
 
 		if (fimc_is_vender_wdr_mode_on(sensor_peri->cis.cis_data)) {
@@ -895,6 +926,11 @@ void fimc_is_sensor_flash_fire_work(struct work_struct *data)
 				ret = fimc_is_sensor_flash_fire(sensor_peri, flash->flash_data.intensity);
 				if (ret) {
 					err("failed to turn off flash at flash expired handler\n");
+#if defined(CONFIG_LEDS_S2MU106_FLASH)
+					pdo_ctrl_by_flash(0);
+					muic_afc_set_voltage(9);
+					info("[%s]%d Down Volatge set Clear \n" ,__func__,__LINE__);
+#endif
 				}
 			} else {
 				flash->flash_ae.main_fls_ae_reset = false;
@@ -918,7 +954,11 @@ void fimc_is_sensor_flash_fire_work(struct work_struct *data)
 			if (ret) {
 				err("failed to turn off flash at flash expired handler\n");
 			}
-
+#if defined(CONFIG_LEDS_S2MU106_FLASH)
+			pdo_ctrl_by_flash(0);
+			muic_afc_set_voltage(9);
+			info("[%s]%d Down Volatge set Clear \n" ,__func__,__LINE__);
+#endif
 			flash->flash_ae.main_fls_ae_reset = false;
 			flash->flash_ae.main_fls_strm_on_off_step = 0;
 			flash->flash_ae.frm_num_main_fls[0] = 0;
@@ -1292,6 +1332,7 @@ int fimc_is_sensor_peri_pre_flash_fire(struct v4l2_subdev *subdev, void *arg)
 {
 	int ret = 0;
 	u32 vsync_count = 0;
+	u32 applied_frame_num = 0;
 	struct fimc_is_module_enum *module = NULL;
 	struct fimc_is_flash *flash = NULL;
 	struct fimc_is_sensor_ctl *sensor_ctl = NULL;
@@ -1307,13 +1348,13 @@ int fimc_is_sensor_peri_pre_flash_fire(struct v4l2_subdev *subdev, void *arg)
 	BUG_ON(!module);
 
 	sensor_peri = (struct fimc_is_device_sensor_peri *)module->private_data;
-
-	sensor_ctl = &sensor_peri->cis.sensor_ctls[vsync_count % CAM2P0_UCTL_LIST_SIZE];
+	applied_frame_num = vsync_count - sensor_peri->sensor_interface.diff_bet_sen_isp;
+	sensor_ctl = &sensor_peri->cis.sensor_ctls[applied_frame_num % CAM2P0_UCTL_LIST_SIZE];
 
 	flash = sensor_peri->flash;
 	BUG_ON(!flash);
 
-	if (sensor_ctl->valid_flash_udctrl == false)
+	if (sensor_ctl->valid_flash_udctrl == false || vsync_count != sensor_ctl->flash_frame_number)
 		goto p_err;
 
 	flash_uctl = &sensor_ctl->cur_cam20_flash_udctrl;
@@ -1324,10 +1365,29 @@ int fimc_is_sensor_peri_pre_flash_fire(struct v4l2_subdev *subdev, void *arg)
 		flash->flash_data.intensity = flash_uctl->firingPower;
 		flash->flash_data.firing_time_us = flash_uctl->firingTime;
 
+#if defined(CONFIG_LEDS_S2MU106_FLASH)
+		/* Pre-flash on */
+		if(flash->flash_data.mode == 3) {
+			muic_afc_set_voltage(5);
+			pdo_ctrl_by_flash(1);
+			info("[%s]%d Down Volatge set On \n" ,__func__,__LINE__);
+		}
+#endif
 		info("[%s](%d) pre-flash mode(%d), pow(%d), time(%d)\n", __func__,
 			vsync_count, flash->flash_data.mode,
 			flash->flash_data.intensity, flash->flash_data.firing_time_us);
 		ret = fimc_is_sensor_flash_fire(sensor_peri, flash->flash_data.intensity);
+#if defined(CONFIG_LEDS_S2MU106_FLASH)
+		/* If pre-flash on failed, set voltage to 9V */
+		if (ret) {
+			err("failed to turn off flash at flash expired handler\n");
+			if(flash->flash_data.mode == 3) {
+				pdo_ctrl_by_flash(0);
+				muic_afc_set_voltage(9);
+				info("[%s]%d Down Volatge set Clear \n" ,__func__,__LINE__);
+			}
+		}
+#endif
 	}
 
 	/* HACK: reset uctl */
@@ -1574,6 +1634,7 @@ void fimc_is_sensor_peri_probe(struct fimc_is_device_sensor_peri *sensor_peri)
 	clear_bit(FIMC_IS_SENSOR_FLASH_AVAILABLE, &sensor_peri->peri_state);
 	clear_bit(FIMC_IS_SENSOR_PREPROCESSOR_AVAILABLE, &sensor_peri->peri_state);
 	clear_bit(FIMC_IS_SENSOR_OIS_AVAILABLE, &sensor_peri->peri_state);
+	clear_bit(FIMC_IS_SENSOR_APERTURE_AVAILABLE, &sensor_peri->peri_state);
 
 	mutex_init(&sensor_peri->cis.control_lock);
 }
@@ -1590,8 +1651,13 @@ int fimc_is_sensor_peri_s_stream(struct fimc_is_device_sensor *device,
 	struct v4l2_subdev *subdev_preprocessor = NULL;
 	struct fimc_is_cis *cis = NULL;
 	struct fimc_is_preprocessor *preprocessor = NULL;
+	struct fimc_is_core *core = NULL;
+	struct fimc_is_dual_info *dual_info = NULL;
 
 	BUG_ON(!device);
+
+	core = (struct fimc_is_core *)device->private_data;
+	dual_info = &core->dual_info;
 
 	subdev_module = device->subdev_module;
 	if (!subdev_module) {
@@ -1638,7 +1704,8 @@ int fimc_is_sensor_peri_s_stream(struct fimc_is_device_sensor *device,
 		flush_kthread_work(&sensor_peri->mode_change_work);
 
 		/* stream on sequence */
-		if (cis->need_mode_change == false) {
+		if (cis->need_mode_change == false && cis->use_initial_ae == false)
+		{
 			/* only first time after camera on */
 			fimc_is_sensor_initial_setting_low_exposure(sensor_peri);
 			cis->need_mode_change = true;
@@ -1712,6 +1779,17 @@ int fimc_is_sensor_peri_s_stream(struct fimc_is_device_sensor *device,
 			}
 		}
 #endif
+
+		if (sensor_peri->flash != NULL && dual_info->mode == FIMC_IS_DUAL_MODE_NOTHING) {
+			sensor_peri->flash->flash_data.mode = CAM2_FLASH_MODE_OFF;
+			if (sensor_peri->flash->flash_data.flash_fired == true) {
+				ret = fimc_is_sensor_flash_fire(sensor_peri, 0);
+				if (ret) {
+					err("failed to turn off flash at flash expired handler\n");
+				}
+			}
+		}
+
 		if (ret == 0)
 			ret = fimc_is_sensor_wait_streamoff(device);
 
@@ -1719,9 +1797,11 @@ int fimc_is_sensor_peri_s_stream(struct fimc_is_device_sensor *device,
 			hrtimer_cancel(&sensor_peri->actuator->actuator_data.afwindow_timer);
 		memset(&sensor_peri->cis.cur_sensor_uctrl, 0, sizeof(camera2_sensor_uctl_t));
 		memset(&sensor_peri->cis.expecting_sensor_dm[0], 0, sizeof(camera2_sensor_dm_t) * EXPECT_DM_NUM);
+		memset(&sensor_peri->cis.expecting_sensor_udm[0], 0, sizeof(camera2_sensor_udm_t) * EXPECT_DM_NUM);
 		for (i = 0; i < CAM2P0_UCTL_LIST_SIZE; i++) {
 			memset(&sensor_peri->cis.sensor_ctls[i].cur_cam20_sensor_udctrl, 0, sizeof(camera2_sensor_uctl_t));
 			sensor_peri->cis.sensor_ctls[i].valid_sensor_ctrl = 0;
+			sensor_peri->cis.sensor_ctls[i].force_update = false;
 		}
 		sensor_peri->use_sensor_work = false;
 	}
@@ -2190,6 +2270,18 @@ int fimc_is_sensor_peri_actuator_softlanding(struct fimc_is_device_sensor_peri *
 		soft_landing_table->step_delay = 200;
 		soft_landing_table->hw_table[0] = 0;
 	}
+	
+#ifdef USE_CAMERA_ACT_DRIVER_SOFT_LANDING 
+	v4l2_ctrl.id = V4L2_CID_ACTUATOR_SOFT_LANDING;
+	ret = v4l2_subdev_call(device->subdev_actuator, core, s_ctrl, &v4l2_ctrl);
+	
+	if(ret != HW_SOFTLANDING_FAIL){
+		if(ret)
+			err("[SEN:%d] v4l2_subdev_call(s_ctrl, id:%d) is fail(%d)",
+				actuator->id, v4l2_ctrl.id, ret);
+		return ret;
+	}
+#endif	
 
 	ret = fimc_is_sensor_peri_actuator_check_move_done(device);
 	if (ret) {

@@ -1035,7 +1035,7 @@ static int dw_mci_edmac_start_dma(struct dw_mci *host,
 	int ret = 0;
 
 	/* Set external dma config: burst size, burst width */
-	cfg.dst_addr = (dma_addr_t)(host->phy_regs + fifo_offset);
+	cfg.dst_addr = host->phy_regs + fifo_offset;
 	cfg.src_addr = cfg.dst_addr;
 	cfg.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 	cfg.src_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
@@ -3203,6 +3203,7 @@ static void dw_mci_timeout_timer(unsigned long data)
 {
 	struct dw_mci *host = (struct dw_mci *)data;
 	struct mmc_request *mrq;
+	unsigned int int_mask;
 
 	if (host && host->mrq) {
 		host->sw_timeout_chk = true;
@@ -3247,8 +3248,21 @@ static void dw_mci_timeout_timer(unsigned long data)
 		}
 
 		spin_unlock(&host->lock);
+
 		dw_mci_ciu_reset(host->dev, host);
 		dw_mci_fifo_reset(host->dev, host);
+		int_mask = mci_readl(host, INTMASK);
+		if (~int_mask & (SDMMC_INT_CMD_DONE | SDMMC_INT_DATA_OVER | DW_MCI_ERROR_FLAGS)) {
+			if (host->use_dma)
+				int_mask |= (SDMMC_INT_CMD_DONE | SDMMC_INT_DATA_OVER |
+						DW_MCI_ERROR_FLAGS);
+			else
+				int_mask |= (SDMMC_INT_CMD_DONE | SDMMC_INT_DATA_OVER |
+						SDMMC_INT_TXDR | SDMMC_INT_RXDR |
+						DW_MCI_ERROR_FLAGS);
+			mci_writel(host, INTMASK, int_mask);
+		}
+
 		spin_lock(&host->lock);
 		dw_mci_request_end(host, mrq);
 		host->state = STATE_IDLE;
@@ -3559,6 +3573,31 @@ static bool dw_mci_cmdq_busy_waiting(struct mmc_host *mmc, struct mmc_request *m
 	return dw_mci_wait_data_busy(host, mrq);
 }
 
+
+static int dw_mci_cmdq_hwacg_control_direct(struct mmc_host *mmc, bool set)
+{
+	struct dw_mci_slot *slot = mmc_priv(mmc);
+	struct dw_mci *host = slot->host;
+	u32 reg;
+
+	if (host->prv_hwacg_state != set) {
+		if (set == true) {
+			reg = mci_readl(host, FORCE_CLK_STOP);
+			reg &= ~(MMC_HWACG_CONTROL);
+			host->qactive_check = HWACG_Q_ACTIVE_DIS;
+			mci_writel(host, FORCE_CLK_STOP, reg);
+		} else {
+			reg = mci_readl(host, FORCE_CLK_STOP);
+			reg |= MMC_HWACG_CONTROL;
+			host->qactive_check = HWACG_Q_ACTIVE_EN;
+			mci_writel(host, FORCE_CLK_STOP, reg);
+		}
+		host->prv_hwacg_state = set;
+		return 1;
+	}
+	return 0;
+}
+
 static void dw_mci_cmdq_hwacg_control(struct mmc_host *mmc, bool set)
 {
 	struct dw_mci_slot *slot = mmc_priv(mmc);
@@ -3678,6 +3717,12 @@ static void dw_mci_cmdq_hwacg_control(struct mmc_host *mmc, bool set)
 
 }
 
+static int dw_mci_cmdq_hwacg_control_direct(struct mmc_host *mmc, bool set)
+{
+
+}
+
+
 static void dw_mci_cmdq_sicd_control(struct mmc_host *mmc, bool set)
 {
 
@@ -3704,6 +3749,7 @@ static const struct cmdq_host_ops dw_mci_cmdq_ops = {
 	.cmdq_log = dw_mci_cmdq_cmd_log,
 	.busy_waiting = dw_mci_cmdq_busy_waiting,
 	.hwacg_control = dw_mci_cmdq_hwacg_control,
+	.hwacg_control_direct = dw_mci_cmdq_hwacg_control_direct,
 	.sicd_control = dw_mci_cmdq_sicd_control,
 	.pm_qos_lock = dw_mci_cmdq_pm_qos_lock,
 	.reset = dw_mci_cmdq_core_reset,
@@ -3820,9 +3866,11 @@ static int dw_mci_init_slot(struct dw_mci *host, unsigned int id, struct platfor
 
 		host->cq_host = cmdq_pltfm_init(pdev);
 		ret = dw_mci_cmdq_init(host, mmc, dma64);
-		if (ret)
-			pr_err("%s: CMDQ init: failed (%d)\n",
-					mmc_hostname(host->cur_slot->mmc), ret);
+		if (ret) {
+ 			pr_err("%s: CMDQ init: failed (%d)\n",
+ 					mmc_hostname(host->cur_slot->mmc), ret);
+			cmdq_free(host->cq_host);
+		}
 		else {
 			host->cq_host->ops = &dw_mci_cmdq_ops;
 			host->cq_host->caps |= CMDQ_TASK_DESC_SZ_128;
@@ -3851,9 +3899,14 @@ err_host_allocated:
 static void dw_mci_cleanup_slot(struct dw_mci_slot *slot, unsigned int id)
 {
 	/* Debugfs stuff is cleaned up by mmc core */
+#ifdef CONFIG_MMC_CQ_HCI
+	if (slot->mmc->caps2 & MMC_CAP2_CMD_QUEUE)
+		cmdq_free(slot->host->cq_host);
+#endif
 	mmc_remove_host(slot->mmc);
 	slot->host->slot[id] = NULL;
 	mmc_free_host(slot->mmc);
+
 }
 
 static void dw_mci_init_dma(struct dw_mci *host)

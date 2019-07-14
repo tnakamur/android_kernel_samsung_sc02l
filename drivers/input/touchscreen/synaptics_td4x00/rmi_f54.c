@@ -3024,6 +3024,9 @@ static void get_chip_name(void *dev_data)
 	case SYNAPTICS_PRODUCT_ID_TD4100:
 		snprintf(data->cmd_buff, CMD_RESULT_STR_LEN, "%s", tostring(TD4100));
 		break;
+	case SYNAPTICS_PRODUCT_ID_TD4101:
+		snprintf(data->cmd_buff, CMD_RESULT_STR_LEN, "%s", tostring(TD4101));
+		break;
 	default:
 		snprintf(data->cmd_buff, CMD_RESULT_STR_LEN, "%s", tostring(NA));
 	}
@@ -3927,7 +3930,12 @@ static int td43xx_ee_short_normalize_data(struct synaptics_rmi4_data *rmi4_data,
 
 	tx_num = f54->tx_assigned;
 	rx_num = f54->rx_assigned;
-	left_size = right_size = tx_num / 2;
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_TD4X00_J2CORESPR
+	left_size = f54->left_mux_size; 		/* J260 */
+	right_size = f54->right_mux_size;
+#else
+	left_size = right_size = tx_num / 2;	/* others */
+#endif
 
 	input_err(true, &rmi4_data->i2c_client->dev,
 					"%s: size %d %d\n",
@@ -4868,7 +4876,7 @@ static void synaptics_print_frame(struct synaptics_rmi4_data *rmi4_data, signed 
 	kfree(pStr);
 }
 
-#if 0
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_TD4X00_J2CORESPR
 static int tddi_ratio_calculation(struct synaptics_rmi4_data *rmi4_data, signed short *p_image)
 {
 	struct synaptics_rmi4_f54_handle *f54 = rmi4_data->f54;
@@ -4876,8 +4884,13 @@ static int tddi_ratio_calculation(struct synaptics_rmi4_data *rmi4_data, signed 
 	int i, j;
 	int tx_num = f54->tx_assigned;
 	int rx_num = f54->rx_assigned;
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_TD4X00_J2CORESPR
+	unsigned char left_size = f54->left_mux_size;		/* J260 */
+	unsigned char right_size = f54->right_mux_size;
+#else
 	unsigned char left_size = f54->tx_assigned / 2;
 	unsigned char right_size = f54->tx_assigned / 2;
+#endif
 	signed short *p_data_16;
 	signed short *p_left_median = NULL;
 	signed short *p_right_median = NULL;
@@ -5030,6 +5043,10 @@ static void  run_elec_open_test(void *dev_data)
 	unsigned int average;
 	signed short min;
 	signed short max;
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_TD4X00_J2CORESPR
+	signed short min2;
+	signed short max2;
+#endif
 
 	set_default_result(data);
 
@@ -5404,11 +5421,41 @@ static void  run_elec_open_test(void *dev_data)
 	input_err(true, &rmi4_data->i2c_client->dev,
 		"delta average = %d, min = %d, max = %d\n",
 		average, min, max);
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_TD4X00_J2CORESPR
+	/* calculate the ratio */
+	tddi_ratio_calculation(rmi4_data, p_rt92_delta_image);
+
+	memset(p_rt92_image_2, 0x00, tx_num * rx_num * 2);	/* reset the buffer, going to fill in the result. */
+	min2 = max2 = p_rt92_delta_image[0];
+	for (i = 0; i < tx_num; i++) {
+		for (j = 0; j < rx_num; j++) {
+
+			min2 = min_t(signed short, p_rt92_delta_image[i*rx_num + j], min2);
+			max2 = max_t(signed short, p_rt92_delta_image[i*rx_num + j], max2);
+
+			if (p_rt92_delta_image[i * rx_num + j] < ELEC_OPEN_TEST_LIMIT_TWO) {
+
+				input_err(true, &rmi4_data->i2c_client->dev,
+						"%s: fail at (tx%-2d, rx%-2d) = %-4d at phase 2 (limit = %d)\n",
+						i, j, p_rt92_delta_image[i*rx_num + j], ELEC_OPEN_TEST_LIMIT_TWO);
+
+				p_rt92_image_2[i*rx_num + j] = 1; /* 1: fail */
+			} else {
+				p_rt92_image_2[i*rx_num + j] = 0;
+			}
+		}
+	}
+	input_info(true, &rmi4_data->i2c_client->dev, "ph.2 data range (max, min) = (%-4d, %-4d)", max2, min2);
+#endif
 
 	if (data->cmd_all_factory_state == CMD_STATUS_RUNNING)
 		snprintf(data->cmd_buff, CMD_RESULT_STR_LEN, "%d,%d", average, average);
 	else
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_TD4X00_J2CORESPR
+		snprintf(data->cmd_buff, CMD_RESULT_STR_LEN, "%d,%d,%d,%d,%d", average, min, max, min2, max2);	/* J260 */
+#else
 		snprintf(data->cmd_buff, CMD_RESULT_STR_LEN, "%d,%d,%d", average, min, max);
+#endif
 	cmd_state = CMD_STATUS_OK;
 
 sw_reset:
@@ -5607,7 +5654,19 @@ static void run_rawgap_read(void *dev_data)
 
 	num_of_tx = f54->tx_assigned;
 	num_of_rx = f54->rx_assigned;
+
+	/*
+	 * model	 : J330 / J260
+	 * num_of_rx : 29  / 26
+	 * num_of_tx : 16  / 15
+	 * tx_half	 :	8  / 7
+	 */
+	
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_TD4X00_J2CORESPR
+	tx_half = (num_of_tx / 2) + 1;
+#else
 	tx_half = num_of_tx / 2;
+#endif
 
 	max_value = min_value = 0;
 

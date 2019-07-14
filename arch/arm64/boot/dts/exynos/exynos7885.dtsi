@@ -22,6 +22,7 @@
 #include "exynos7885-pinctrl.dtsi"
 #include "exynos7885-pm-domains.dtsi"
 #include "exynos7885-ess.dtsi"
+#include "exynos7885-mali_common.dtsi"
 / {
 	compatible = "samsung,armv8", "samsung,exynos7885";
 	interrupt-parent = <&gic>;
@@ -38,6 +39,14 @@
 			     <0 99 4>,
 			     <0 218 4>,
 			     <0 219 4>;
+		interrupt-affinity = <&cpu6>,
+					<&cpu7>,
+					<&cpu0>,
+					<&cpu1>,
+					<&cpu2>,
+					<&cpu3>,
+					<&cpu4>,
+					<&cpu5>;
 	};
 
 	aliases {
@@ -237,7 +246,7 @@
 				arm,psci-suspend-param = <0x0010000>;
 				entry-latency-us = <30>;
 				exit-latency-us = <75>;
-				min-residency-us = <2000>;
+				min-residency-us = <3000>;
 				status = "okay";
 			};
 		};
@@ -268,23 +277,23 @@
 				mif-perf {
 					const-type = <CONSTRAINT_MIN>;
 					dm-type = <DM_MIF>;
-						/*  cpu     mif  */
-                                        table = < 1690000 1014000
-						  1586000 1014000
-						  1482000 1014000
-						  1352000  845000
-						  1248000  845000
-						  1144000  845000
-						  1014000  845000
-						   902000  676000
-						   839000  676000
-						   757000  546000
-						   676000  546000
-						   546000  420000
-						   449000  420000
-						   343000  420000
-						   208000  420000>;
-                                };
+						         /*  cpu     mif  */
+						table = < 1690000 1014000
+						          1586000 1014000
+						          1482000 1014000
+						          1352000 1014000
+						          1248000 1014000
+						          1144000  845000
+						          1014000  845000
+						           902000  676000
+						           839000  676000
+						           757000  546000
+						           676000  546000
+						           546000  420000
+						           449000  420000
+						           343000  420000
+						           208000  420000>;
+      	};
 			};
 		};
 		domain@1 {
@@ -309,19 +318,19 @@
 				mif-perf {
 					const-type = <CONSTRAINT_MIN>;
 					dm-type = <DM_MIF>;
-						/*  cpu     mif  */
-                                        table = < 2184000 1794000
-                                                  2080000 1794000
-                                                  1976000 1539000
-                                                  1872000 1539000
-                                                  1768000 1352000
-                                                  1664000 1014000
-                                                  1560000  845000
-                                                  1352000  845000
-                                                  1144000  676000
-                                                   936000  546000
-                                                   728000  420000>;
-                                };
+          					/*  cpu     mif  */
+					table = < 2184000 1794000
+          					2080000 1794000
+          					1976000 1539000
+          					1872000 1539000
+          					1768000 1352000
+          					1664000 1014000
+          					1560000  845000
+          					1352000  845000
+          					1144000  676000
+          					 936000  546000
+          					 728000  420000>;
+      	};
 			};
 		};
 	};
@@ -436,7 +445,7 @@
 		/* Delay time */
 		use_delay_time = "false";
 
-		freq_info = <267000 167000 167000 167000 267000 167000>;
+		freq_info = <333000 167000 167000 167000 333000 167000>;
 		/* <initial_freq, default_qos, suspend_freq, min, max, reboot_freq> */
 
 		/* Booting value */
@@ -890,9 +899,10 @@
 		#size-cells = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hs_i2c4_bus>;
-		clocks = <&clock GATE_USI0>, <&clock GATE_USI0>;
+		clocks = <&clock GATE_HSI2C0>, <&clock GATE_HSI2C0>;
 		clock-names = "rate_hsi2c", "gate_hsi2c";
 		samsung,scl-clk-stretching;
+		samsung,usi-i-mode = <0x10032000>;
 		gpio_sda= <&gpc2 0 0x1>;
 		gpio_scl= <&gpc2 1 0x1>;
 		status = "disabled";
@@ -908,9 +918,10 @@
 		#size-cells = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hs_i2c5_bus>;
-		clocks = <&clock GATE_USI0>, <&clock GATE_USI0>;
+		clocks = <&clock GATE_HSI2C0>, <&clock GATE_HSI2C0>;
 		clock-names = "rate_hsi2c", "gate_hsi2c";
 		samsung,scl-clk-stretching;
+		samsung,usi-i-mode = <0x10032000>;
 		gpio_sda= <&gpc2 2 0x1>;
 		gpio_scl= <&gpc2 3 0x1>;
 		status = "disabled";
@@ -926,9 +937,10 @@
 		#size-cells = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hs_i2c6_bus>;
-		clocks = <&clock GATE_USI1>, <&clock GATE_USI1>;
+		clocks = <&clock GATE_HSI2C1>, <&clock GATE_HSI2C1>;
 		clock-names = "rate_hsi2c", "gate_hsi2c";
 		samsung,scl-clk-stretching;
+		samsung,usi-i-mode = <0x10032004>;
 		gpio_sda= <&gpc2 4 0x1>;
 		gpio_scl= <&gpc2 5 0x1>;
 		status = "disabled";
@@ -944,9 +956,10 @@
 		#size-cells = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hs_i2c7_bus>;
-		clocks = <&clock GATE_USI1>, <&clock GATE_USI1>;
+		clocks = <&clock GATE_HSI2C1>, <&clock GATE_HSI2C1>;
 		clock-names = "rate_hsi2c", "gate_hsi2c";
 		samsung,scl-clk-stretching;
+		samsung,usi-i-mode = <0x10032004>;
 		gpio_sda= <&gpc2 6 0x1>;
 		gpio_scl= <&gpc2 7 0x1>;
 		status = "disabled";
@@ -962,9 +975,10 @@
 		#size-cells = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hs_i2c8_bus>;
-		clocks = <&clock GATE_USI2>, <&clock GATE_USI2>;
+		clocks = <&clock GATE_HSI2C2>, <&clock GATE_HSI2C2>;
 		clock-names = "rate_hsi2c", "gate_hsi2c";
 		samsung,scl-clk-stretching;
+		samsung,usi-i-mode = <0x10032008>;
 		gpio_sda= <&gpp7 0 0x1>;
 		gpio_scl= <&gpp7 1 0x1>;
 		status = "disabled";
@@ -980,9 +994,10 @@
 		#size-cells = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hs_i2c9_bus>;
-		clocks = <&clock GATE_USI2>, <&clock GATE_USI2>;
+		clocks = <&clock GATE_HSI2C2>, <&clock GATE_HSI2C2>;
 		clock-names = "rate_hsi2c", "gate_hsi2c";
 		samsung,scl-clk-stretching;
+		samsung,usi-i-mode = <0x10032008>;
 		gpio_sda= <&gpp8 0 0x1>;
 		gpio_scl= <&gpp8 1 0x1>;
 		status = "disabled";
@@ -1230,6 +1245,7 @@
 
 		/* power domain */
 		samsung,power-domain = <&pd_dispaud>;
+		memory-region = <&fb_handover>;
 	};
 
 	idma_g1: dpp@0x148B2000{
@@ -1547,6 +1563,7 @@
 
 		abox_debug: abox_debug@0 {
 			compatible = "samsung,abox-debug";
+			reg = <0x0 0x0 0x0>;
 			memory-region = <&abox_rmem>;
 		};
 
@@ -1679,18 +1696,15 @@
 			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x2, 0xF)>,
 			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x3, 0xF)>,
 			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x4, 0xF)>,
-			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x5, 0xF)>;
+			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x5, 0xF)>,
+			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x6, 0xF)>,
+			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x7, 0xF)>,
+			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x8, 0xF)>,
+			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0x9, 0xF)>,
+			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0xA, 0xF)>,
+			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0xB, 0xF)>,
+			<(SYSMMU_PORT_PREFETCH_PREDICTION_WRITE(0x1)	| SYSMMU_BL1) SYSMMU_ID_MASK(0xC, 0xF)>;
 		#iommu-cells = <0>;
-	};
-
-	mali: mali@11500000 {
-		compatible = "arm,mali";
-		reg = <0x0 0x11500000 0x5000>;
-		interrupts = <0 159 0>, <0 160 0>, <0 158 0>;
-		interrupt-names = "JOB", "MMU", "GPU";
-		g3d_cmu_cal_id = <ACPM_DVFS_G3D>;
-		samsung,power-domain = <&pd_g3d>;
-		#cooling-cells = <2>; /* min followed by max */
 	};
 
 	iommu-domain_mfcmscl {
@@ -3021,4 +3035,61 @@
 		/* If you need to add new key type, add it this position */
 	};
 
+	cpufreq-ufc {
+		/* Ctrl Type */
+		#define PM_QOS_MIN_LIMIT		0
+		#define PM_QOS_MIN_WO_BOOST_LIMIT	1
+		#define PM_QOS_MAX_LIMIT		2
+		/* Execution Mode */
+		#define	AARCH64_MODE			0
+		#define AARCH32_MODE			1
+
+		domain@0 {
+			device_type = "cpufreq-userctrl";
+			shared-cpus = "0-5";
+
+			user-default-qos = <839000>;
+		};
+
+		domain@1 {
+			device_type = "cpufreq-userctrl";
+			shared-cpus = "6-7";
+
+			user-default-qos = <936000>;
+
+			min-limit {
+				ctrl-type = <PM_QOS_MIN_LIMIT>;
+				execution-mode = <AARCH64_MODE>;
+					/* big	    lit */
+				table = < 2184000 1586000
+					  2080000  839000
+					  1976000  839000
+					  1872000  839000
+					  1768000  839000
+					  1664000  839000
+					  1560000  839000
+					  1352000  839000
+					  1144000  839000
+					   936000  839000
+					   728000  839000 >;
+			};
+
+			max-limit {
+				ctrl-type = <PM_QOS_MAX_LIMIT>;
+				execution-mode = <AARCH64_MODE>;
+					/* big	    lit */
+				table = < 2184000 1586000
+					  2080000 1586000
+					  1976000 1586000
+					  1872000 1586000
+					  1768000 1586000
+					  1664000 1586000
+					  1560000 1586000
+					  1352000 1586000
+					  1144000 1352000
+					   936000 1248000
+					   728000 1248000 >;
+			};
+		};
+	};
 };

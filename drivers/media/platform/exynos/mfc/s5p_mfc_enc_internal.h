@@ -874,7 +874,7 @@ static struct v4l2_queryctrl controls[] = {
 		.type = V4L2_CTRL_TYPE_INTEGER,
 		.name = "QoS ratio value",
 		.minimum = 20,
-		.maximum = 200,
+		.maximum = 1000,
 		.step = 10,
 		.default_value = 100,
 	},

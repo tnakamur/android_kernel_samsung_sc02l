@@ -141,6 +141,11 @@ int slsi_hip_stop(struct slsi_dev *sdev)
 	return 0;
 }
 
+int hip4_free_ctrl_slots_count(struct slsi_hip4 *hip)
+{
+	return HIP4_CTL_SLOTS;
+}
+
 int scsc_wifi_transmit_frame(struct slsi_hip4 *hip, bool ctrl_packet, struct sk_buff *skb)
 {
 	struct slsi_dev *sdev = container_of(hip, struct slsi_dev, hip4_inst);

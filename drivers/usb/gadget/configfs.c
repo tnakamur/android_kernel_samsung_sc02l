@@ -533,27 +533,26 @@ static int config_usb_cfg_link(
 	}
 	/* usb tethering */
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-	list_for_each_entry(gs, &gi->string_list, list) {
-		src = gs->serialnumber;
-	}
+	if (fi->set_inst_eth_addr) {
+		list_for_each_entry(gs, &gi->string_list, list) {
+			src = gs->serialnumber;
+		}
 
-	if (!ethaddr[0])
-	{
+		if (src) {
+			for (i = 0; i < ETH_ALEN; i++)
+				ethaddr[i] = 0;
+			/* create a fake MAC address from our serial number.
+			 * first byte is 0x02 to signify locally administered.
+			 */
+			ethaddr[0] = 0x02;
+			for (i = 0; (i < 256) && *src; i++) {
+				/* XOR the USB serial across the remaining bytes */
+				ethaddr[i % (ETH_ALEN - 1) + 1] ^= *src++;
+			}
 
-		for (i = 0; i < ETH_ALEN; i++)
-			ethaddr[i] = 0;
-		/* create a fake MAC address from our serial number.
-		 * first byte is 0x02 to signify locally administered.
-		 */
-		ethaddr[0] = 0x02;
-		for (i = 0; (i < 256) && *src; i++) {
-			/* XOR the USB serial across the remaining bytes */
-			ethaddr[i % (ETH_ALEN - 1) + 1] ^= *src++;
+			fi->set_inst_eth_addr(fi, ethaddr);
 		}
 	}
-
-	if (fi->set_inst_eth_addr)
-		fi->set_inst_eth_addr(fi, ethaddr);
 #endif
 
 	f = usb_get_function(fi);
@@ -1718,6 +1717,18 @@ static void android_disconnect(struct usb_gadget *gadget)
 	struct usb_composite_dev        *cdev = get_gadget_data(gadget);
 	struct gadget_info *gi = container_of(cdev, struct gadget_info, cdev);
 
+	/* FIXME: There's a race between usb_gadget_udc_stop() which is likely
+	 * to set the gadget driver to NULL in the udc driver and this drivers
+	 * gadget disconnect fn which likely checks for the gadget driver to
+	 * be a null ptr. It happens that unbind (doing set_gadget_data(NULL))
+	 * is called before the gadget driver is set to NULL and the udc driver
+	 * calls disconnect fn which results in cdev being a null ptr.
+	 */
+	if (cdev == NULL) {
+		WARN(1, "%s: gadget driver already disconnected\n", __func__);
+		return;
+	}
+
 	/* accessory HID support can be active while the
 		accessory function is not actually enabled,
 		so we need to inform it when we are disconnected.
@@ -2214,7 +2225,9 @@ void unregister_gadget_item(struct config_item *item)
 {
 	struct gadget_info *gi = to_gadget_info(item);
 
+	mutex_lock(&gi->lock);
 	unregister_gadget(gi);
+	mutex_unlock(&gi->lock);
 }
 EXPORT_SYMBOL_GPL(unregister_gadget_item);
 

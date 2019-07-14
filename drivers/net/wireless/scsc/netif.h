@@ -93,7 +93,7 @@ struct slsi_peer;
 
 int slsi_netif_init(struct slsi_dev *sdev);
 /* returns the index or -E<error> code */
-int slsi_netif_add(struct slsi_dev *sdev, const char *name);
+int slsi_netif_dynamic_iface_add(struct slsi_dev *sdev, const char *name);
 int slsi_netif_register(struct slsi_dev *sdev, struct net_device *dev);
 int slsi_netif_register_rtlnl_locked(struct slsi_dev *sdev, struct net_device *dev);
 void slsi_netif_remove(struct slsi_dev *sdev, struct net_device *dev);

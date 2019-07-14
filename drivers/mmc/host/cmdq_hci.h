@@ -91,7 +91,9 @@
 /* response mode error mask */
 #define CQRMEM		0x50
 #define CQ_EXCEPTION	(1 << 6)
+
 /* write protection violation */
+#define WP_ERASE_SKIP	(1 << 15)
 #define WP_EXCEPTION    (1 << 26)
 
 /* task error info */
@@ -234,6 +236,41 @@ struct cmdq_host {
 	struct mmc_request **mrq_slot;
 	u32 cmd_log_idx[NUM_SLOTS];
 	void *private;
+
+	struct list_head	active_mrq;
+	spinlock_t lock;
+	spinlock_t list_lock;
+	struct cmdq_sfr_ramdump		*cq_dump;
+};
+
+struct cmdq_sfr_ramdump {
+	u32 cqver;
+	u32 cqcap;
+	u32 cqcfg;
+	u32 cqctl;
+	u32 cqis;
+	u32 cqiste;
+	u32 cqisge;
+	u32 cqic;
+	u32 cqtlba;
+	u32 cqtlbau;
+	u32 cqtdbr;
+	u32 cqtcn;
+	u32 cqdqs;
+	u32 cqdpt;
+	u32 cqtclr;
+	u32 cqssc1;
+	u32 cqssc2;
+	u32 cqrdct;
+	u32 cqrmem;
+	u32 cqterri;
+	u32 cqcri;
+	u32 cqcra;
+	u32 cqcmd;
+	u32 cqdebug0;
+	u32 cqdebug1;
+	u32 cqdataintmask1;
+	u32 cqdataintmask2;
 };
 
 enum dw_mci_cq_log_cmd {
@@ -273,6 +310,7 @@ struct cmdq_host_ops {
 					struct cmdq_log_ctx *log_ctx);
 	void (*crypto_cfg_reset)(struct mmc_host *mmc, unsigned int slot);
 	void (*hwacg_control)(struct mmc_host *mmc, bool set);
+	int (*hwacg_control_direct)(struct mmc_host *mmc, bool set);
 	void (*post_cqe_halt)(struct mmc_host *mmc);
 	bool (*busy_waiting)(struct mmc_host *mmc, struct mmc_request *mrq);
 	void (*pm_qos_lock)(struct mmc_host *mmc, bool set);
@@ -301,6 +339,7 @@ static inline u32 cmdq_readl(struct cmdq_host *host, int reg)
 extern irqreturn_t cmdq_irq(struct mmc_host *mmc, int err);
 extern int cmdq_init(struct cmdq_host *cq_host, struct mmc_host *mmc,
 		     bool dma64);
+extern int cmdq_free(struct cmdq_host *cq_host);
 extern struct cmdq_host *cmdq_pltfm_init(struct platform_device *pdev);
 extern void cmdq_dumpregs(struct cmdq_host *cq_host);
 #endif

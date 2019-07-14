@@ -602,9 +602,10 @@ static void m2m1shot2_timeout_handler(unsigned long arg)
 {
 	struct m2m1shot2_context *ctx = (struct m2m1shot2_context *)arg;
 	struct m2m1shot2_source_image *image = ctx->source;
+	struct m2m1shot2_context_image *timeout_image[M2M1SHOT2_MAX_IMAGES + 1];
 	unsigned long flags;
 	char name[32];
-	int i;
+	int i, j = 0;
 
 	pr_err("%s: %d Fence(s) timed out after %d msec.\n", __func__,
 		atomic_read(&ctx->starter.refcount), M2M1S2_TIMEOUT_INTERVAL);
@@ -659,27 +660,28 @@ static void m2m1shot2_timeout_handler(unsigned long arg)
 
 	for (i = 0; i < ctx->num_sources; i++) {
 		if (image[i].img.flags & M2M1SHOT2_IMGFLAG_ACQUIRE_FENCE) {
-			sync_fence_cancel_async(image[i].img.fence,
-						&image[i].img.waiter);
 			image[i].img.flags &= ~M2M1SHOT2_IMGFLAG_ACQUIRE_FENCE;
-			sync_fence_put(image[i].img.fence);
+			timeout_image[j++] = &image[i].img;
 		}
 	}
 
 	if (!!(ctx->target.flags & M2M1SHOT2_IMGFLAG_ACQUIRE_FENCE)) {
-		sync_fence_cancel_async(ctx->target.fence, &ctx->target.waiter);
 		ctx->target.flags &= ~M2M1SHOT2_IMGFLAG_ACQUIRE_FENCE;
-		sync_fence_put(ctx->target.fence);
+		timeout_image[j++] = &ctx->target;
 	}
+
+	/* Increase reference to prevent running the workqueue in callback */
+	kref_get(&ctx->starter);
 
 	spin_unlock_irqrestore(&ctx->fence_timeout_lock, flags);
 	
-	/*
-	 * Now it is OK to init kref for m2m1shot2_schedule_queuework below.
-	 * All fences waiter are removed.
-	 */
-	kref_init(&ctx->starter);
-	kref_put(&ctx->starter, m2m1shot2_schedule_queuework);
+	while (j-- > 0) {
+		sync_fence_cancel_async(timeout_image[j]->fence,
+					&timeout_image[j]->waiter);
+		sync_fence_put(timeout_image[j]->fence);
+	}
+
+	m2m1shot2_schedule_queuework(&ctx->starter);
 };
 
 /**

@@ -19,6 +19,16 @@
 #include <linux/clk.h>
 #include "fingerprint_sysfs.h"
 
+#if defined(ENABLE_SENSORS_FPRINT_SECURE) && defined(CONFIG_TZDEV)
+#define FP_CSMC_HANDLER_ID 0xB2000201
+#define FP_HANDLER_MAIN 100
+
+enum fp_control_case {
+	FP_SET_POWEROFF = 1,//fp_set_poweroff_regs
+	FP_SET_POWERON_INACTIVE,
+};
+#endif
+
 /* fingerprint debug timer */
 #define FPSENSOR_DEBUG_TIMER_SEC (10 * HZ)
 
@@ -32,13 +42,13 @@ enum {
 	SENSOR_EGIS,
 	SENSOR_VIPER_WOG,
 	SENSOR_NAMSAN,
-	SENSOR_GW32J,
+	SENSOR_GOODIX,
 	SENSOR_MAXIMUM,
 };
 
 #define SENSOR_STATUS_SIZE 9
 static char sensor_status[SENSOR_STATUS_SIZE][10] = {"ooo", "unknown", "failed",
-	"viper", "raptor", "egis", "viper_wog", "namsan", "gw32j"};
+	"viper", "raptor", "egis", "viper_wog", "namsan", "goodix"};
 
 /* For Finger Detect Mode */
 enum {

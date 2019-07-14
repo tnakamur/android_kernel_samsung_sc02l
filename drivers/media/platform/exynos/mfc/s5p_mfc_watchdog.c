@@ -52,7 +52,7 @@ static void mfc_dump_regs(struct s5p_mfc_dev *dev)
 		{ 0xC000, 0x84 },
 	};
 
-	pr_err("-----------dumping MFC registers (SFR base = %p, dev = %p)\n",
+	pr_err("-----------dumping MFC registers (SFR base = %pK, dev = %pK)\n",
 				dev->regs_base, dev);
 
 	s5p_mfc_enable_all_clocks(dev);
@@ -213,8 +213,7 @@ static void mfc_save_logging_sfr(struct s5p_mfc_dev *dev)
 		/* READ PAGE FAULT at AxID 0 ~ 3: PX */
 		if ((dev->logging_data->cause & (1 << MFC_CAUSE_0READ_PAGE_FAULT)) ||
 				(dev->logging_data->cause & (1 << MFC_CAUSE_1READ_PAGE_FAULT))) {
-			if (((dev->logging_data->fault_trans_info & 0xff) >= 0) &&
-					((dev->logging_data->fault_trans_info & 0xff) <= 3)) {
+			if ((dev->logging_data->fault_trans_info & 0xff) <= 3) {
 				px_fault = true;
 				for (i = 0; i < MFC_SFR_LOGGING_COUNT_SET2; i++)
 					dev->logging_data->SFRs_set2[i] = MFC_READL(s5p_mfc_logging_sfr_set2[i]);
@@ -256,7 +255,7 @@ static void mfc_save_logging_sfr(struct s5p_mfc_dev *dev)
 	dev->logging_data->last_int_sec = dev->last_int_time.tv_sec;
 	dev->logging_data->last_int_usec = dev->last_int_time.tv_usec;
 	dev->logging_data->hwlock_dev = dev->hwlock.dev;
-	dev->logging_data->hwlock_ctx = dev->hwlock.bits;
+	dev->logging_data->hwlock_ctx = (u32)(dev->hwlock.bits);
 	dev->logging_data->num_inst = dev->num_inst;
 	dev->logging_data->num_drm_inst = dev->num_drm_inst;
 	dev->logging_data->power_cnt = s5p_mfc_pm_get_pwr_ref_cnt(dev);
@@ -329,9 +328,17 @@ void s5p_mfc_dump_buffer_info(struct s5p_mfc_dev *dev, unsigned long addr)
 	ctx = dev->ctx[dev->curr_ctx];
 	if (ctx) {
 		pr_err("-----------dumping MFC buffer info (fault at: %#lx)\n", addr);
-		pr_err("common:%#llx~%#llx, instance:%#llx~%#llx, codec:%#llx~%#llx\n",
+		pr_err("Normal FW:%llx~%#llx (common ctx buf:%#llx~%#llx)\n",
+				dev->fw_buf.daddr, dev->fw_buf.daddr + dev->fw_buf.size,
 				dev->common_ctx_buf.daddr,
-				dev->common_ctx_buf.daddr + PAGE_ALIGN(0x7800),
+				dev->common_ctx_buf.daddr + PAGE_ALIGN(0x7800));
+#ifdef CONFIG_EXYNOS_CONTENT_PATH_PROTECTION
+		pr_err("Secure FW:%llx~%#llx (common ctx buf:%#llx~%#llx)\n",
+				dev->drm_fw_buf.daddr, dev->drm_fw_buf.daddr + dev->drm_fw_buf.size,
+				dev->drm_common_ctx_buf.daddr,
+				dev->drm_common_ctx_buf.daddr + PAGE_ALIGN(0x7800));
+#endif
+		pr_err("instance buf:%#llx~%#llx, codec buf:%#llx~%#llx\n",
 				ctx->instance_ctx_buf.daddr,
 				ctx->instance_ctx_buf.daddr + ctx->instance_ctx_buf.size,
 				ctx->codec_buf.daddr,

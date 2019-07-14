@@ -155,7 +155,7 @@ struct __packed shmem_4mb_phys_map {
 #ifdef GROUP_MEM_IPC_DEVICE
 
 struct mem_ipc_device {
-	enum dev_format id;
+	enum legacy_ipc_map id;
 	char name[16];
 
 	struct circ_queue txq;
@@ -335,7 +335,7 @@ struct mem_link_device {
 	struct resource *syscp_info;
 
 	/**
-	 * Actual logical IPC devices (for IPC_FMT and IPC_RAW)
+	 * Actual logical IPC devices (for IPC_MAP_FMT, IPC_MAP_NORM_RAW...)
 	 */
 	struct mem_ipc_device ipc_dev[MAX_SIPC_MAP];
 
@@ -496,6 +496,18 @@ struct mem_link_device {
 	unsigned int force_use_memcpy;
 	unsigned int memcpy_packet_count;
 	unsigned int zeromemcpy_packet_count;
+
+#ifdef CONFIG_LINK_DEVICE_NAPI
+	struct net_device dummy_net;
+	struct napi_struct mld_napi;
+	unsigned int rx_int_enable;
+	unsigned int rx_int_count;
+	unsigned int rx_poll_count;
+	unsigned long long rx_int_disabled_time;
+#endif /* CONFIG_LINK_DEVICE_NAPI */
+#ifdef CONFIG_MODEM_IF_NET_GRO
+	struct timespec flush_time;
+#endif
 
 	atomic_t forced_cp_crash;
 	struct timer_list crash_ack_timer;
@@ -725,12 +737,11 @@ static inline enum dev_format dev_id(enum sipc_ch_id ch)
 	return sipc5_fmt_ch(ch) ? IPC_FMT : IPC_RAW;
 }
 
-static inline enum dev_format get_mmap_idx(enum sipc_ch_id ch,
+static inline enum legacy_ipc_map get_mmap_idx(enum sipc_ch_id ch,
 		struct sk_buff *skb)
 {
 	if (sipc5_fmt_ch(ch))
 		return IPC_MAP_FMT;
-	else
 #ifdef CONFIG_MODEM_IF_LEGACY_QOS
 		return (skb->queue_mapping == 1) ?
 			IPC_MAP_HPRIO_RAW : IPC_MAP_NORM_RAW;
@@ -933,5 +944,7 @@ void iosm_event_bh(struct mem_link_device *mld, u16 cmd);
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 extern int is_rndis_use(void);
 #endif
+
+extern void pass_skb_to_net(struct mem_link_device *mld, struct sk_buff *skb);
 
 #endif

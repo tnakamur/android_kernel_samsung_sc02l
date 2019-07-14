@@ -57,6 +57,7 @@
 #include <linux/suspend.h>
 #include <soc/samsung/exynos-itmon.h>
 
+#include <asm/debug-monitors.h>
 #include <asm/system_misc.h>
 #include <asm/stacktrace.h>
 #include <asm/cacheflush.h>
@@ -78,10 +79,10 @@
 #define FW_PATH "/vendor/firmware/"
 #endif
 
-struct ecd_interface *interface = NULL;
-bool initial_no_firmware = false;
+static struct ecd_interface *interface = NULL;
 static bool initial_console_enable = false;
 static bool initial_ecd_enable = false;
+bool initial_no_firmware = false;
 
 extern int ecd_init_binary(unsigned long, unsigned long);
 extern int ecd_start_binary(unsigned long);
@@ -90,7 +91,8 @@ extern struct irq_domain *gic_get_root_irqdomain(unsigned int gic_nr);
 extern int gic_irq_domain_map(struct irq_domain *d,
 				unsigned int irq, irq_hw_number_t hw);
 
-struct list_head ecd_ioremap_list;
+static struct list_head ecd_ioremap_list;
+static struct vm_struct ecd_early_vm;
 
 struct ecd_ioremap_item {
 	unsigned long vaddr;
@@ -116,6 +118,7 @@ struct ecd_interface_ops {
 	int (*sysfs_break_now_store)(const char *, int);
 	int (*sysfs_switch_dbg_store)(const char *, int);
 };
+
 struct ecd_rc {
 	int				setup_idx;
 	int				action_idx;
@@ -164,7 +167,7 @@ struct ecd_interface {
 };
 
 #ifdef CONFIG_EXYNOS_CONSOLE_DEBUGGER_INTERFACE
-struct tty_driver *ecd_tty_driver;
+static struct tty_driver *ecd_tty_driver;
 #endif
 
 bool ecd_get_debug_panic(void)
@@ -1097,7 +1100,7 @@ static void ecd_dump_stacktrace_task(struct pt_regs *regs, struct task_struct *t
 	}
 
 	ecd_printf("Call trace:\n");
-	walk_stackframe(&frame, report_trace, NULL);
+	walk_stackframe(NULL, &frame, report_trace, NULL);
 }
 
 #define THREAD_INFO(sp) ((struct thread_info *) \
@@ -1129,7 +1132,7 @@ static void ecd_dump_stacktrace(const struct pt_regs *regs, void *ssp)
 		frame.sp = regs->sp;
 		frame.pc = regs->pc;
 		ecd_printf("\n");
-		walk_stackframe(&frame, report_trace, NULL);
+		walk_stackframe(NULL, &frame, report_trace, NULL);
 	}
 	memcpy(current_thread_info(), &flags, sizeof(struct thread_info));
 }
@@ -1374,10 +1377,12 @@ void ecd_do_break_now(void)
 
 static int __init add_exception_func(void)
 {
-	hook_debug_fault_code(DBG_ESR_EVT_HWBP, ecd_do_breakpoint, SIGTRAP,
-			      TRAP_HWBKPT, "hw-breakpoint handler");
-	hook_debug_fault_code(DBG_ESR_EVT_HWWP, ecd_do_watchpoint, SIGTRAP,
-			      TRAP_HWBKPT, "hw-watchpoint handler");
+	if (!initial_no_firmware) {
+		hook_debug_fault_code(DBG_ESR_EVT_HWBP, ecd_do_breakpoint, SIGTRAP,
+				      TRAP_HWBKPT, "hw-breakpoint handler");
+		hook_debug_fault_code(DBG_ESR_EVT_HWWP, ecd_do_watchpoint, SIGTRAP,
+				      TRAP_HWBKPT, "hw-watchpoint handler");
+	}
 	return 0;
 }
 arch_initcall(add_exception_func);
@@ -1909,6 +1914,9 @@ static int ecd_probe(struct platform_device *pdev)
 	struct ecd_interface *inf;
 	struct ecd_pdata *pdata = dev_get_platdata(&pdev->dev);
 	int uart_irq, ret;
+	int page_size, i;
+	struct page *page;
+	struct page **pages;
 
 	if (!initial_ecd_enable) {
 		dev_err(&pdev->dev, "initial_ecd_enable is not set");
@@ -1921,10 +1929,22 @@ static int ecd_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	if (pdev->id >= MAX_DEBUGGER_PORTS) {
-		dev_err(&pdev->dev, "MAX_DEBUGGER_PORTS over");
-		return -EINVAL;
+	page_size = ecd_early_vm.size / PAGE_SIZE;
+	pages = kzalloc(sizeof(struct page*) * page_size, GFP_KERNEL);
+	page = phys_to_page(ecd_early_vm.phys_addr);
+
+	for (i = 0; i < page_size; i++)
+		pages[i] = page++;
+
+	ret = map_vm_area(&ecd_early_vm, PAGE_KERNEL, pages);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to mapping between virt and phys for firmware");
+		return -ENOMEM;
 	}
+	kfree(pages);
+
+	if (pdev->id >= MAX_DEBUGGER_PORTS)
+		return -EINVAL;
 
 	if (!pdata->uart_getc || !pdata->uart_putc) {
 		dev_err(&pdev->dev, "did not have getc & putc function");
@@ -2008,7 +2028,6 @@ static int __init ecd_setup(char *str)
 {
 	char *move;
 	char *console = NULL, *option = NULL;
-	struct map_desc iodesc;
 	unsigned long paddr;
 
 	if (!str)
@@ -2032,12 +2051,13 @@ static int __init ecd_setup(char *str)
 		initial_no_firmware = true;
 
 	if (!initial_no_firmware) {
-		paddr = memblock_alloc(CONDBG_FW_SIZE, SZ_4K);
-		iodesc.virtual = CONDBG_FW_ADDR;
-		iodesc.pfn = __phys_to_pfn(paddr);
-		iodesc.length = CONDBG_FW_SIZE;
-		iodesc.type = MT_MEMORY;
-		iotable_init_exec(&iodesc, 1);
+		ecd_early_vm.phys_addr = memblock_alloc(CONDBG_FW_SIZE, SZ_4K);
+		ecd_early_vm.addr = (void *)CONDBG_FW_ADDR;
+		ecd_early_vm.size = CONDBG_FW_SIZE + PAGE_SIZE;
+
+		/* Reserved fixed virtual memory within VMALLOC region */
+		vm_area_add_early(&ecd_early_vm);
+
 		pr_info("ECD reserved memory:%zx, %zx, for firmware\n",
 						paddr, CONDBG_FW_ADDR);
 		initial_ecd_enable = true;
@@ -2093,5 +2113,4 @@ static int __init ecd_init(void)
 #endif
 	return platform_driver_register(&ecd_driver);
 }
-
 postcore_initcall(ecd_init);

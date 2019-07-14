@@ -95,6 +95,7 @@ struct pn547_dev {
 };
 
 static struct pn547_dev *pn547_dev;
+static atomic_t s_Device_opened = ATOMIC_INIT(1);
 
 #ifdef CONFIG_NFC_PN547_ESE_SUPPORT
 static struct semaphore ese_access_sema;
@@ -478,10 +479,21 @@ static int pn547_dev_open(struct inode *inode, struct file *filp)
 	struct pn547_dev *pn547_dev = container_of(filp->private_data,
 						   struct pn547_dev,
 						   pn547_device);
+	if (!atomic_dec_and_test(&s_Device_opened)) {
+		atomic_inc(&s_Device_opened);
+		pr_err("%s: already opened!\n", __func__);
+		return -EBUSY;
+	}
 	filp->private_data = pn547_dev;
 
 	pr_debug("%s : %d,%d\n", __func__, imajor(inode), iminor(inode));
 
+	return 0;
+}
+
+static int pn547_dev_release(struct inode *inode, struct file *filp)
+{
+	atomic_inc(&s_Device_opened);
 	return 0;
 }
 
@@ -1003,12 +1015,14 @@ static void release_ese_lock(p61_access_state_t  p61_current_state)
 }
 #endif
 
+
 static const struct file_operations pn547_dev_fops = {
 	.owner = THIS_MODULE,
 	.llseek = no_llseek,
 	.read = pn547_dev_read,
 	.write = pn547_dev_write,
 	.open = pn547_dev_open,
+	.release = pn547_dev_release,
 	.unlocked_ioctl = pn547_dev_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = pn547_compat_ioctl,

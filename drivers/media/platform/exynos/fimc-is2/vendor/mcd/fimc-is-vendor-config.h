@@ -29,6 +29,10 @@
 #include "fimc-is-vendor-config_a6e.h"
 #elif defined(CONFIG_CAMERA_A7Y18)
 #include "fimc-is-vendor-config_a7y18.h"
+#elif defined(CONFIG_CAMERA_J2CORE)
+#include "fimc-is-vendor-config_j2corelte.h"
+#elif defined(CONFIG_CAMERA_M20)
+#include "fimc-is-vendor-config_m20.h"
 #else
 #include "fimc-is-vendor-config_jackpot.h" /* Default */
 #endif

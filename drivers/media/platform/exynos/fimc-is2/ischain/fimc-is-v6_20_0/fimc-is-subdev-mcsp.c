@@ -69,7 +69,7 @@ static int fimc_is_ischain_mxp_cfg(struct fimc_is_subdev *subdev,
 	height = queue->framecfg.height;
 	fimc_is_ischain_mxp_adjust_crop(device, incrop->w, incrop->h, &width, &height);
 
-	if (queue->framecfg.colorspace == V4L2_COLORSPACE_JPEG) {
+	if (queue->framecfg.quantization == V4L2_QUANTIZATION_FULL_RANGE) {
 		crange = SCALER_OUTPUT_YUV_RANGE_FULL;
 		msinfo("CRange:W\n", device, subdev);
 	} else {
@@ -249,7 +249,7 @@ static int fimc_is_ischain_mxp_start(struct fimc_is_device_ischain *device,
 
 	fimc_is_ischain_mxp_adjust_crop(device, incrop->w, incrop->h, &otcrop->w, &otcrop->h);
 
-	if (queue->framecfg.colorspace == V4L2_COLORSPACE_JPEG) {
+	if (queue->framecfg.quantization == V4L2_QUANTIZATION_FULL_RANGE) {
 		crange = SCALER_OUTPUT_YUV_RANGE_FULL;
 		mdbg_pframe("CRange:W\n", device, subdev, frame);
 	} else {
@@ -428,23 +428,23 @@ static int fimc_is_ischain_mxp_tag(struct fimc_is_subdev *subdev,
 	switch (node->vid) {
 	case FIMC_IS_VIDEO_M0P_NUM:
 		index = PARAM_MCS_OUTPUT0;
-		target_addr = ldr_frame->shot->uctl.scalerUd.sc0TargetAddress;
+		target_addr = ldr_frame->sc0TargetAddress;
 		break;
 	case FIMC_IS_VIDEO_M1P_NUM:
 		index = PARAM_MCS_OUTPUT1;
-		target_addr = ldr_frame->shot->uctl.scalerUd.sc1TargetAddress;
+		target_addr = ldr_frame->sc1TargetAddress;
 		break;
 	case FIMC_IS_VIDEO_M2P_NUM:
 		index = PARAM_MCS_OUTPUT2;
-		target_addr = ldr_frame->shot->uctl.scalerUd.sc2TargetAddress;
+		target_addr = ldr_frame->sc2TargetAddress;
 		break;
 	case FIMC_IS_VIDEO_M3P_NUM:
 		index = PARAM_MCS_OUTPUT3;
-		target_addr = ldr_frame->shot->uctl.scalerUd.sc3TargetAddress;
+		target_addr = ldr_frame->sc3TargetAddress;
 		break;
 	case FIMC_IS_VIDEO_M4P_NUM:
 		index = PARAM_MCS_OUTPUT4;
-		target_addr = ldr_frame->shot->uctl.scalerUd.sc4TargetAddress;
+		target_addr = ldr_frame->sc4TargetAddress;
 		break;
 	default:
 		mserr("vid(%d) is not matched", device, subdev, node->vid);
@@ -481,6 +481,7 @@ static int fimc_is_ischain_mxp_tag(struct fimc_is_subdev *subdev,
 		if (!COMPARE_CROP(incrop, &inparm) ||
 			!COMPARE_CROP(otcrop, &otparm) ||
 			change_pixelformat ||
+			test_bit(FIMC_IS_ISCHAIN_MODE_CHANGED, &device->state) ||
 			!test_bit(FIMC_IS_SUBDEV_RUN, &subdev->state) ||
 			test_bit(FIMC_IS_SUBDEV_FORCE_SET, &leader->state)) {
 			ret = fimc_is_ischain_mxp_start(device,
@@ -500,6 +501,7 @@ static int fimc_is_ischain_mxp_tag(struct fimc_is_subdev *subdev,
 				merr("fimc_is_ischain_mxp_start is fail(%d)", device, ret);
 				goto p_err;
 			}
+			clear_bit(FIMC_IS_ISCHAIN_MODE_CHANGED, &device->state);
 
 			mdbg_pframe("in_crop[%d, %d, %d, %d]\n", device, subdev, ldr_frame,
 				incrop->x, incrop->y, incrop->w, incrop->h);
@@ -538,22 +540,21 @@ static int fimc_is_ischain_mxp_tag(struct fimc_is_subdev *subdev,
 			}
 		}
 	} else {
-		if (test_bit(FIMC_IS_SUBDEV_RUN, &subdev->state)) {
-			ret = fimc_is_ischain_mxp_stop(device,
-				subdev,
-				ldr_frame,
-				mcs_output,
-				index,
-				&lindex,
-				&hindex,
-				&indexes);
-			if (ret) {
-				merr("fimc_is_ischain_mxp_stop is fail(%d)", device, ret);
-				goto p_err;
-			}
-
-			mdbg_pframe(" off\n", device, subdev, ldr_frame);
+		ret = fimc_is_ischain_mxp_stop(device,
+			subdev,
+			ldr_frame,
+			mcs_output,
+			index,
+			&lindex,
+			&hindex,
+			&indexes);
+		if (ret) {
+			merr("fimc_is_ischain_mxp_stop is fail(%d)", device, ret);
+			goto p_err;
 		}
+
+		if (test_bit(FIMC_IS_SUBDEV_RUN, &subdev->state))
+			mdbg_pframe(" off\n", device, subdev, ldr_frame);
 
 		if ((node->vid - FIMC_IS_VIDEO_M0P_NUM)
 			== (ldr_frame->shot->uctl.scalerUd.mcsc_sub_blk_port[INTERFACE_TYPE_DS])) {

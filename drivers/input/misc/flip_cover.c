@@ -70,7 +70,8 @@ static ssize_t flip_cover_detect_show(struct device *dev,
 	return strlen(buf);
 }
 static ssize_t certify_hall_detect_show(struct device *dev,
-					struct device_attribute *attr, char *buf)
+					struct device_attribute *attr,
+					char *buf)
 {
 	if (!test_bit(SW_CERTIFYHALL, gddata->input->sw))
 		sprintf(buf, "OPEN\n");
@@ -87,9 +88,28 @@ static struct attribute *flip_cover_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group flip_cover_attr_group = {
+static struct attribute_group flip_cover_attrs_group = {
 	.attrs = flip_cover_attrs,
 };
+
+static struct attribute *flip_cover_attr[] = {
+	&dev_attr_hall_detect.attr,
+	NULL,
+};
+
+static struct attribute_group flip_cover_attr_group = {
+	.attrs = flip_cover_attr,
+};
+
+static struct attribute *certify_cover_attr[] = {
+	&dev_attr_certify_hall_detect.attr,
+	NULL,
+};
+
+static struct attribute_group certify_cover_attr_group = {
+	.attrs = certify_cover_attr,
+};
+
 #endif
 
 #if IS_ENABLED(CONFIG_SEC_FACTORY)
@@ -180,13 +200,15 @@ static int flip_cover_setup_halls(struct flip_cover_drvdata *ddata)
 		hall->input = input;
 		hall->state = gpio_get_value_cansleep(hall->gpio);
 		input_set_capability(input, EV_SW, hall->event);
-		wake_lock_init(&hall->wlock, WAKE_LOCK_SUSPEND, "flip_cover_wlock");
+		wake_lock_init(&hall->wlock, WAKE_LOCK_SUSPEND,
+						"flip_cover_wlock");
 		INIT_DELAYED_WORK(&hall->dwork, flip_cover_work);
 		ret = request_threaded_irq(hall->irq, NULL, flip_cover_detect,
-				IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
-				hall->name, hall);
+			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+			hall->name, hall);
 		if (ret < 0)
-			pr_err("failed to request irq %d(%d)\n", hall->irq, ret);
+			pr_err("failed to request irq %d(%d)\n",
+							hall->irq, ret);
 	}
 
 	return ret;
@@ -288,7 +310,19 @@ static int flip_cover_probe(struct platform_device *pdev)
 	input_set_drvdata(input, ddata);
 #if IS_ENABLED(CONFIG_SEC_SYSFS)
 	sec_key_dev = sec_device_find("sec_key");
-	ret = sysfs_create_group(&sec_key_dev->kobj, &flip_cover_attr_group);
+	if (pdata->nhalls == 1) {
+		struct flip_cover_hall_data *hall = &ddata->pdata->hall[0];
+
+		if (!strncmp(hall->name, "hall", 4))
+			ret = sysfs_create_group(&sec_key_dev->kobj,
+						&flip_cover_attr_group);
+		else
+			ret = sysfs_create_group(&sec_key_dev->kobj,
+						&certify_cover_attr_group);
+	} else if (pdata->nhalls == 2) {
+		ret = sysfs_create_group(&sec_key_dev->kobj,
+					&flip_cover_attrs_group);
+	}
 	if (ret) {
 		pr_err("failed to create sysfs %d\n", ret);
 		goto fail4;
@@ -310,8 +344,24 @@ fail1:
 static int flip_cover_remove(struct platform_device *pdev)
 {
 	struct flip_cover_drvdata *ddata = platform_get_drvdata(pdev);
+#if IS_ENABLED(CONFIG_SEC_SYSFS)
+	struct device *sec_key_dev;
 
-	sysfs_remove_group(&ddata->dev->parent->kobj, &flip_cover_attr_group);
+	sec_key_dev = sec_device_find("sec_key");
+	if (ddata->pdata->nhalls == 1) {
+		struct flip_cover_hall_data *hall = &ddata->pdata->hall[0];
+
+		if (!strncmp(hall->name, "hall", 4))
+			sysfs_remove_group(&sec_key_dev->parent->kobj,
+						&flip_cover_attr_group);
+		else
+			sysfs_remove_group(&sec_key_dev->parent->kobj,
+						&certify_cover_attr_group);
+	} else if (ddata->pdata->nhalls == 2)
+		sysfs_remove_group(&sec_key_dev->parent->kobj,
+						&flip_cover_attrs_group);
+#endif
+
 	device_init_wakeup(&pdev->dev, 0);
 	input_unregister_device(ddata->input);
 	platform_set_drvdata(pdev, NULL);

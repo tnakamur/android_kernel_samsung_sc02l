@@ -24,10 +24,23 @@ config SCSC_CORE_TOOL_LOCATION
 	---help---
 	  Select the moredump tool location, when CONFIG_SCSC_CORE_FW_LOCATION_AUTO=n
 
+config SCSC_WLBT_CONFIG_PLATFORM
+	string "SCSC WLBT PLATFORM"
+	default ""
+	---help---
+	  Select the platform, e.g. lassen_smdk
+
 config SCSC_PCIE
 	tristate "Samsung SCSC MIF PCIE implementation"
 	depends on SCSC_CORE
 	depends on PCI
+config SCSC_MXLOGGER
+	bool "Samsung SCSC MXLOGGER (Sable)"
+	depends on SCSC_CORE
+	default n
+	---help---
+	   MXLOGGER provides FW level logging in DRAM
+
 
 config SCSC_WLBTD
 	bool "Samsung SCSC Daemon support for Android O"
@@ -35,6 +48,13 @@ config SCSC_WLBTD
 	default n
 	---help---
 	   Uses generic netlink messages to communicate events to userspace daemon which takes necessary actions e.g. taking moredump
+
+config SCSC_WRITE_INFO_FILE_WLBTD
+	bool "SCSC flag to decide whether to write file via wlbtd or not"
+	depends on SCSC_WLBTD
+	default y
+	---help---
+		SCSC flag to decide whether to write file via wlbtd or not
 
 config SCSC_PLATFORM
 	tristate "Samsung SCSC MIF Platform driver implementation"
@@ -114,6 +134,13 @@ config SCSC_WIFILOGGER_TEST
 	bool "Samsung SCSC Android Wi-Fi Logger Test Harness"
 	depends on SCSC_WIFILOGGER && SCSC_WIFILOGGER_DEBUGFS
 	default n
+
+config SCSC_LOG_COLLECTION
+	bool "Samsung SCSC Log Collection"
+	depends on SCSC_CORE
+	default n
+	---help---
+	  Enable LOG collection to collect Chunks (host and FW) and generate a SBL file
 
 config SCSC_MX150_EXT_DUAL_FEM
 	bool "Support MX150 boards with dual external WLBT front-end"

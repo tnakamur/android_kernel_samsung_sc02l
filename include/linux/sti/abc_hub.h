@@ -41,17 +41,28 @@ struct sub_cond_pdata {
 	int irq_number[DET_CONN_MAX_NUM_GPIOS];
 	unsigned int irq_type[DET_CONN_MAX_NUM_GPIOS];
 	int gpio_cnt;
+	struct mutex cond_lock;
 };
 #endif
 
 /*********** sub module : bootc ************/
 #ifdef CONFIG_SEC_ABC_HUB_BOOTC
+#define BOOTC_OFFSET_DATA_CNT 1
+#define BOOTC_OFFSET_STR_MAX 100
+
+struct abc_hub_bootc_offset_data {
+	char module[BOOTC_OFFSET_STR_MAX];
+	int offset;
+};
+
 struct sub_bootc_pdata {
 	// common
 	int init;
 	int enabled;
 	// custom
 	int time_spec;
+	int time_spec_offset;
+	struct abc_hub_bootc_offset_data offset_data[BOOTC_OFFSET_DATA_CNT];
 	struct workqueue_struct *workqueue;
 	struct delayed_work bootc_work;
 };

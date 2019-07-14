@@ -199,6 +199,8 @@ obj-$(CONFIG_MFD_S2MPU07)	+= s2mpu07_core.o s2mpu07_irq.o
 obj-$(CONFIG_MFD_S2MPU08)	+= s2mpu08_core.o s2mpu08_irq.o
 obj-$(CONFIG_MFD_S2MPB02)	+= s2mpb02-core.o s2mpb02-irq.o
 obj-$(CONFIG_MFD_S2MU004)	+= s2mu004_core.o s2mu004_irq.o
+obj-$(CONFIG_MFD_S2MU106)	+= s2mu106_core.o s2mu106_irq.o
+obj-$(CONFIG_MFD_S2MU205)	+= s2mu205_core.o s2mu205_irq.o
 obj-$(CONFIG_MFD_S2MU005)	+= s2mu005_core.o s2mu005_irq.o
 obj-$(CONFIG_MFD_SYSCON)	+= syscon.o
 obj-$(CONFIG_MFD_LM3533)	+= lm3533-core.o lm3533-ctrlbank.o
@@ -213,7 +215,6 @@ obj-$(CONFIG_MFD_HI6421_PMIC)	+= hi6421-pmic-core.o
 obj-$(CONFIG_MFD_DLN2)		+= dln2.o
 obj-$(CONFIG_MFD_RT5033)	+= rt5033.o
 obj-$(CONFIG_MFD_SKY81452)	+= sky81452.o
-obj-$(CONFIG_MFD_S2MU004)       += s2mu004_core.o s2mu004_irq.o
 
 intel-soc-pmic-objs		:= intel_soc_pmic_core.o intel_soc_pmic_crc.o
 intel-soc-pmic-$(CONFIG_INTEL_PMC_IPC)	+= intel_soc_pmic_bxtwc.o

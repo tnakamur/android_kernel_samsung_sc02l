@@ -26,6 +26,10 @@ static struct reg_index_table reg_id_table[15] = {
 #define REGISTER_TEST	49 /* 1 */
 #define DATA_TEST	50 /* 2 */
 
+#define OFFSET_DATA_SET 2
+#define DATA_MAX_LEN    128
+
+
 enum {
 	dataset = 0,
 	registerset,
@@ -46,7 +50,7 @@ void mobeam_write(struct ssp_data *data, int type, u8 *u_buf)
 
 	struct ssp_msg *msg;
 
-	if (!(data->uSensorState & (1 << SENSOR_TYPE_PROXIMITY))) {
+	if (!(data->uSensorState & (1ULL << SENSOR_TYPE_PROXIMITY))) {
 		pr_info("[SSP]: %s - Skip this function!!!"\
 			", proximity sensor is not connected(0x%llx)\n",
 			__func__, data->uSensorState);
@@ -157,8 +161,13 @@ static ssize_t barcode_emul_store(struct device *dev,
 		const char *buf, size_t size)
 {
 	struct ssp_data *data = dev_get_drvdata(dev);
-	u8 send_buf[128] = { 0, };
+	u8 send_buf[DATA_MAX_LEN] = { 0, };
 	int i;
+	int len;
+	if(size <= 1) {
+		pr_info("[SSP] %s - not enough size of input data(%d)", __func__, (int)size);
+		return -EINVAL;
+	}
 
 	memset(send_buf, 0xFF, 128);
 	if (buf[0] == 0xFF && buf[1] != STOP_BEAMING) {
@@ -176,7 +185,12 @@ static ssize_t barcode_emul_store(struct device *dev,
 	} else if (buf[0] == 0x00) {
 		pr_info("[SSP] %s - DATA SET(0x%X, 0x%X)\n", __func__,
 			buf[0], buf[1]);
-		memcpy(send_buf, &buf[2], 128);
+            len = (int)size - OFFSET_DATA_SET;
+            if (len > DATA_MAX_LEN) {
+                len = DATA_MAX_LEN;
+            }
+            memcpy(send_buf, &buf[2], len);
+
 		pr_info("[SSP] %s - %u %u %u %u %u %u\n", __func__,
 			send_buf[0], send_buf[1], send_buf[2],
 			send_buf[3], send_buf[4], send_buf[5]);
@@ -188,6 +202,10 @@ static ssize_t barcode_emul_store(struct device *dev,
 		mobeam_write(data, countset, &hop_count);
 	} else {
 		pr_info("[SSP] %s - REGISTER SET(0x%X)\n", __func__, buf[0]);
+		if(size < 8) {
+			pr_info("[SSP] %s - not enough size of input data(%d)", __func__, (int)size);
+			return -EINVAL;
+		}
 		for (i = 0; i < 15; i++) {
 			if (reg_id_table[i].reg == buf[0])
 				send_buf[0] = reg_id_table[i].index;

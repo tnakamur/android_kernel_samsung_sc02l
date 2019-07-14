@@ -7,7 +7,19 @@
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/ccic/usbpd.h>
+
+#if defined(CONFIG_CCIC_S2MU004)
 #include <linux/ccic/usbpd-s2mu004.h>
+#endif
+
+#if defined(CONFIG_CCIC_S2MU106)
+#include <linux/ccic/usbpd-s2mu106.h>
+#endif
+
+#if defined(CONFIG_CCIC_S2MU205)
+#include <linux/ccic/usbpd-s2mu205.h>
+#endif
+
 #include <linux/of_gpio.h>
 
 #include <linux/muic/muic.h>
@@ -47,17 +59,19 @@ static struct switch_dev switch_dock = {
 };
 #endif
 
+void usbpd_manager_select_pdo_cancel(struct device *dev);
+
 #ifdef CONFIG_BATTERY_SAMSUNG
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 void select_pdo(int num);
-void s2mu004_select_pdo(int num);
+void usbpd_manager_select_pdo(int num);
 void (*fp_select_pdo)(int num);
 
 #if defined(CONFIG_CCIC_NOTIFIER)
 extern struct device *ccic_device;
 #endif
 
-void s2mu004_select_pdo(int num)
+void usbpd_manager_select_pdo(int num)
 {
 	struct usbpd_data *pd_data = pd_noti.pd_data;
 	struct usbpd_manager_data *manager = &pd_data->manager;
@@ -71,8 +85,12 @@ void s2mu004_select_pdo(int num)
 		return;
 	}
 
+	mutex_lock(&manager->pdo_mutex);
+	if (manager->flash_mode == 1)
+		goto exit;
+
 	if (pd_noti.sink_status.selected_pdo_num == num)
-		return;
+		goto exit;
 	else if (num > pd_noti.sink_status.available_pdo_num)
 		pd_noti.sink_status.selected_pdo_num = pd_noti.sink_status.available_pdo_num;
 	else if (num < 1)
@@ -82,12 +100,35 @@ void s2mu004_select_pdo(int num)
 	pr_info(" %s : PDO(%d) is selected to change\n", __func__, pd_noti.sink_status.selected_pdo_num);
 
 	schedule_delayed_work(&manager->select_pdo_handler, msecs_to_jiffies(50));
+exit:
+	mutex_unlock(&manager->pdo_mutex);
 }
 
 void select_pdo(int num)
 {
 	if (fp_select_pdo)
 		fp_select_pdo(num);
+}
+
+void pdo_ctrl_by_flash(bool mode)
+{
+	struct usbpd_data *pd_data = pd_noti.pd_data;
+	struct usbpd_manager_data *manager = &pd_data->manager;
+
+	pr_info("%s: mode(%d)\n", __func__, mode);
+
+	mutex_lock(&manager->pdo_mutex);
+	if (mode)
+		manager->flash_mode = 1;
+	else
+		manager->flash_mode = 0;
+
+	if (pd_noti.sink_status.selected_pdo_num != 0) {
+		pd_noti.sink_status.selected_pdo_num = 1;
+		usbpd_manager_select_pdo_cancel(pd_data->dev);
+		usbpd_manager_inform_event(pd_noti.pd_data, MANAGER_GET_SRC_CAP);
+	}
+	mutex_unlock(&manager->pdo_mutex);
 }
 #endif
 #endif
@@ -130,6 +171,20 @@ void usbpd_manager_start_discover_msg_cancel(struct device *dev)
 	struct usbpd_manager_data *manager = &pd_data->manager;
 
 	cancel_delayed_work_sync(&manager->start_discover_msg_handler);
+}
+
+void usbpd_manager_send_pr_swap(struct device *dev)
+{
+	pr_info("%s: call send pr swap msg\n", __func__);
+
+	usbpd_manager_inform_event(pd_noti.pd_data, MANAGER_SEND_PR_SWAP);
+}
+
+void usbpd_manager_send_dr_swap(struct device *dev)
+{
+	pr_info("%s: call send pr swap msg\n", __func__);
+
+	usbpd_manager_inform_event(pd_noti.pd_data, MANAGER_SEND_DR_SWAP);
 }
 
 static void init_source_cap_data(struct usbpd_manager_data *_data)
@@ -188,7 +243,13 @@ static void init_sink_cap_data(struct usbpd_manager_data *_data)
 int samsung_uvdm_ready(void)
 {
 	int uvdm_ready = false;
+#if defined CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *pdic_data;
+#elif defined CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *pdic_data;
+#elif defined CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *pdic_data;
+#endif
 	struct usbpd_data *pd_data;
 	struct usbpd_manager_data *manager;
 
@@ -224,7 +285,13 @@ int samsung_uvdm_ready(void)
 
 void samsung_uvdm_close(void)
 {
+#if defined CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *pdic_data;
+#elif defined CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *pdic_data;
+#elif defined CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *pdic_data;
+#endif
 	struct usbpd_data *pd_data;
 	struct usbpd_manager_data *manager;
 
@@ -405,7 +472,13 @@ void set_sec_uvdm_rx_header(void *data, int cur_num, int cur_set, int ack)
 
 int usbpd_manager_send_samsung_uvdm_message(void *data, const char *buf, size_t size)
 {
+#if defined CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *pdic_data = data;
+#elif defined CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *pdic_data = data;
+#elif defined CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *pdic_data = data;
+#endif
 	struct usbpd_data *pd_data = dev_get_drvdata(pdic_data->dev);
 	struct usbpd_manager_data *manager = &pd_data->manager;
 	int received_data = 0;
@@ -456,7 +529,13 @@ int usbpd_manager_send_samsung_uvdm_message(void *data, const char *buf, size_t 
 				
 ssize_t samsung_uvdm_out_request_message(void *data, size_t size)
 {
+#if defined CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *pdic_data;
+#elif defined CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *pdic_data;
+#elif defined CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *pdic_data;
+#endif
 	struct usbpd_data *pd_data;
 	struct usbpd_manager_data *manager;
 	uint8_t *SEC_DATA;
@@ -568,7 +647,13 @@ ssize_t samsung_uvdm_out_request_message(void *data, size_t size)
 
 int samsung_uvdm_in_request_message(void *data)
 {
+#if defined CONFIG_CCIC_S2MU004
 	struct s2mu004_usbpd_data *pdic_data;
+#elif defined CONFIG_CCIC_S2MU106
+	struct s2mu106_usbpd_data *pdic_data;
+#elif defined CONFIG_CCIC_S2MU205
+	struct s2mu205_usbpd_data *pdic_data;
+#endif
 	struct usbpd_data *pd_data;
 	struct usbpd_manager_data *manager;
 	struct policy_data *policy;
@@ -764,15 +849,19 @@ void usbpd_manager_plug_attach(struct device *dev, muic_attached_dev_t new_dev)
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 	struct usbpd_data *pd_data = dev_get_drvdata(dev);
 	struct policy_data *policy = &pd_data->policy;
+	struct usbpd_manager_data *manager = &pd_data->manager;
 
 	CC_NOTI_ATTACH_TYPEDEF pd_notifier;
 
 	if (new_dev == ATTACHED_DEV_TYPE3_CHARGER_MUIC) {
-		if (policy->send_sink_cap) {
+		if (policy->send_sink_cap || (manager->ps_rdy == 1 &&
+		manager->prev_available_pdo != pd_noti.sink_status.available_pdo_num)) {
 			pd_noti.event = PDIC_NOTIFY_EVENT_PD_SINK_CAP;
 			policy->send_sink_cap = 0;
 		} else
 			pd_noti.event = PDIC_NOTIFY_EVENT_PD_SINK;
+		manager->ps_rdy = 1;
+		manager->prev_available_pdo = pd_noti.sink_status.available_pdo_num;
 		pd_notifier.src = CCIC_NOTIFY_DEV_CCIC;
 		pd_notifier.dest = CCIC_NOTIFY_DEV_BATTERY;
 		pd_notifier.id = CCIC_NOTIFY_ID_POWER_STATUS;
@@ -789,7 +878,7 @@ void usbpd_manager_plug_attach(struct device *dev, muic_attached_dev_t new_dev)
 
 	pr_info("%s: usbpd plug attached\n", __func__);
 	manager->attached_dev = new_dev;
-	s2mu004_pdic_notifier_attach_attached_dev(manager->attached_dev);
+	s2m_pdic_notifier_attach_attached_dev(manager->attached_dev);
 #endif
 #endif
 }
@@ -803,7 +892,7 @@ void usbpd_manager_plug_detach(struct device *dev, bool notify)
 
 	usbpd_policy_reset(pd_data, PLUG_DETACHED);
 	if (notify)
-		s2mu004_pdic_notifier_detach_attached_dev(manager->attached_dev);
+		s2m_pdic_notifier_detach_attached_dev(manager->attached_dev);
 	manager->attached_dev = ATTACHED_DEV_NONE_MUIC;
 }
 
@@ -878,6 +967,10 @@ void usbpd_manager_inform_event(struct usbpd_data *pd_data,
 		usbpd_manager_command_to_policy(pd_data->dev,
 				MANAGER_REQ_NEW_POWER_SRC);
 		break;
+	case MANAGER_GET_SRC_CAP:
+		usbpd_manager_command_to_policy(pd_data->dev,
+				MANAGER_REQ_GET_SRC_CAP);
+		break;
 	case MANAGER_UVDM_SEND_MESSAGE:
 		usbpd_manager_command_to_policy(pd_data->dev,
 				MANAGER_REQ_UVDM_SEND_MESSAGE);
@@ -888,6 +981,14 @@ void usbpd_manager_inform_event(struct usbpd_data *pd_data,
 	case MANAGER_START_DISCOVER_IDENTITY:
 		usbpd_manager_command_to_policy(pd_data->dev,
 					MANAGER_REQ_VDM_DISCOVER_IDENTITY);
+		break;
+	case MANAGER_SEND_PR_SWAP:
+		usbpd_manager_command_to_policy(pd_data->dev,
+					MANAGER_REQ_PR_SWAP);
+		break;
+	case MANAGER_SEND_DR_SWAP:
+		usbpd_manager_command_to_policy(pd_data->dev,
+					MANAGER_REQ_DR_SWAP);
 		break;
 	default:
 		pr_info("%s: not matched event(%d)\n", __func__, event);
@@ -941,7 +1042,7 @@ void usbpd_manager_turn_on_source(struct usbpd_data *pd_data)
 	pr_info("%s: usbpd plug attached\n", __func__);
 
 	manager->attached_dev = ATTACHED_DEV_TYPE3_ADAPTER_MUIC;
-	s2mu004_pdic_notifier_attach_attached_dev(manager->attached_dev);
+	s2m_pdic_notifier_attach_attached_dev(manager->attached_dev);
 	/* TODO : Turn on source */
 }
 
@@ -951,7 +1052,7 @@ void usbpd_manager_turn_off_power_supply(struct usbpd_data *pd_data)
 
 	pr_info("%s: usbpd plug detached\n", __func__);
 
-	s2mu004_pdic_notifier_detach_attached_dev(manager->attached_dev);
+	s2m_pdic_notifier_detach_attached_dev(manager->attached_dev);
 	manager->attached_dev = ATTACHED_DEV_NONE_MUIC;
 	/* TODO : Turn off power supply */
 }
@@ -962,7 +1063,7 @@ void usbpd_manager_turn_off_power_sink(struct usbpd_data *pd_data)
 
 	pr_info("%s: usbpd sink turn off\n", __func__);
 
-	s2mu004_pdic_notifier_detach_attached_dev(manager->attached_dev);
+	s2m_pdic_notifier_detach_attached_dev(manager->attached_dev);
 	manager->attached_dev = ATTACHED_DEV_NONE_MUIC;
 	/* TODO : Turn off power sink */
 }
@@ -1232,6 +1333,7 @@ int usbpd_manager_evaluate_capability(struct usbpd_data *pd_data)
 	int pd_volt = 0, pd_current;
 #ifdef CONFIG_BATTERY_SAMSUNG
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
+	struct usbpd_manager_data *manager = &pd_data->manager;
 	int available_pdo_num = 0;
 	PDIC_SINK_STATUS *pdic_sink_status = &pd_noti.sink_status;
 #endif
@@ -1273,6 +1375,8 @@ int usbpd_manager_evaluate_capability(struct usbpd_data *pd_data)
 	}
 #ifdef CONFIG_BATTERY_SAMSUNG
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
+	if (manager->flash_mode == 1)
+		available_pdo_num = 1;
 	pdic_sink_status->available_pdo_num = available_pdo_num;
 	return available_pdo_num;
 #endif
@@ -1402,6 +1506,8 @@ void usbpd_init_manager_val(struct usbpd_data *pd_data)
 	manager->SVID_0 = 0;
 	manager->SVID_1 = 0;
 	manager->Standard_Vendor_ID = 0;
+	manager->prev_available_pdo = 0;
+	manager->ps_rdy = 0;
 	reinit_completion(&manager->uvdm_out_wait);
 	reinit_completion(&manager->uvdm_in_wait);
 	usbpd_manager_select_pdo_cancel(pd_data->dev);
@@ -1421,10 +1527,11 @@ int usbpd_init_manager(struct usbpd_data *pd_data)
 		ret = of_usbpd_manager_dt(manager);
 #ifdef CONFIG_BATTERY_SAMSUNG
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
-	fp_select_pdo = s2mu004_select_pdo;
+	fp_select_pdo = usbpd_manager_select_pdo;
 #endif
 #endif
 	mutex_init(&manager->vdm_mutex);
+	mutex_init(&manager->pdo_mutex);
 	manager->pd_data = pd_data;
 	manager->power_role_swap = true;
 	manager->data_role_swap = true;
@@ -1438,6 +1545,11 @@ int usbpd_init_manager(struct usbpd_data *pd_data)
 	manager->SVID_0 = 0;
 	manager->SVID_1 = 0;
 	manager->Standard_Vendor_ID = 0;
+
+	manager->flash_mode = 0;
+	manager->prev_available_pdo = 0;
+	manager->ps_rdy = 0;
+
 	init_completion(&manager->uvdm_out_wait);
 	init_completion(&manager->uvdm_in_wait);
 

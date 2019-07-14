@@ -143,7 +143,7 @@ static int fimc_is_hw_mcsc_check_tdnr_mode_pre(struct fimc_is_hw_ip *hw_ip,
 	 */
 #ifdef MCSC_DNR_USE_TUNING
 	sensor_position = hw_ip->hardware->sensor_position[atomic_read(&hw_ip->instance)];
-	tdnr_tuneset = &hw_mcsc->applied_setfile[sensor_position]->tdnr_contents;
+	tdnr_tuneset = &hw_mcsc->applied_setfile[sensor_position][frame->instance]->tdnr_contents;
 	setfile_tdnr_enable = tdnr_tuneset->tdnr_enable;
 #endif
 
@@ -160,12 +160,14 @@ static int fimc_is_hw_mcsc_check_tdnr_mode_pre(struct fimc_is_hw_ip *hw_ip,
 		 * 2. head group shot count is "0"(first shot)
 		 * 3. tdnr wdma size changed
 		 * 4. tdnr wdma dma out disabled
-		 * 5. setfile tuneset changed(TODO)
+		 * 5. instance is changed
+		 * 6. setfile tuneset changed(TODO)
 		 */
 		if ((cur_mode == TDNR_MODE_BYPASS)
 			|| (!atomic_read(&head->scount))
 			|| (lindex & LOWBIT_OF(PARAM_MCS_INPUT))
-			|| (hindex & HIGHBIT_OF(PARAM_MCS_INPUT)))
+			|| (hindex & HIGHBIT_OF(PARAM_MCS_INPUT))
+			|| (atomic_read(&hw_ip->instance) != hw_mcsc->instance))
 			tdnr_mode = TDNR_MODE_2DNR; /* first frame */
 		else
 			/* set to 3DNR mode */
@@ -838,7 +840,7 @@ static int fimc_is_hw_mcsc_cfg_tdnr_tuning_param(struct fimc_is_hw_ip *hw_ip,
 #ifdef MCSC_DNR_USE_TUNING
 	instance = atomic_read(&hw_ip->instance);
 	sensor_position = hw_ip->hardware->sensor_position[instance];
-	tdnr_tuneset = &hw_mcsc->applied_setfile[sensor_position]->tdnr_contents;
+	tdnr_tuneset = &hw_mcsc->applied_setfile[sensor_position][frame->instance]->tdnr_contents;
 	use_tdnr_tuning = true;
 #endif
 

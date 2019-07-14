@@ -147,18 +147,72 @@ static void tdmb_set_config_poweron(void)
 			__func__, dt_pdata->tdmb_en, rc);
 		return;
 	}
+	if (dt_pdata->tdmb_xtal_en > 0) {
+		rc = gpio_request(dt_pdata->tdmb_lna_en, "gpio_tdmb_xtal_en");
+		if (rc < 0) {
+			DPRINTK("%s: gpio_tdmb_xtal_en request failed (%d)\n", __func__, rc);
+			dt_pdata->tdmb_xtal_gpio_req = false;
+		} else {
+			dt_pdata->tdmb_xtal_gpio_req = true;
+		}
+	}
+	if (dt_pdata->tdmb_lna_en > 0) {
+		rc = gpio_request(dt_pdata->tdmb_lna_en, "gpio_tdmb_lna_en");
+		if (rc < 0) {
+			DPRINTK("%s: gpio_tdmb_lna_en request failed (%d)\n", __func__, rc);
+			dt_pdata->tdmb_lna_gpio_req = false;
+		} else {
+			dt_pdata->tdmb_lna_gpio_req = true;
+		}
+	}
+	if (dt_pdata->tdmb_ant1_sw > 0) {
+		rc = gpio_request(dt_pdata->tdmb_ant1_sw, "gpio_tdmb_ant1_sw");
+		if (rc < 0) {
+			DPRINTK("%s: gpio_tdmb_ant1_sw request failed (%d)\n", __func__, rc);
+			dt_pdata->tdmb_ant1_gpio_req = false;
+		} else {
+			dt_pdata->tdmb_ant1_gpio_req = true;
+		}
+	}
+
+	if (dt_pdata->tdmb_ant2_sw > 0) {
+		rc = gpio_request(dt_pdata->tdmb_ant2_sw, "gpio_tdmb_ant2_sw");
+		if (rc < 0) {
+			DPRINTK("%s: gpio_tdmb_ant2_sw request failed (%d)\n", __func__, rc);
+			dt_pdata->tdmb_ant2_gpio_req = false;
+		} else {
+			dt_pdata->tdmb_ant2_gpio_req = true;
+		}
+	}
+
 	if (dt_pdata->tdmb_use_irq) {
 		rc = gpio_request(dt_pdata->tdmb_irq, "gpio_tdmb_irq");
 		if (rc < 0) {
 			DPRINTK("%s: gpio %d request failed (%d)\n",
 				__func__, dt_pdata->tdmb_irq, rc);
 			gpio_free(dt_pdata->tdmb_en);
+			if (dt_pdata->tdmb_xtal_gpio_req && dt_pdata->tdmb_xtal_en > 0)
+				gpio_free(dt_pdata->tdmb_xtal_en);
+			if (dt_pdata->tdmb_lna_gpio_req && dt_pdata->tdmb_lna_en > 0)
+				gpio_free(dt_pdata->tdmb_lna_en);
+			if (dt_pdata->tdmb_ant1_gpio_req && dt_pdata->tdmb_ant1_sw > 0)
+				gpio_free(dt_pdata->tdmb_ant1_sw);
+			if (dt_pdata->tdmb_ant2_gpio_req && dt_pdata->tdmb_ant2_sw > 0)
+				gpio_free(dt_pdata->tdmb_ant2_sw);
 			return;
 		}
 	}
 	if (pinctrl_select_state(dt_pdata->tdmb_pinctrl, dt_pdata->pwr_on)) {
 		DPRINTK("%s: Failed to configure tdmb_on\n", __func__);
 		gpio_free(dt_pdata->tdmb_en);
+		if (dt_pdata->tdmb_xtal_gpio_req && dt_pdata->tdmb_xtal_en > 0)
+			gpio_free(dt_pdata->tdmb_xtal_en);
+		if (dt_pdata->tdmb_lna_gpio_req && dt_pdata->tdmb_lna_en > 0)
+			gpio_free(dt_pdata->tdmb_lna_en);
+		if (dt_pdata->tdmb_ant1_gpio_req && dt_pdata->tdmb_ant1_sw > 0)
+			gpio_free(dt_pdata->tdmb_ant1_sw);
+		if (dt_pdata->tdmb_ant2_gpio_req && dt_pdata->tdmb_ant2_sw > 0)
+			gpio_free(dt_pdata->tdmb_ant2_sw);
 		if (dt_pdata->tdmb_use_irq)
 			gpio_free(dt_pdata->tdmb_irq);
 	}
@@ -171,6 +225,14 @@ static void tdmb_set_config_poweroff(void)
 		DPRINTK("%s: Failed to configure tdmb_off\n", __func__);
 
 	gpio_free(dt_pdata->tdmb_en);
+	if (dt_pdata->tdmb_xtal_gpio_req && dt_pdata->tdmb_xtal_en > 0)
+		gpio_free(dt_pdata->tdmb_xtal_en);
+	if (dt_pdata->tdmb_lna_gpio_req && dt_pdata->tdmb_lna_en > 0)
+		gpio_free(dt_pdata->tdmb_lna_en);
+	if (dt_pdata->tdmb_ant1_gpio_req && dt_pdata->tdmb_ant1_sw > 0)
+		gpio_free(dt_pdata->tdmb_ant1_sw);
+	if (dt_pdata->tdmb_ant2_gpio_req && dt_pdata->tdmb_ant2_sw > 0)
+		gpio_free(dt_pdata->tdmb_ant2_sw);
 	if (dt_pdata->tdmb_use_irq)
 		gpio_free(dt_pdata->tdmb_irq);
 }
@@ -186,6 +248,16 @@ static void tdmb_gpio_on(void)
 	gpio_direction_output(dt_pdata->tdmb_en, 0);
 	usleep_range(1000, 1000);
 	gpio_direction_output(dt_pdata->tdmb_en, 1);
+	if (dt_pdata->tdmb_xtal_en > 0) {
+		gpio_direction_output(dt_pdata->tdmb_xtal_en, 1);
+		usleep_range(10000, 10000);
+	}
+	if (dt_pdata->tdmb_lna_en > 0)
+		gpio_direction_output(dt_pdata->tdmb_lna_en, 1);
+	if (dt_pdata->tdmb_ant1_sw > 0)
+		gpio_direction_output(dt_pdata->tdmb_ant1_sw, dt_pdata->tdmb_ant1_sel);
+	if (dt_pdata->tdmb_ant2_sw > 0)
+		gpio_direction_output(dt_pdata->tdmb_ant2_sw, dt_pdata->tdmb_ant2_sel);
 	usleep_range(25000, 25000);
 
 	if (dt_pdata->tdmb_use_rst) {
@@ -202,8 +274,17 @@ static void tdmb_gpio_off(void)
 #ifdef CONFIG_TDMB_VREG_SUPPORT
 	tdmb_vreg_onoff(false);
 #endif
-	gpio_direction_output(dt_pdata->tdmb_en, 0);
 
+	if (dt_pdata->tdmb_xtal_en > 0)
+		gpio_direction_output(dt_pdata->tdmb_xtal_en, 0);
+	if (dt_pdata->tdmb_lna_en > 0)
+		gpio_direction_output(dt_pdata->tdmb_lna_en, 0);
+	if (dt_pdata->tdmb_ant1_sw > 0)
+		gpio_direction_output(dt_pdata->tdmb_ant1_sw, !dt_pdata->tdmb_ant1_sel);
+	if (dt_pdata->tdmb_ant2_sw > 0)
+		gpio_direction_output(dt_pdata->tdmb_ant2_sw, !dt_pdata->tdmb_ant2_sel);
+
+	gpio_direction_output(dt_pdata->tdmb_en, 0);
 	usleep_range(1000, 1000);
 	if (dt_pdata->tdmb_use_rst)
 		gpio_direction_output(dt_pdata->tdmb_rst, 0);
@@ -995,6 +1076,40 @@ static struct tdmb_dt_platform_data *get_tdmb_dt_pdata(struct device *dev)
 		DPRINTK("Failed to get is valid tdmb_en\n");
 		goto alloc_err;
 	}
+	pdata->tdmb_lna_en = of_get_named_gpio(dev->of_node, "tdmb_lna_en", 0);
+	if (!gpio_is_valid(pdata->tdmb_lna_en)) {
+		DPRINTK("Failed to get is valid tdmb_lna_en\n");
+	} else
+		pdata->tdmb_lna_gpio_req =  false;
+	pdata->tdmb_xtal_en = of_get_named_gpio(dev->of_node, "tdmb_xtal_en", 0);
+	if (!gpio_is_valid(pdata->tdmb_xtal_en)) {
+		DPRINTK("Failed to get is valid tdmb_xtal_en\n");
+	} else {
+		pdata->tdmb_xtal_gpio_req =  false;
+	}
+	pdata->tdmb_ant1_sw = of_get_named_gpio(dev->of_node, "tdmb_ant1_switch", 0);
+	if (!gpio_is_valid(pdata->tdmb_ant1_sw)) {
+		DPRINTK("Failed to get is valid tdmb_ant1_sw\n");
+	} else {
+		pdata->tdmb_ant1_gpio_req =  false;
+
+		if (of_property_read_u32(dev->of_node, "tdmb_ant1_sel",
+								&pdata->tdmb_ant1_sel)) {
+			DPRINTK("Failed to get tdmb_ant1_sel\n");
+		}
+	}
+	pdata->tdmb_ant2_sw = of_get_named_gpio(dev->of_node, "tdmb_ant2_switch", 0);
+	if (!gpio_is_valid(pdata->tdmb_ant2_sw)) {
+		DPRINTK("Failed to get is valid tdmb_ant2_sw\n");
+	} else {
+		pdata->tdmb_ant2_gpio_req =  false;
+
+		if (of_property_read_u32(dev->of_node, "tdmb_ant2_sel",
+								&pdata->tdmb_ant2_sel)) {
+			DPRINTK("Failed to get tdmb_ant2_sel\n");
+		}
+	}
+
 	pdata->tdmb_use_rst = of_property_read_bool(dev->of_node, "tdmb_use_rst");
 	if (pdata->tdmb_use_rst) {
 		pdata->tdmb_rst = of_get_named_gpio(dev->of_node, "tdmb_rst", 0);

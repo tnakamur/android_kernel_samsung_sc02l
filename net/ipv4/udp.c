@@ -1346,7 +1346,7 @@ try_again:
 		*addr_len = sizeof(*sin);
 	}
 	if (inet->cmsg_flags)
-		ip_cmsg_recv_offset(msg, skb, sizeof(struct udphdr));
+		ip_cmsg_recv_offset(msg, skb, sizeof(struct udphdr), off);
 
 	err = copied;
 	if (flags & MSG_TRUNC)
@@ -1537,7 +1537,7 @@ int udp_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 
 		/* if we're overly short, let UDP handle it */
 		encap_rcv = ACCESS_ONCE(up->encap_rcv);
-		if (skb->len > sizeof(struct udphdr) && encap_rcv) {
+		if (encap_rcv) {
 			int ret;
 
 			/* Verify checksum before giving to encap */
@@ -1800,6 +1800,8 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		struct nf_conn *ct = NULL;
 		enum ip_conntrack_info ctinfo;
 		struct nf_conntrack_tuple *tuple = NULL;
+		char srcaddr[INET6_ADDRSTRLEN_NAP];
+		char dstaddr[INET6_ADDRSTRLEN_NAP];
 		/* END_OF_KNOX_NPA */
 
 		if (unlikely(sk->sk_rx_dst != dst))
@@ -1808,29 +1810,55 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		/* START_OF_KNOX_NPA */
 		/* function to handle open flows with incoming udp packets */
 		if (check_ncm_flag()) {
-			if ( (skb) && (skb->dev) && (sk) && (sk->sk_protocol == IPPROTO_UDP) ) {
+			if ( (sk) && (sk->sk_protocol == IPPROTO_UDP) ) {
 				ct = nf_ct_get(skb, &ctinfo);
-				if ( (ct) && (!atomic_read(&ct->startFlow)) ) {
-					atomic_set(&ct->startFlow, 1);
-					ct->knox_uid = sk->knox_uid;
-					ct->knox_pid = sk->knox_pid;
-					memcpy(ct->process_name,sk->process_name,sizeof(ct->process_name)-1);
-					ct->knox_puid = sk->knox_puid;
-					ct->knox_ppid = sk->knox_ppid;
-					memcpy(ct->parent_process_name,sk->parent_process_name,sizeof(ct->parent_process_name)-1);
-					memcpy(ct->domain_name,sk->domain_name,sizeof(ct->domain_name)-1);
-					memcpy(ct->interface_name,skb->dev->name,sizeof(ct->interface_name)-1);
+				if ( (ct) && (!atomic_read(&ct->startFlow)) && (!nf_ct_is_dying(ct)) ) {
 					tuple = &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
-					if ( (tuple != NULL) && (ntohs(tuple->dst.u.udp.port) == DNS_PORT_NAP) && (ct->knox_uid == INIT_UID_NAP) && (sk->knox_dns_uid > INIT_UID_NAP) ) {
-						ct->knox_puid = sk->knox_dns_uid;
-						ct->knox_ppid = sk->knox_dns_pid;
-						memcpy(ct->parent_process_name,sk->dns_process_name,sizeof(ct->parent_process_name)-1);
+					if (tuple) {
+						sprintf(srcaddr,"%pI4",(void *)&tuple->src.u3.ip);
+						sprintf(dstaddr,"%pI4",(void *)&tuple->dst.u3.ip);
+						if ( !isIpv4AddressEqualsNull(srcaddr, dstaddr) ) {
+							atomic_set(&ct->startFlow, 1);
+							if ( check_intermediate_flag() ) {
+								/* Use 'atomic_set(&ct->intermediateFlow, 1); ct->npa_timeout = ((u32)(jiffies)) + (get_intermediate_timeout() * HZ);' if struct nf_conn->timeout is of type u32; */
+								/* Use 'unsigned long timeout = ct->timeout.expires - jiffies;
+										if ( (timeout > 0) && ((timeout/HZ) > 5) ) {
+											atomic_set(&ct->intermediateFlow, 1);
+											ct->npa_timeout.expires = (jiffies) + (get_intermediate_timeout() * HZ);
+											add_timer(&ct->npa_timeout);
+										}'
+								if struct nf_conn->timeout is of type struct timer_list; */
+								unsigned long timeout = ct->timeout.expires - jiffies;
+								if ( (timeout > 0) && ((timeout/HZ) > 5) ) {
+									atomic_set(&ct->intermediateFlow, 1);
+									ct->npa_timeout.expires = (jiffies) + (get_intermediate_timeout() * HZ);
+									add_timer(&ct->npa_timeout);
+								}
+							}
+							ct->knox_uid = sk->knox_uid;
+							ct->knox_pid = sk->knox_pid;
+							memcpy(ct->process_name,sk->process_name,sizeof(ct->process_name)-1);
+							ct->knox_puid = sk->knox_puid;
+							ct->knox_ppid = sk->knox_ppid;
+							memcpy(ct->parent_process_name,sk->parent_process_name,sizeof(ct->parent_process_name)-1);
+							memcpy(ct->domain_name,sk->domain_name,sizeof(ct->domain_name)-1);
+							if ( (skb->dev) ) {
+								memcpy(ct->interface_name,skb->dev->name,sizeof(ct->interface_name)-1);
+							} else {
+								sprintf(ct->interface_name,"%s","null");
+							}
+							if ( (tuple != NULL) && (ntohs(tuple->dst.u.udp.port) == DNS_PORT_NAP) && (ct->knox_uid == INIT_UID_NAP) && (sk->knox_dns_uid > INIT_UID_NAP) ) {
+								ct->knox_puid = sk->knox_dns_uid;
+								ct->knox_ppid = sk->knox_dns_pid;
+								memcpy(ct->parent_process_name,sk->dns_process_name,sizeof(ct->parent_process_name)-1);
+							}
+							knox_collect_conntrack_data(ct, NCM_FLOW_TYPE_OPEN, 3);
+						}	
 					}
-					knox_collect_conntrack_data(ct, NCM_FLOW_TYPE_OPEN, 3);
 				}
 			}
 		}
-		/* END_OF_KNOX_NPA */
+		// KNOX NPA - END
 
 		ret = udp_queue_rcv_skb(sk, skb);
 		sock_put(sk);
@@ -1853,6 +1881,8 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		struct nf_conn *ct = NULL;
 		enum ip_conntrack_info ctinfo;
 		struct nf_conntrack_tuple *tuple = NULL;
+		char srcaddr[INET6_ADDRSTRLEN_NAP];
+		char dstaddr[INET6_ADDRSTRLEN_NAP];
 		/* END_OF_KNOX_NPA */
 
 		if (inet_get_convert_csum(sk) && uh->check && !IS_UDPLITE(sk))
@@ -1862,29 +1892,55 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		/* START_OF_KNOX_NPA */
 		/* function to handle open flows with incoming udp packets */
 		if (check_ncm_flag()) {
-			if ( (skb) && (skb->dev) && (sk) && (sk->sk_protocol == IPPROTO_UDP) ) {
+			if ( (sk) && (sk->sk_protocol == IPPROTO_UDP) ) {
 				ct = nf_ct_get(skb, &ctinfo);
-				if ( (ct) && (!atomic_read(&ct->startFlow)) ) {
-					atomic_set(&ct->startFlow, 1);
-					ct->knox_uid = sk->knox_uid;
-					ct->knox_pid = sk->knox_pid;
-					memcpy(ct->process_name,sk->process_name,sizeof(ct->process_name)-1);
-					ct->knox_puid = sk->knox_puid;
-					ct->knox_ppid = sk->knox_ppid;
-					memcpy(ct->parent_process_name,sk->parent_process_name,sizeof(ct->parent_process_name)-1);
-					memcpy(ct->domain_name,sk->domain_name,sizeof(ct->domain_name)-1);
-					memcpy(ct->interface_name,skb->dev->name,sizeof(ct->interface_name)-1);
+				if ( (ct) && (!atomic_read(&ct->startFlow)) && (!nf_ct_is_dying(ct)) ) {
 					tuple = &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
-					if ( (tuple != NULL) && (ntohs(tuple->dst.u.udp.port) == DNS_PORT_NAP) && (ct->knox_uid == INIT_UID_NAP) && (sk->knox_dns_uid > INIT_UID_NAP) ) {
-						ct->knox_puid = sk->knox_dns_uid;
-						ct->knox_ppid = sk->knox_dns_pid;
-						memcpy(ct->parent_process_name,sk->dns_process_name,sizeof(ct->parent_process_name)-1);
+					if (tuple) {
+						sprintf(srcaddr,"%pI4",(void *)&tuple->src.u3.ip);
+						sprintf(dstaddr,"%pI4",(void *)&tuple->dst.u3.ip);
+						if ( !isIpv4AddressEqualsNull(srcaddr, dstaddr) ) {
+							atomic_set(&ct->startFlow, 1);
+							if ( check_intermediate_flag() ) {
+								/* Use 'atomic_set(&ct->intermediateFlow, 1); ct->npa_timeout = ((u32)(jiffies)) + (get_intermediate_timeout() * HZ);' if struct nf_conn->timeout is of type u32; */
+								/* Use 'unsigned long timeout = ct->timeout.expires - jiffies;
+										if ( (timeout > 0) && ((timeout/HZ) > 5) ) {
+											atomic_set(&ct->intermediateFlow, 1);
+											ct->npa_timeout.expires = (jiffies) + (get_intermediate_timeout() * HZ);
+											add_timer(&ct->npa_timeout);
+										}'
+								if struct nf_conn->timeout is of type struct timer_list; */
+								unsigned long timeout = ct->timeout.expires - jiffies;
+								if ( (timeout > 0) && ((timeout/HZ) > 5) ) {
+									atomic_set(&ct->intermediateFlow, 1);
+									ct->npa_timeout.expires = (jiffies) + (get_intermediate_timeout() * HZ);
+									add_timer(&ct->npa_timeout);
+								}
+							}
+							ct->knox_uid = sk->knox_uid;
+							ct->knox_pid = sk->knox_pid;
+							memcpy(ct->process_name,sk->process_name,sizeof(ct->process_name)-1);
+							ct->knox_puid = sk->knox_puid;
+							ct->knox_ppid = sk->knox_ppid;
+							memcpy(ct->parent_process_name,sk->parent_process_name,sizeof(ct->parent_process_name)-1);
+							memcpy(ct->domain_name,sk->domain_name,sizeof(ct->domain_name)-1);
+							if ( (skb->dev) ) {
+								memcpy(ct->interface_name,skb->dev->name,sizeof(ct->interface_name)-1);
+							} else {
+								sprintf(ct->interface_name,"%s","null");
+							}
+							if ( (tuple != NULL) && (ntohs(tuple->dst.u.udp.port) == DNS_PORT_NAP) && (ct->knox_uid == INIT_UID_NAP) && (sk->knox_dns_uid > INIT_UID_NAP) ) {
+								ct->knox_puid = sk->knox_dns_uid;
+								ct->knox_ppid = sk->knox_dns_pid;
+								memcpy(ct->parent_process_name,sk->dns_process_name,sizeof(ct->parent_process_name)-1);
+							}
+							knox_collect_conntrack_data(ct, NCM_FLOW_TYPE_OPEN, 4);
+						}	
 					}
-					knox_collect_conntrack_data(ct, NCM_FLOW_TYPE_OPEN, 4);
 				}
 			}
 		}
-		/* END_OF_KNOX_NPA */
+		// KNOX NPA - END
 
 		ret = udp_queue_rcv_skb(sk, skb);
 		sock_put(sk);
@@ -2332,6 +2388,20 @@ unsigned int udp_poll(struct file *file, struct socket *sock, poll_table *wait)
 }
 EXPORT_SYMBOL(udp_poll);
 
+int udp_abort(struct sock *sk, int err)
+{
+	lock_sock(sk);
+
+	sk->sk_err = err;
+	sk->sk_error_report(sk);
+	udp_disconnect(sk, 0);
+
+	release_sock(sk);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(udp_abort);
+
 struct proto udp_prot = {
 	.name		   = "UDP",
 	.owner		   = THIS_MODULE,
@@ -2363,6 +2433,7 @@ struct proto udp_prot = {
 	.compat_getsockopt = compat_udp_getsockopt,
 #endif
 	.clear_sk	   = sk_prot_clear_portaddr_nulls,
+	.diag_destroy	   = udp_abort,
 };
 EXPORT_SYMBOL(udp_prot);
 

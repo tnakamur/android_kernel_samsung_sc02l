@@ -25,22 +25,21 @@
 #else
 #ifdef VENDER_PATH
 #define FIMC_IS_FW_PATH 			"/system/vendor/firmware/"
-#define FIMC_IS_FW_DUMP_PATH			"/data/camera/"
-#define FIMC_IS_SETFILE_SDCARD_PATH		"/data/media/0/"
+#define FIMC_IS_FW_DUMP_PATH			"/data/vendor/camera/"
+#define FIMC_IS_SETFILE_SDCARD_PATH		"/data/vendor/camera/"
 #ifdef CONFIG_USE_DIRECT_IS_CONTROL
-#define FIMC_IS_FW_SDCARD			"/data/media/0/fimc_is_lib.bin"
+#define FIMC_IS_FW_SDCARD			"/data/vendor/camera/fimc_is_fw.bin"
 #define FIMC_IS_FW				"fimc_is_lib.bin"
 #else
-#define FIMC_IS_FW_SDCARD			"/data/media/0/fimc_is_fw.bin"
+#define FIMC_IS_FW_SDCARD			"/data/vendor/camera/fimc_is_fw.bin"
 #define FIMC_IS_FW				"fimc_is_fw.bin"
 #endif /* CONFIG_USE_DIRECT_IS_CONTROL */
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
 #define FIMC_IS_ISP_LIB_SDCARD_PATH		NULL
 #else
-#define FIMC_IS_ISP_LIB_SDCARD_PATH		"/data/media/0/"
+#define FIMC_IS_ISP_LIB_SDCARD_PATH		"/data/vendor/camera/"
 #endif
-#define FIMC_IS_REAR_CAL_SDCARD_PATH		"/data/media/0/"
-#define FIMC_IS_FRONT_CAL_SDCARD_PATH		"/data/media/0/"
+#define FIMC_IS_CAL_SDCARD_PATH		"/data/vendor/camera/"
 #else /* VENDER_PATH */
 #define FIMC_IS_FW_PATH 			"/system/vendor/firmware/"
 #define FIMC_IS_FW_DUMP_PATH			"/data/"
@@ -48,8 +47,7 @@
 #define FIMC_IS_FW_SDCARD			"/data/fimc_is_fw2.bin"
 #define FIMC_IS_FW				"fimc_is_fw2.bin"
 #define FIMC_IS_ISP_LIB_SDCARD_PATH		"/data/"
-#define FIMC_IS_REAR_CAL_SDCARD_PATH		"/data/"
-#define FIMC_IS_FRONT_CAL_SDCARD_PATH		"/data/"
+#define FIMC_IS_CAL_SDCARD_PATH		"/data/"
 #endif
 #endif /* defined(CONFIG_EXYNOS_ASB) */
 
@@ -81,29 +79,32 @@
 #define DEBUGCTL_OFFSET			(DEBUG_REGION_OFFSET + DEBUG_REGION_SIZE)
 #else /* #ifdef ENABLE_IS_CORE */
 /* static reserved memory for libraries */
-#define LIB_OFFSET		(VMALLOC_START + 0xF6000000)
-#define LIB_START		(LIB_OFFSET + 0x04000000)
+#define CDH_SIZE		SZ_128K		/* CDH : Camera Debug Helper */
+
+#define LIB_OFFSET		(VMALLOC_START + 0xF6000000 - 0x8000000)
+#define __LIB_START		(LIB_OFFSET + 0x04000000 - CDH_SIZE)
+#define LIB_START		(__LIB_START + CDH_SIZE)
 
 #define VRA_LIB_ADDR		(LIB_START)
-#define VRA_LIB_SIZE		(SZ_512K)
+#define VRA_LIB_SIZE		(SZ_512K + SZ_256K)
 
 #define DDK_LIB_ADDR		(LIB_START + VRA_LIB_SIZE)
-#define DDK_LIB_SIZE		(SZ_4M)
+#define DDK_LIB_SIZE		((SZ_2M + SZ_1M + SZ_256K) + SZ_1M)
 
 #define RTA_LIB_ADDR		(LIB_START + VRA_LIB_SIZE + DDK_LIB_SIZE)
-#define RTA_LIB_SIZE		(SZ_1M + SZ_2M)
+#define RTA_LIB_SIZE		(SZ_2M + SZ_2M)
 
 #ifdef USE_RTA_BINARY
-#define LIB_SIZE		(VRA_LIB_SIZE + DDK_LIB_SIZE +  RTA_LIB_SIZE)
+#define LIB_SIZE		(VRA_LIB_SIZE + DDK_LIB_SIZE +  RTA_LIB_SIZE + CDH_SIZE)
 #else
-#define LIB_SIZE		(VRA_LIB_SIZE + DDK_LIB_SIZE)
+#define LIB_SIZE		(VRA_LIB_SIZE + DDK_LIB_SIZE + CDH_SIZE)
 #endif
 
-#define HEAP_START		(LIB_START + LIB_SIZE + 0x80000)
+#define HEAP_START		(LIB_START + SZ_16M)
 #define HEAP_SIZE		(FIMC_IS_HEAP_SIZE)
 
 /* reserved memory for FIMC-IS */
-#define SETFILE_SIZE		(0x00200000)
+#define SETFILE_SIZE		(0x0032C000)
 #define REAR_CALDATA_SIZE	(0x00010000)
 #define FRONT_CALDATA_SIZE	(0x00010000)
 #define DEBUG_REGION_SIZE	(0x0007D000)
@@ -112,7 +113,8 @@
 #define DATA_REGION_SIZE	(0x00010000)
 #define PARAM_REGION_SIZE	(0x00005000)	/* 20KB * instance(4) */
 
-#define RESERVE_LIB_SIZE	(FIMC_IS_RESERVE_LIB_SIZE)	/* 2MB */
+#define HEAP_RTA_START		(HEAP_START + SZ_64M)		/* HEAP_SIZE(for DDK) should be smaller than 64MB */
+#define HEAP_RTA_SIZE		(FIMC_IS_RESERVE_LIB_SIZE)	/* 6MB ~ */
 #define TAAISP_DMA_SIZE		(FIMC_IS_TAAISP_SIZE)	/* 512KB */
 #define LHFD_MAP_SIZE		(0x009F0000)	/* 9.9375MB */
 #define VRA_DMA_SIZE		(FIMC_IS_VRA_SIZE)	/* 8MB */
@@ -146,10 +148,12 @@
 #define FIMC_IS_VERSION_SIZE			42
 #define FIMC_IS_VERSION_BIN_SIZE		44
 #ifdef USE_BINARY_PADDING_DATA_ADDED
-#define FIMC_IS_SIGNATURE_SIZE  		272
-#define FIMC_IS_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE+FIMC_IS_SIGNATURE_SIZE)
+#define FIMC_IS_SIGNATURE_SIZE			528
+#define DDK_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE + FIMC_IS_SIGNATURE_SIZE)
+#define RTA_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE + FIMC_IS_SIGNATURE_SIZE)
 #else
-#define FIMC_IS_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE)
+#define DDK_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE)
+#define RTA_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE)
 #endif
 #define FIMC_IS_SETFILE_VER_OFFSET		0x40
 #define FIMC_IS_SETFILE_VER_SIZE		52

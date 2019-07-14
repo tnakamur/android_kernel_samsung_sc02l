@@ -826,7 +826,8 @@ struct param_sensor_config {
 	u32	bns_output_height; /* Active scaled image height */
 	u32	calibrated_width; /* sensor cal size */
 	u32	calibrated_height;
-	u32	reserved[PARAMETER_MAX_MEMBER-16];
+	u32	early_config_lock;
+	u32	reserved[PARAMETER_MAX_MEMBER-17];
 	u32	err;
 };
 
@@ -1370,6 +1371,17 @@ struct is_fast_control {
 
 #define MAX_SHARED_COUNT	400
 
+struct is_fdae_info {
+	u32			id[MAX_FACE_COUNT];
+	u32			score[MAX_FACE_COUNT];
+	struct is_fd_rect	rect[MAX_FACE_COUNT];
+	u32			is_rot[MAX_FACE_COUNT];
+	u32			rot[MAX_FACE_COUNT];
+	u32			face_num;
+	u32			frame_count;
+	spinlock_t		slock;
+};
+
 struct is_region {
 	struct is_param_region	parameter;
 	struct is_tune_region	tune;
@@ -1378,6 +1390,7 @@ struct is_region {
 	struct is_debug_region	debug;
 	struct is_fast_control	fast_ctl;
 	u32			reserved[96];
+	struct is_fdae_info	fdae_info;
 	u32			shared[MAX_SHARED_COUNT];
 };
 

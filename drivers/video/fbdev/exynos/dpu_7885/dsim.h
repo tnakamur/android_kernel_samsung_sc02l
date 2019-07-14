@@ -39,6 +39,7 @@ extern int dsim_log_level;
 
 #define MIPI_WR_TIMEOUT			msecs_to_jiffies(33)
 #define MIPI_RD_TIMEOUT			msecs_to_jiffies(100)
+#define DSIM_PL_FIFO_THRESHOLD			2048	/*this value depends on H/W */
 
 #define dsim_err(fmt, ...)							\
 	do {									\
@@ -69,10 +70,9 @@ extern int dsim_log_level;
 	} while (0)
 
 #define call_panel_ops(q, op, args...)				\
-	((q) && ((q)->panel_ops->op) ? ((q)->panel_ops->op(args)) : 0)
+	(((q) && ((q)->panel_ops->op)) ? ((q)->panel_ops->op(args)) : 0)
 
 extern struct dsim_device *dsim_drvdata[MAX_DSIM_CNT];
-extern struct dsim_lcd_driver s6e3fa7_mipi_lcd_driver;
 
 /* define video timer interrupt */
 enum {
@@ -227,6 +227,10 @@ struct dsim_device {
 	int cmd_timeout_cnt;
 	int runtime_reset_cnt;
 	int version;
+
+	int pl_cnt;
+	int line_cnt;
+
 	int continuous_underrun_max;
 	int continuous_underrun_cnt;
 #ifdef CONFIG_LCD_HMT
@@ -342,21 +346,26 @@ void dsim_reg_stop(u32 id, u32 lanes);
 void dsim_reg_runtime_stop(u32 id, u32 lanes);
 void dsim_reg_wr_tx_payload(u32 id, u32 payload);
 u32 dsim_reg_header_fifo_is_empty(u32 id);
+u32 dsim_reg_payload_fifo_is_empty(u32 id);
 void dsim_reg_clear_int(u32 id, u32 int_src);
 void dsim_reg_set_fifo_ctrl(u32 id, u32 cfg);
 void dsim_reg_enable_shadow_read(u32 id, u32 en);
-u32 dsim_reg_is_writable_fifo_state(u32 id, struct decon_lcd *lcd_info);
+bool dsim_reg_is_writable_ph_fifo_state(u32 id);
 void dsim_reg_wr_tx_header(u32 id, u32 data_id, unsigned long data0, u32 data1, u32 bta_type);
 void dsim_set_bist(u32 id, u32 en);
 void dsim_reg_set_partial_update(u32 id, struct decon_lcd *lcd_info);
 void dsim_reg_set_bta_type(u32 id, u32 bta_type);
 void dsim_reg_set_num_of_transfer(u32 id, u32 num_of_transfer);
+void dsim_reg_enable_packetgo(u32 id, u32 en);
+
+int dsim_reg_get_linecount(u32 id, u32 mode);
 
 void dsim_reg_function_reset(u32 id);
 void dsim_reg_set_esc_clk_on_lane(u32 id, u32 en, u32 lane);
 void dsim_reg_enable_word_clock(u32 id, u32 en);
 void dsim_reg_set_esc_clk_prescaler(u32 id, u32 en, u32 p);
 u32 dsim_reg_is_pll_stable(u32 id);
+void dsim_reg_set_cmd_transfer_mode(u32 id, u32 lp);
 #if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
 int dsim_doze(struct dsim_device *dsim);
 int dsim_doze_suspend(struct dsim_device *dsim);

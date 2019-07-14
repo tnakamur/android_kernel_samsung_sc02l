@@ -53,7 +53,7 @@
 static LIST_HEAD(device_list);
 static DEFINE_MUTEX(device_list_lock);
 
-static unsigned int bufsiz = (30 * 1024);
+static unsigned int bufsiz = (50 * 1024);
 module_param(bufsiz, uint, S_IRUGO);
 MODULE_PARM_DESC(bufsiz, "maximum data bytes for SPI message");
 
@@ -76,6 +76,29 @@ static struct gf_device *g_data;
 #if !defined(CONFIG_SENSORS_ET5XX) && !defined(CONFIG_SENSORS_VFS8XXX)
 int fpsensor_goto_suspend = 0;
 #endif
+#endif
+
+#if defined(ENABLE_SENSORS_FPRINT_SECURE)
+int fps_resume_set(void){
+	int ret =0;
+
+	if (fpsensor_goto_suspend) {
+		fpsensor_goto_suspend = 0;
+#if defined(CONFIG_TZDEV)
+		if (!g_data->ldo_onoff) {
+			ret = exynos_smc(FP_CSMC_HANDLER_ID, FP_HANDLER_MAIN, FP_SET_POWEROFF, 0);
+			pr_info("gfspi %s: FP_SET_POWEROFF ret = %d\n", __func__, ret);
+		} else {
+			ret = exynos_smc(FP_CSMC_HANDLER_ID, FP_HANDLER_MAIN, FP_SET_POWERON_INACTIVE, 0);
+			pr_info("gfspi %s: FP_SET_POWERON_INACTIVE ret = %d\n", __func__, ret);
+		}
+#else
+		ret = exynos_smc(MC_FC_FP_PM_RESUME, 0, 0, 0);
+		pr_info("gfspi %s : smc ret = %d\n", __func__, ret);
+#endif
+	}
+	return ret;
+}
 #endif
 
 static ssize_t gfspi_bfs_values_show(struct device *dev,
@@ -104,7 +127,9 @@ static ssize_t gfspi_vendor_show(struct device *dev,
 static ssize_t gfspi_name_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%s\n", "GW32J1");
+	struct gf_device *data = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", data->chipid);
 }
 
 static ssize_t gfspi_adm_show(struct device *dev,
@@ -113,11 +138,53 @@ static ssize_t gfspi_adm_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%d\n", DETECT_ADM);
 }
 
+static ssize_t gfspi_intcnt_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct gf_device *data = dev_get_drvdata(dev);
+	return snprintf(buf, PAGE_SIZE, "%d\n", data->interrupt_count);
+}
+
+static ssize_t gfspi_intcnt_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t size)
+{
+	struct gf_device *data = dev_get_drvdata(dev);
+
+	if (sysfs_streq(buf, "c")) {
+		data->interrupt_count = 0;
+		pr_info("initialization is done\n");
+	}
+	return size;
+}
+
+static ssize_t gfspi_resetcnt_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct gf_device *data = dev_get_drvdata(dev);
+	return snprintf(buf, PAGE_SIZE, "%d\n", data->reset_count);
+}
+
+static ssize_t gfspi_resetcnt_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t size)
+{
+	struct gf_device *data = dev_get_drvdata(dev);
+
+	if (sysfs_streq(buf, "c")) {
+		data->reset_count = 0;
+		pr_info("initialization is done\n");
+	}
+	return size;
+}
+
 static DEVICE_ATTR(bfs_values, 0444, gfspi_bfs_values_show, NULL);
 static DEVICE_ATTR(type_check, 0444, gfspi_type_check_show, NULL);
 static DEVICE_ATTR(vendor, 0444,	gfspi_vendor_show, NULL);
 static DEVICE_ATTR(name, 0444, gfspi_name_show, NULL);
 static DEVICE_ATTR(adm, 0444, gfspi_adm_show, NULL);
+static DEVICE_ATTR(intcnt, 0664, gfspi_intcnt_show, gfspi_intcnt_store);
+static DEVICE_ATTR(resetcnt, 0664, gfspi_resetcnt_show, gfspi_resetcnt_store);
 
 static struct device_attribute *fp_attrs[] = {
 	&dev_attr_bfs_values,
@@ -125,6 +192,8 @@ static struct device_attribute *fp_attrs[] = {
 	&dev_attr_vendor,
 	&dev_attr_name,
 	&dev_attr_adm,
+	&dev_attr_intcnt,
+	&dev_attr_resetcnt,
 	NULL,
 };
 
@@ -134,6 +203,7 @@ static void gfspi_enable_irq(struct gf_device *gf_dev)
 		pr_err("%s, irq already enabled\n", __func__);
 	} else {
 		enable_irq(gf_dev->irq);
+		enable_irq_wake(gf_dev->irq);
 		gf_dev->irq_enabled = 1;
 		pr_debug("%s enable interrupt!\n", __func__);
 	}
@@ -144,6 +214,7 @@ static void gfspi_disable_irq(struct gf_device *gf_dev)
 	if (gf_dev->irq_enabled == 0) {
 		pr_err("%s, irq already disabled\n", __func__);
 	} else {
+		disable_irq_wake(gf_dev->irq);
 		disable_irq(gf_dev->irq);
 		gf_dev->irq_enabled = 0;
 		pr_debug("%s disable interrupt!\n", __func__);
@@ -324,6 +395,7 @@ static irqreturn_t gfspi_irq(int irq, void *handle)
 	wake_lock_timeout(&gf_dev->wake_lock,
 			msecs_to_jiffies(WAKELOCK_HOLD_TIME));
 	gfspi_netlink_send(gf_dev, GF_NETLINK_IRQ);
+	gf_dev->interrupt_count++;
 
 	return IRQ_HANDLED;
 }
@@ -519,6 +591,14 @@ static long gfspi_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			if (retval)
 				pr_err("%s: booster stop failed. (%d)\n", __func__, retval);
 		}
+#elif defined(CONFIG_TZDEV_BOOST)
+		if (onoff) {
+			pr_info("%s CPU_SPEEDUP ON\n", __func__);
+			tz_boost_enable();
+		} else {
+			pr_info("%s CPU_SPEEDUP OFF\n", __func__);
+			tz_boost_disable();
+		}
 #else
 		pr_err("%s CPU_SPEEDUP is not used\n", __func__);
 #endif
@@ -683,6 +763,10 @@ void gfspi_hw_power_enable(struct gf_device *gf_dev, u8 onoff)
 		gfspi_pin_control(gf_dev, 1);
 		if (gf_dev->pwr_gpio)
 			gpio_set_value(gf_dev->pwr_gpio, 1);
+#if defined(ENABLE_SENSORS_FPRINT_SECURE) && defined(CONFIG_TZDEV)
+		pr_info("%s: FP_SET_POWERON_INACTIVE ret = %d\n", __func__, 
+			exynos_smc(FP_CSMC_HANDLER_ID, FP_HANDLER_MAIN, FP_SET_POWERON_INACTIVE, 0));
+#endif
 		if (gf_dev->reset_gpio) {
 			mdelay(11);
 			gpio_set_value(gf_dev->reset_gpio, 1);
@@ -690,7 +774,16 @@ void gfspi_hw_power_enable(struct gf_device *gf_dev, u8 onoff)
 		gf_dev->ldo_onoff = 1;
 	} else if (!onoff && gf_dev->ldo_onoff) {
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
-		exynos_smc(MC_FC_FP_CS_SET, 0, 0, 0);
+#if defined (CONFIG_ARCH_EXYNOS9) || defined(CONFIG_ARCH_EXYNOS8)\
+			|| defined (CONFIG_ARCH_EXYNOS7)
+#if defined(CONFIG_TZDEV)
+		pr_info("%s: FP_SET_POWEROFF ret = %d\n", __func__, 
+			exynos_smc(FP_CSMC_HANDLER_ID, FP_HANDLER_MAIN, FP_SET_POWEROFF, 0));
+#else
+		pr_info("%s: cs_set smc ret = %d\n", __func__,
+			exynos_smc(MC_FC_FP_CS_SET, 0, 0, 0));
+#endif
+#endif
 #endif
 		if (gf_dev->reset_gpio) {
 			gpio_set_value(gf_dev->reset_gpio, 0);
@@ -721,6 +814,7 @@ void gfspi_hw_reset(struct gf_device *gf_dev, u8 delay)
 	mdelay(3);
 	gpio_set_value(gf_dev->reset_gpio, 1);
 	mdelay(delay);
+	gf_dev->reset_count++;
 }
 
 #ifndef ENABLE_SENSORS_FPRINT_SECURE
@@ -737,13 +831,23 @@ int gfspi_type_check(struct gf_device *gf_dev)
 	gfspi_spi_read_bytes(gf_dev, 0x0000, 4, chipid);
 	chipid32 = (chipid[2] << 16 | chipid[3] << 8 | chipid[0]);
 	if (GF_GW32J_CHIP_ID == chipid32) {
-		gf_dev->sensortype = SENSOR_GW32J;
+		gf_dev->sensortype = SENSOR_GOODIX;
 		pr_info("%s sensor type is GW32J (%s:0x%x)\n", __func__,
 		sensor_status[gf_dev->sensortype + 2], chipid32);
 		status = 0;
 	} else if (GF_GW32N_CHIP_ID == chipid32) {
-		gf_dev->sensortype = SENSOR_GW32J;
+		gf_dev->sensortype = SENSOR_GOODIX;
 		pr_info("%s sensor type is GW32N (%s:0x%x)\n", __func__,
+		sensor_status[gf_dev->sensortype + 2], chipid32);
+		status = 0;
+	} else if (GF_GW36H_CHIP_ID == chipid32) {
+		gf_dev->sensortype = SENSOR_GOODIX;
+		pr_info("%s sensor type is GW36H (%s:0x%x)\n", __func__,
+		sensor_status[gf_dev->sensortype + 2], chipid32);
+		status = 0;
+	} else if (GF_GW36C_CHIP_ID == chipid32) {
+		gf_dev->sensortype = SENSOR_GOODIX;
+		pr_info("%s sensor type is GW36C (%s:0x%x)\n", __func__,
 		sensor_status[gf_dev->sensortype + 2], chipid32);
 		status = 0;
 	} else {
@@ -784,6 +888,8 @@ static int gfspi_probe(struct spi_device *spi)
 	gf_dev->need_update = 0;
 	gf_dev->ldo_onoff = 0;
 	gf_dev->pid = 0;
+	gf_dev->reset_count = 0;
+	gf_dev->interrupt_count = 0;
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 	gf_dev->enabled_clk = 0;
 	gf_dev->tz_mode = true;
@@ -869,6 +975,10 @@ static int gfspi_probe(struct spi_device *spi)
 		pr_err("%s type_check failed\n", __func__);
 #endif
 
+#if defined(DISABLED_GPIO_PROTECTION)
+	etspi_pin_control(etspi, 0);
+#endif
+
 	/* create sysfs */
 	status = fingerprint_register(gf_dev->fp_device,
 		gf_dev, fp_attrs, "fingerprint");
@@ -925,8 +1035,14 @@ static int gfspi_probe(struct spi_device *spi)
 	fb_register_client(&gf_dev->notifier);
 #endif
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
-		/* prevent spi_cs line floating */
-		exynos_smc(MC_FC_FP_CS_SET, 0, 0, 0);
+#if defined (CONFIG_ARCH_EXYNOS9) || defined(CONFIG_ARCH_EXYNOS8)\
+			|| defined (CONFIG_ARCH_EXYNOS7)
+	/* prevent spi_cs line floating */
+#if !defined(CONFIG_TZDEV)
+	pr_info("%s: cs_set smc ret = %d\n", __func__,
+		exynos_smc(MC_FC_FP_CS_SET, 0, 0, 0));
+#endif
+#endif
 #endif
 	pr_info("%s probe finished\n", __func__);
 	return 0;
@@ -1020,11 +1136,30 @@ static int gfspi_pm_suspend(struct device *dev)
 {
 	struct gf_device *gf_dev = dev_get_drvdata(dev);
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
+#if defined (CONFIG_ARCH_EXYNOS9) || defined(CONFIG_ARCH_EXYNOS8)\
+		|| defined (CONFIG_ARCH_EXYNOS7)
 	int ret = 0;
 
 	fpsensor_goto_suspend = 1; /* used by pinctrl_samsung.c */
-	ret = exynos_smc(MC_FC_FP_PM_SUSPEND, 0, 0, 0);
-	pr_info("%s: smc ret = %d\n", __func__, ret);
+	
+	if (!gf_dev->ldo_onoff) {
+#if defined(CONFIG_TZDEV)
+		ret = exynos_smc(FP_CSMC_HANDLER_ID, FP_HANDLER_MAIN, FP_SET_POWEROFF, 0);
+		pr_info("%s: FP_SET_POWEROFF ret = %d\n", __func__, ret);
+#else
+		ret = exynos_smc(MC_FC_FP_PM_SUSPEND, 0, 0, 0);
+		pr_info("%s: suspend smc ret = %d\n", __func__, ret);
+#endif
+	} else {
+#if defined(CONFIG_TZDEV)
+		ret = exynos_smc(FP_CSMC_HANDLER_ID, FP_HANDLER_MAIN, FP_SET_POWERON_INACTIVE, 0);
+		pr_info("%s: FP_SET_POWERON_INACTIVE ret = %d\n", __func__, ret);
+#else
+		ret = exynos_smc(MC_FC_FP_PM_SUSPEND_CS_HIGH, 0, 0, 0);
+		pr_info("%s: suspend_cs_high smc ret = %d\n", __func__, ret);
+#endif
+	}
+#endif
 #else
 	pr_info("%s\n", __func__);
 #endif
@@ -1038,6 +1173,11 @@ static int gfspi_pm_resume(struct device *dev)
 
 	pr_info("%s\n", __func__);
 	gfspi_enable_debug_timer(gf_dev);
+#if defined(ENABLE_SENSORS_FPRINT_SECURE)
+	if (fpsensor_goto_suspend) {
+		fps_resume_set();
+	}
+#endif
 	return 0;
 }
 

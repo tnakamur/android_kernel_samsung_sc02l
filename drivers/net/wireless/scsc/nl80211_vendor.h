@@ -1,8 +1,11 @@
 /*****************************************************************************
  *
- * Copyright (c) 2012 - 2017 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2012 - 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
+
+#include "nl80211_vendor_nan.h"
+
 #ifndef __SLSI_NL80211_VENDOR_H_
 #define __SLSI_NL80211_VENDOR_H_
 
@@ -11,6 +14,8 @@
 #define SLSI_NL80211_GSCAN_SUBCMD_RANGE_START           0x1000
 #define SLSI_NL80211_GSCAN_EVENT_RANGE_START            0x01
 #define SLSI_NL80211_LOGGING_SUBCMD_RANGE_START           0x1400
+#define SLSI_NL80211_NAN_SUBCMD_RANGE_START             0x1500
+#define SLSI_NL80211_RTT_SUBCMD_RANGE_START    0x1100
 #define SLSI_GSCAN_SCAN_ID_START                        0x410
 #define SLSI_GSCAN_SCAN_ID_END                          0x500
 
@@ -28,7 +33,7 @@
 #define SLSI_REPORT_EVENTS_NONE                         (0)
 #define SLSI_REPORT_EVENTS_EACH_SCAN                    (1)
 #define SLSI_REPORT_EVENTS_FULL_RESULTS                 (2)
-#define SLSI_REPORT_EVENTS_NO_BATCH                 (4)
+#define SLSI_REPORT_EVENTS_NO_BATCH                     (4)
 
 #define SLSI_NL_ATTRIBUTE_U32_LEN                       (NLA_HDRLEN + 4)
 #define SLSI_NL_ATTRIBUTE_COUNTRY_CODE                  (4)
@@ -81,10 +86,44 @@
 #define SLSI_WIFI_HAL_FEATURE_HAL_EPNO           0x040000      /* WiFi PNO enhanced */
 #define SLSI_WIFI_HAL_FEATURE_RSSI_MONITOR       0x080000      /* RSSI Monitor */
 #define SLSI_WIFI_HAL_FEATURE_MKEEP_ALIVE        0x100000      /* WiFi mkeep_alive */
+#define SLSI_WIFI_HAL_FEATURE_CONTROL_ROAMING    0x800000      /* Enable/Disable firmware roaming macro */
 
 enum slsi_wifi_attr {
 	SLSI_NL_ATTRIBUTE_ND_OFFLOAD_VALUE = 0,
 	SLSI_NL_ATTRIBUTE_PNO_RANDOM_MAC_OUI
+};
+
+enum SLSI_ROAM_ATTRIBUTES {
+	SLSI_NL_ATTR_MAX_BLACKLIST_SIZE,
+	SLSI_NL_ATTR_MAX_WHITELIST_SIZE,
+	SLSI_NL_ATTR_ROAM_STATE
+};
+
+enum slsi_acs_attr_offload {
+	SLSI_ACS_ATTR_CHANNEL_INVALID = 0,
+	SLSI_ACS_ATTR_PRIMARY_CHANNEL,
+	SLSI_ACS_ATTR_SECONDARY_CHANNEL,
+	SLSI_ACS_ATTR_HW_MODE,
+	SLSI_ACS_ATTR_HT_ENABLED,
+	SLSI_ACS_ATTR_HT40_ENABLED,
+	SLSI_ACS_ATTR_VHT_ENABLED,
+	SLSI_ACS_ATTR_CHWIDTH,
+	SLSI_ACS_ATTR_CH_LIST,
+	SLSI_ACS_ATTR_VHT_SEG0_CENTER_CHANNEL,
+	SLSI_ACS_ATTR_VHT_SEG1_CENTER_CHANNEL,
+	SLSI_ACS_ATTR_FREQ_LIST,
+	/* keep last */
+	SLSI_ACS_ATTR_AFTER_LAST,
+	SLSI_ACS_ATTR_MAX =
+	SLSI_ACS_ATTR_AFTER_LAST - 1
+};
+
+enum slsi_acs_hw_mode {
+	SLSI_ACS_MODE_IEEE80211B,
+	SLSI_ACS_MODE_IEEE80211G,
+	SLSI_ACS_MODE_IEEE80211A,
+	SLSI_ACS_MODE_IEEE80211AD,
+	SLSI_ACS_MODE_IEEE80211ANY,
 };
 
 enum GSCAN_ATTRIBUTE {
@@ -102,12 +141,12 @@ enum GSCAN_ATTRIBUTE {
 	GSCAN_ATTRIBUTE_BAND = GSCAN_ATTRIBUTE_BUCKETS_BAND,
 
 	GSCAN_ATTRIBUTE_ENABLE_FEATURE = 20,
-	GSCAN_ATTRIBUTE_SCAN_RESULTS_COMPLETE,              /* indicates no more results */
+	GSCAN_ATTRIBUTE_SCAN_RESULTS_COMPLETE, /* indicates no more results */
 	GSCAN_ATTRIBUTE_REPORT_EVENTS,
 
 	/* remaining reserved for additional attributes */
 	GSCAN_ATTRIBUTE_NUM_OF_RESULTS = 30,
-	GSCAN_ATTRIBUTE_SCAN_RESULTS,                       /* flat array of wifi_scan_result */
+	GSCAN_ATTRIBUTE_SCAN_RESULTS, /* flat array of wifi_scan_result */
 	GSCAN_ATTRIBUTE_NUM_CHANNELS,
 	GSCAN_ATTRIBUTE_CHANNEL_LIST,
 	GSCAN_ATTRIBUTE_SCAN_ID,
@@ -251,6 +290,8 @@ enum slsi_hal_vendor_subcmds {
 	SLSI_NL80211_VENDOR_SUBCMD_GET_FEATURE_SET,
 	SLSI_NL80211_VENDOR_SUBCMD_SET_COUNTRY_CODE,
 	SLSI_NL80211_VENDOR_SUBCMD_CONFIGURE_ND_OFFLOAD,
+	SLSI_NL80211_VENDOR_SUBCMD_GET_ROAMING_CAPABILITIES,
+	SLSI_NL80211_VENDOR_SUBCMD_SET_ROAMING_STATE,
 	SLSI_NL80211_VENDOR_SUBCMD_START_LOGGING = SLSI_NL80211_LOGGING_SUBCMD_RANGE_START,
 	SLSI_NL80211_VENDOR_SUBCMD_TRIGGER_FW_MEM_DUMP,
 	SLSI_NL80211_VENDOR_SUBCMD_GET_FW_MEM_DUMP,
@@ -264,12 +305,25 @@ enum slsi_hal_vendor_subcmds {
 	SLSI_NL80211_VENDOR_SUBCMD_START_PKT_FATE_MONITORING,
 	SLSI_NL80211_VENDOR_SUBCMD_GET_TX_PKT_FATES,
 	SLSI_NL80211_VENDOR_SUBCMD_GET_RX_PKT_FATES,
-	SLSI_NL80211_VENDOR_SUBCMD_GET_WAKE_REASON_STATS
+	SLSI_NL80211_VENDOR_SUBCMD_GET_WAKE_REASON_STATS,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_ENABLE = SLSI_NL80211_NAN_SUBCMD_RANGE_START,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_DISABLE,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_PUBLISH,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_PUBLISHCANCEL,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_SUBSCRIBE,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_SUBSCRIBECANCEL,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_TXFOLLOWUP,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_CONFIG,
+	SLSI_NL80211_VENDOR_SUBCMD_NAN_CAPABILITIES,
+	SLSI_NL80211_VENDOR_SUBCMD_RTT_GET_CAPABILITIES = SLSI_NL80211_RTT_SUBCMD_RANGE_START,
+	SLSI_NL80211_VENDOR_SUBCMD_RTT_RANGE_START,
+	SLSI_NL80211_VENDOR_SUBCMD_RTT_RANGE_CANCEL
 };
 
 enum slsi_supp_vendor_subcmds {
 	SLSI_NL80211_VENDOR_SUBCMD_UNSPEC = 0,
 	SLSI_NL80211_VENDOR_SUBCMD_KEY_MGMT_SET_KEY,
+	SLSI_NL80211_VENDOR_SUBCMD_ACS_INIT,
 };
 
 enum slsi_vendor_event_values {
@@ -285,7 +339,18 @@ enum slsi_vendor_event_values {
 	SLSI_NL80211_HOTSPOT_MATCH,
 	SLSI_NL80211_RSSI_REPORT_EVENT,
 	SLSI_NL80211_LOGGER_RING_EVENT,
-	SLSI_NL80211_LOGGER_FW_DUMP_EVENT
+	SLSI_NL80211_LOGGER_FW_DUMP_EVENT,
+	SLSI_NL80211_NAN_RESPONSE_EVENT,
+	SLSI_NL80211_NAN_PUBLISH_TERMINATED_EVENT,
+	SLSI_NL80211_NAN_MATCH_EVENT,
+	SLSI_NL80211_NAN_MATCH_EXPIRED_EVENT,
+	SLSI_NL80211_NAN_SUBSCRIBE_TERMINATED_EVENT,
+	SLSI_NL80211_NAN_FOLLOWUP_EVENT,
+	SLSI_NL80211_NAN_DISCOVERY_ENGINE_EVENT,
+	SLSI_NL80211_NAN_DISABLED_EVENT,
+	SLSI_NL80211_RTT_RESULT_EVENT,
+	SLSI_NL80211_RTT_COMPLETE_EVENT,
+	SLSI_NL80211_VENDOR_ACS_EVENT
 };
 
 enum slsi_lls_interface_mode {
@@ -383,6 +448,127 @@ enum slsi_enhanced_logging_attributes {
 	SLSI_ENHANCED_LOGGING_ATTRIBUTE_WAKE_STATS_ICMP4_RX_MULTICAST_CNT,
 	SLSI_ENHANCED_LOGGING_ATTRIBUTE_WAKE_STATS_ICMP6_RX_MULTICAST_CNT,
 	SLSI_ENHANCED_LOGGING_ATTRIBUTE_WAKE_STATS_OTHER_RX_MULTICAST_CNT,
+};
+
+enum slsi_rtt_event_attributes {
+	SLSI_RTT_EVENT_ATTR_ADDR     = 0,
+	SLSI_RTT_EVENT_ATTR_BURST_NUM,
+	SLSI_RTT_EVENT_ATTR_MEASUREMENT_NUM,
+	SLSI_RTT_EVENT_ATTR_SUCCESS_NUM,
+	SLSI_RTT_EVENT_ATTR_NUM_PER_BURST_PEER,
+	SLSI_RTT_EVENT_ATTR_STATUS,
+	SLSI_RTT_EVENT_ATTR_RETRY_AFTER_DURATION,
+	SLSI_RTT_EVENT_ATTR_TYPE,
+	SLSI_RTT_EVENT_ATTR_RSSI,
+	SLSI_RTT_EVENT_ATTR_RSSI_SPREAD,
+	SLSI_RTT_EVENT_ATTR_TX_PREAMBLE,
+	SLSI_RTT_EVENT_ATTR_TX_NSS,
+	SLSI_RTT_EVENT_ATTR_TX_BW,
+	SLSI_RTT_EVENT_ATTR_TX_MCS,
+	SLSI_RTT_EVENT_ATTR_TX_RATE,
+	SLSI_RTT_EVENT_ATTR_RX_PREAMBLE,
+	SLSI_RTT_EVENT_ATTR_RX_NSS,
+	SLSI_RTT_EVENT_ATTR_RX_BW,
+	SLSI_RTT_EVENT_ATTR_RX_MCS,
+	SLSI_RTT_EVENT_ATTR_RX_RATE,
+	SLSI_RTT_EVENT_ATTR_RTT,
+	SLSI_RTT_EVENT_ATTR_RTT_SD,
+	SLSI_RTT_EVENT_ATTR_RTT_SPREAD,
+	SLSI_RTT_EVENT_ATTR_DISTANCE_MM,
+	SLSI_RTT_EVENT_ATTR_DISTANCE_SD_MM,
+	SLSI_RTT_EVENT_ATTR_DISTANCE_SPREAD_MM,
+	SLSI_RTT_EVENT_ATTR_TIMESTAMP_US,
+	SLSI_RTT_EVENT_ATTR_BURST_DURATION_MSN,
+	SLSI_RTT_EVENT_ATTR_NEGOTIATED_BURST_NUM,
+	SLSI_RTT_EVENT_ATTR_LCI,
+	SLSI_RTT_EVENT_ATTR_LCR,
+
+};
+
+/* RTT peer type */
+enum slsi_rtt_peer_type {
+	SLSI_RTT_PEER_AP = 0x1,
+	SLSI_RTT_PEER_STA,
+	SLSI_RTT_PEER_P2P_GO,
+	SLSI_RTT_PEER_P2P_CLIENT,
+	SLSI_RTT_PEER_NAN,
+};
+
+/* RTT Measurement Bandwidth */
+enum slsi_wifi_rtt_bw {
+	SLSI_WIFI_RTT_BW_5 = 0x01,
+	SLSI_WIFI_RTT_BW_10 = 0x02,
+	SLSI_WIFI_RTT_BW_20 = 0x04,
+	SLSI_WIFI_RTT_BW_40 = 0x08,
+	SLSI_WIFI_RTT_BW_80 = 0x10,
+	SLSI_WIFI_RTT_BW_160 = 0x20
+};
+
+/* RTT Measurement Preamble */
+enum slsi_wifi_rtt_preamble {
+	SLSI_WIFI_RTT_PREAMBLE_LEGACY = 0x1,
+	SLSI_WIFI_RTT_PREAMBLE_HT = 0x2,
+	SLSI_WIFI_RTT_PREAMBLE_VHT = 0x4
+};
+
+/* RTT Type */
+enum slsi_wifi_rtt_type {
+	SLSI_RTT_TYPE_1_SIDED = 0x1,
+	SLSI_RTT_TYPE_2_SIDED,
+};
+
+enum slsi_rtt_attribute {
+	SLSI_RTT_ATTRIBUTE_TARGET_CNT = 0,
+	SLSI_RTT_ATTRIBUTE_TARGET_INFO,
+	SLSI_RTT_ATTRIBUTE_TARGET_MAC,
+	SLSI_RTT_ATTRIBUTE_TARGET_TYPE,
+	SLSI_RTT_ATTRIBUTE_TARGET_PEER,
+	SLSI_RTT_ATTRIBUTE_TARGET_CHAN_WIDTH,
+	SLSI_RTT_ATTRIBUTE_TARGET_CHAN_FREQ,
+	SLSI_RTT_ATTRIBUTE_TARGET_CHAN_FREQ0,
+	SLSI_RTT_ATTRIBUTE_TARGET_CHAN_FREQ1,
+	SLSI_RTT_ATTRIBUTE_TARGET_PERIOD,
+	SLSI_RTT_ATTRIBUTE_TARGET_NUM_BURST,
+	SLSI_RTT_ATTRIBUTE_TARGET_NUM_FTM_BURST,
+	SLSI_RTT_ATTRIBUTE_TARGET_NUM_RETRY_FTM,
+	SLSI_RTT_ATTRIBUTE_TARGET_NUM_RETRY_FTMR,
+	SLSI_RTT_ATTRIBUTE_TARGET_LCI,
+	SLSI_RTT_ATTRIBUTE_TARGET_LCR,
+	SLSI_RTT_ATTRIBUTE_TARGET_BURST_DURATION,
+	SLSI_RTT_ATTRIBUTE_TARGET_PREAMBLE,
+	SLSI_RTT_ATTRIBUTE_TARGET_BW,
+	SLSI_RTT_ATTRIBUTE_RESULTS_COMPLETE = 30,
+	SLSI_RTT_ATTRIBUTE_RESULTS_PER_TARGET,
+	SLSI_RTT_ATTRIBUTE_RESULT_CNT,
+	SLSI_RTT_ATTRIBUTE_RESULT,
+	SLSI_RTT_ATTRIBUTE_TARGET_ID
+};
+
+/* Ranging status */
+enum slsi_wifi_rtt_status {
+	SLSI_RTT_STATUS_SUCCESS = 0,
+	SLSI_RTT_STATUS_FAILURE,           /* general failure status */
+	SLSI_RTT_STATUS_FAIL_NO_RSP,           /* target STA does not respond to request */
+	SLSI_RTT_STATUS_FAIL_REJECTED,           /* request rejected. Applies to 2-sided RTT only*/
+	SLSI_RTT_STATUS_FAIL_NOT_SCHEDULED_YET,
+	SLSI_RTT_STATUS_FAIL_TM_TIMEOUT, /* timing measurement times out */
+	SLSI_RTT_STATUS_FAIL_AP_ON_DIFF_CHANNEL, /* Target on different channel, cannot range */
+	SLSI_RTT_STATUS_FAIL_NO_CAPABILITY,     /* ranging not supported */
+	SLSI_RTT_STATUS_ABORTED,     /* request aborted for unknown reason */
+	SLSI_RTT_STATUS_FAIL_INVALID_TS,     /* Invalid T1-T4 timestamp */
+	SLSI_RTT_STATUS_FAIL_PROTOCOL,    /* 11mc protocol failed */
+	SLSI_RTT_STATUS_FAIL_SCHEDULE,    /* request could not be scheduled */
+	SLSI_RTT_STATUS_FAIL_BUSY_TRY_LATER,    /* responder cannot collaborate at time of request */
+	SLSI_RTT_STATUS_INVALID_REQ,    /* bad request args */
+	SLSI_RTT_STATUS_NO_WIFI,    /* WiFi not enabled */
+	SLSI_RTT_STATUS_FAIL_FTM_PARAM_OVERRIDE /* Responder overrides param info, cannot range with new params */
+};
+
+/* Format of information elements found in the beacon */
+struct slsi_wifi_information_element {
+	u8 id;                            /* element identifier */
+	u8 len;                           /* number of bytes to follow */
+	u8 data[];
 };
 
 struct slsi_nl_gscan_capabilities {
@@ -687,7 +873,111 @@ struct slsi_lls_iface_stat {
 	int rssi_ack;                         /* access Point ACK RSSI (averaged) from connected AP*/
 	struct slsi_lls_wmm_ac_stat ac[SLSI_LLS_AC_MAX];     /* per ac data packet statistics*/
 	u32 num_peers;                        /* number of peers*/
-	struct slsi_lls_peer_info peer_info[];           /* per peer statistics*/
+	struct slsi_lls_peer_info peer_info[]; /* per peer statistics*/
+};
+
+enum slsi_wifi_hal_api_return_types {
+	WIFI_HAL_SUCCESS = 0,
+	WIFI_HAL_ERROR_NONE = 0,
+	WIFI_HAL_ERROR_UNKNOWN = -1,
+	WIFI_HAL_ERROR_UNINITIALIZED = -2,
+	WIFI_HAL_ERROR_NOT_SUPPORTED = -3,
+	WIFI_HAL_ERROR_NOT_AVAILABLE = -4,
+	WIFI_HAL_ERROR_INVALID_ARGS = -5,
+	WIFI_HAL_ERROR_INVALID_REQUEST_ID = -6,
+	WIFI_HAL_ERROR_TIMED_OUT = -7,
+	WIFI_HAL_ERROR_TOO_MANY_REQUESTS = -8,
+	WIFI_HAL_ERROR_OUT_OF_MEMORY = -9
+};
+
+struct slsi_rtt_capabilities {
+	u8 rtt_one_sided_supported;  /* if 1-sided rtt data collection is supported */
+	u8 rtt_ftm_supported;        /* if ftm rtt data collection is supported */
+	u8 lci_support;              /* if initiator supports LCI request. Applies to 2-sided RTT */
+	u8 lcr_support;              /* if initiator supports LCR request. Applies to 2-sided RTT */
+	u8 preamble_support;         /* bit mask indicates what preamble is supported by initiator */
+	u8 bw_support;               /* bit mask indicates what BW is supported by initiator */
+	u8 responder_supported;      /* if 11mc responder mode is supported */
+	u8 mc_version;               /* draft 11mc spec version supported by chip. For instance,
+				      *version 4.0 should be 40 and version 4.3 should be 43 etc.
+				      */
+};
+
+/* RTT configuration */
+struct slsi_rtt_config {
+	u8 source_addr[ETH_ALEN];
+	u8 peer_addr[ETH_ALEN];                 /* peer device mac address */
+	u16 type;            /* 1-sided or 2-sided RTT */
+	u16 channel_freq;     /* Required for STA-AP mode, optional for P2P, NBD etc. */
+	u16 channel_info;
+	u8 burst_period;         /* Time interval between bursts (units: 100 ms). */
+					/* Applies to 1-sided and 2-sided RTT multi-burst requests.
+					 *Range: 0-31, 0: no preference by initiator (2-sided RTT)
+					 */
+	u8 num_burst;    /* Total number of RTT bursts to be executed. It will be
+			  *specified in the same way as the parameter "Number of
+			  *Burst Exponent" found in the FTM frame format. It
+			  *applies to both: 1-sided RTT and 2-sided RTT. Valid
+			  *values are 0 to 15 as defined in 802.11mc std
+			  *0 means single shot
+			  *The implication of this parameter on the maximum
+			  *number of RTT results is the following:
+			  *for 1-sided RTT: max num of RTT results = (2^num_burst)*(num_frames_per_burst)
+			  *for 2-sided RTT: max num of RTT results = (2^num_burst)*(num_frames_per_burst - 1)
+			  */
+	u8 num_frames_per_burst; /* num of frames per burst.
+				  *Minimum value = 1, Maximum value = 31
+				  *For 2-sided this equals the number of FTM frames
+				  *to be attempted in a single burst. This also
+				  *equals the number of FTM frames that the
+				  *initiator will request that the responder send
+				  *in a single frame.
+				  */
+	u8 num_retries_per_ftmr; /* Maximum number of retries that the initiator can
+				  *retry an FTMR frame.
+				  *Minimum value = 0, Maximum value = 3
+				  */
+	u8 burst_duration;       /* Applies to 1-sided and 2-sided RTT. Valid values will
+				  *be 2-11 and 15 as specified by the 802.11mc std for
+				  *the FTM parameter burst duration. In a multi-burst
+				  *request, if responder overrides with larger value,
+				  *the initiator will return failure. In a single-burst
+				  *request if responder overrides with larger value,
+				  *the initiator will sent TMR_STOP to terminate RTT
+				  *at the end of the burst_duration it requested.
+				  */
+	u16 preamble;    /* RTT preamble to be used in the RTT frames */
+	u16 bw;                /* RTT BW to be used in the RTT frames */
+	u16 LCI_request;              /* 1: request LCI, 0: do not request LCI */
+	u16 LCR_request;              /* 1: request LCR, 0: do not request LCR */
+};
+
+#define MAX_CHAN_VALUE_ACS 25  /*Max number of supported channel is 25*/
+
+struct slsi_acs_chan_info {
+	u16 chan;
+	u8 num_ap;
+	u8 num_bss_load_ap;
+	u8 total_chan_utilization;
+	u8 avg_chan_utilization;
+	int rssi_factor;
+	int adj_rssi_factor;
+};
+
+struct slsi_acs_selected_channels {
+	u8 pri_channel;
+	u8 sec_channel;
+	u8 vht_seg0_center_ch;
+	u8 vht_seg1_center_ch;
+	u16 ch_width;
+	enum slsi_acs_hw_mode hw_mode;
+};
+
+struct slsi_acs_request {
+	struct slsi_acs_chan_info acs_chan_info[MAX_CHAN_VALUE_ACS];
+	u8 hw_mode;
+	u16 ch_width;
+	u8 ch_list_len;
 };
 
 void slsi_nl80211_vendor_init(struct slsi_dev *sdev);
@@ -702,10 +992,19 @@ int slsi_gscan_alloc_buckets(struct slsi_dev *sdev, struct slsi_gscan *gscan, in
 int slsi_vendor_event(struct slsi_dev *sdev, int event_id, const void *data, int len);
 int slsi_mib_get_gscan_cap(struct slsi_dev *sdev, struct slsi_nl_gscan_capabilities *cap);
 void slsi_rx_rssi_report_ind(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *skb);
-
-#ifdef CONFIG_SCSC_WLAN_ENHANCED_LOGGING
+int slsi_mib_get_rtt_cap(struct slsi_dev *sdev, struct net_device *dev, struct slsi_rtt_capabilities *cap);
+int slsi_mlme_add_range_req(struct slsi_dev *sdev, u8 count, struct slsi_rtt_config *nl_rtt_params,
+			    u16 rtt_id, u16 vif_idx);
+int slsi_mlme_del_range_req(struct slsi_dev *sdev, struct net_device *dev, u16 count, u8 *addr, u16 rtt_id);
+void slsi_rx_range_ind(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *skb);
+void slsi_rx_range_done_ind(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *skb);
+int slsi_tx_rate_calc(struct sk_buff *nl_skb, u16 fw_rate, int res, bool tx_rate);
+void slsi_check_num_radios(struct slsi_dev *sdev);
 void slsi_rx_event_log_indication(struct slsi_dev *sdev, struct net_device *dev, struct sk_buff *skb);
+#ifdef CONFIG_SCSC_WLAN_DEBUG
+char *slsi_print_event_name(int event_id);
 #endif
+
 
 void slsi_check_num_radios(struct slsi_dev *sdev);
 
@@ -733,4 +1032,5 @@ static inline enum slsi_lls_traffic_ac slsi_fapi_to_android_traffic_q(enum slsi_
 		return SLSI_LLS_AC_MAX;
 	}
 }
+
 #endif

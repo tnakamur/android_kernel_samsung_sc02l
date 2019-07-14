@@ -82,6 +82,11 @@
 
 
 #define VC_NOTHING		0
+#define VC_TAILPDAF		1
+#define VC_MIPISTAT		2
+#define VC_EMBEDDED		3
+#define VC_PRIVATE		4
+/* for backward compatibility */
 #define VC_TAIL_MODE_PDAF	1
 #define VC_MIPI_STAT		2
 

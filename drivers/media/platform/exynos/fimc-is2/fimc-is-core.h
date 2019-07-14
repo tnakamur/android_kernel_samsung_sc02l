@@ -97,6 +97,14 @@
 	ALIGN((MAX_3DNR_INTERNAL_BUF_WIDTH * MAX_3DNR_INTERNAL_BUF_HEIGHT * 18 / 8), 16)
 #endif
 
+#define MAX_TNR_INTERNAL_BUF_WIDTH	(4032)
+#define MAX_TNR_INTERNAL_BUF_HEIGHT	(3024)
+#define SIZE_TNR_IMAGE_BUF \
+	(MAX_TNR_INTERNAL_BUF_WIDTH * MAX_TNR_INTERNAL_BUF_HEIGHT * 12 / 8) /* 12 bittage */
+#define SIZE_TNR_WEIGHT_BUF \
+	(MAX_TNR_INTERNAL_BUF_WIDTH * MAX_TNR_INTERNAL_BUF_HEIGHT / 2 / 2) /* 8 bittage */
+
+
 #define NUM_LHFD_INTERNAL_BUF		(3)
 #define MAX_LHFD_INTERNEL_BUF_WIDTH	(640)
 #define MAX_LHFD_INTERNEL_BUF_HEIGHT	(480)
@@ -325,6 +333,7 @@ struct fimc_is_core {
 	struct i2c_client			*client2; /* wide af (ak7371) */
 	struct i2c_client			*client3; /* front af (ak7372) */
 	struct i2c_client			*client4; /* tele af (ak7371) */
+	struct i2c_client			*client5; /* iris (ak7372) */
 
 	struct mutex				i2c_lock[SENSOR_CONTROL_I2C_MAX];
 

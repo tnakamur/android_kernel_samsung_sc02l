@@ -68,6 +68,7 @@ struct s2mu005_led_data {
 #if defined(CONFIG_LEDS_SUPPORT_FRONT_FLASH)
 	unsigned int front_brightness;
 #endif
+	unsigned int flashlight_current[S2MU005_FLASH_LIGHT_MAX];
 };
 
 u8 CH_FLASH_TORCH_EN = S2MU005_REG_FLED_RSVD;
@@ -808,15 +809,15 @@ static ssize_t rear_flash_store(struct device *dev,
 	} else if (1001 <= value && value <= 1010) {
 		/* (value) 1001, 1002, 1004, 1006, 1009 */
 		if (value <= 1001)
-			torch_current = 25;
+			torch_current = (led_data->flashlight_current[0]);
 		else if (value <= 1002)
-			torch_current = 50;
+			torch_current = (led_data->flashlight_current[1]);
 		else if (value <= 1004)
-			torch_current = 75;
+			torch_current = (led_data->flashlight_current[2]);
 		else if (value <= 1006)
-			torch_current = 100;
+			torch_current = (led_data->flashlight_current[3]);
 		else if (value <= 1009)
-			torch_current = 150;
+			torch_current = (led_data->flashlight_current[4]);
 		else
 			torch_current = 50;
 
@@ -847,6 +848,11 @@ static ssize_t rear_flash_store(struct device *dev,
 	s2mu005_write_reg(led_data->i2c, CH_FLASH_TORCH_EN, reg_val);
 #endif
 	s2mu005_led_set(led_cdev, brightness);
+
+#ifdef S2MU005_FLED_DEBUG
+	if(value == 0)
+		s2mu005_led_dump_reg();
+#endif
 
 	mutex_unlock(&led_data->lock);
 	return size;
@@ -940,6 +946,11 @@ static ssize_t front_flash_store(struct device *dev,
 	s2mu005_write_reg(led_data->i2c, CH_FLASH_TORCH_EN, reg_val);
 #endif
 
+#ifdef S2MU005_FLED_DEBUG
+	if(value == 0)
+		s2mu005_led_dump_reg();
+#endif
+
 	mutex_unlock(&led_data->lock);
 	return size;
 
@@ -963,6 +974,7 @@ static int s2mu005_led_dt_parse_pdata(struct device *dev,
 	u32 temp;
 	const char *temp_str;
 	u32 index;
+	u32 args[S2MU005_FLASH_LIGHT_MAX];
 
 	led_np = dev->parent->of_node;
 
@@ -1027,6 +1039,20 @@ static int s2mu005_led_dt_parse_pdata(struct device *dev,
 	dev_info(dev, "front_torch_current = <%d>, brightness = %x\n", temp, pdata->front_brightness);
 #endif
 
+	ret = of_property_read_u32_array(np, "flashlight_current",args, S2MU005_FLASH_LIGHT_MAX);
+	if(ret < 0) {
+		pdata->flashlight_current[0] = STEP0_CURRENT;
+		pdata->flashlight_current[1] = STEP1_CURRENT;
+		pdata->flashlight_current[2] = STEP2_CURRENT;
+		pdata->flashlight_current[3] = STEP3_CURRENT;
+		pdata->flashlight_current[4] = STEP4_CURRENT;
+	}else {
+		pdata->flashlight_current[0] = args[0];
+		pdata->flashlight_current[1] = args[1];
+		pdata->flashlight_current[2] = args[2];
+		pdata->flashlight_current[3] = args[3];
+		pdata->flashlight_current[4] = args[4];
+	}
 	pdata->num_leds = of_get_child_count(np);
 
 	for_each_child_of_node(np, c_np) {
@@ -1247,6 +1273,11 @@ static int s2mu005_led_probe(struct platform_device *pdev)
 #if defined(CONFIG_LEDS_SUPPORT_FRONT_FLASH)
 		led_data->front_brightness = pdata->front_brightness;
 #endif
+		led_data->flashlight_current[0] = pdata->flashlight_current[0];
+		led_data->flashlight_current[1] = pdata->flashlight_current[1];
+		led_data->flashlight_current[2] = pdata->flashlight_current[2];
+		led_data->flashlight_current[3] = pdata->flashlight_current[3];
+		led_data->flashlight_current[4] = pdata->flashlight_current[4];
 
 		ret = s2mu005_read_reg(led_data->i2c, 0x73, &temp);	/* EVT0 0x73[3:0] == 0x0 */
 		if (ret < 0)

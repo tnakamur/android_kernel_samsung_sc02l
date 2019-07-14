@@ -32,6 +32,7 @@ extern struct class *sec_class;
 #define SEC_CLASS_DEV_NAME_WACOM	"sec_epen"
 
 #define SEC_CMD(name, func)		.cmd_name = name, .cmd_func = func
+#define SEC_CMD_H(name, func)		.cmd_name = name, .cmd_func = func, .cmd_log = 1
 
 #define SEC_CMD_BUF_SIZE		(4096 - 1)
 #define SEC_CMD_STR_LEN			256
@@ -43,6 +44,7 @@ struct sec_cmd {
 	struct list_head	list;
 	const char		*cmd_name;
 	void			(*cmd_func)(void *device_data);
+	int				cmd_log;
 };
 
 enum SEC_CMD_STATUS {

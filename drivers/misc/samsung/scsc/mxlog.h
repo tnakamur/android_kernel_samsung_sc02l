@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (c) 2014 - 2016 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2014 - 2017 Samsung Electronics Co., Ltd. All rights reserved
  *
  ****************************************************************************/
 
@@ -84,7 +84,7 @@ struct mxlog_event_log_msg {
 
 struct mxlog;
 
-void mxlog_init(struct mxlog *mxlog, struct scsc_mx *mx);
+void mxlog_init(struct mxlog *mxlog, struct scsc_mx *mx, char *fw_build_id);
 void mxlog_release(struct mxlog *mxlog);
 
 struct mxlog {

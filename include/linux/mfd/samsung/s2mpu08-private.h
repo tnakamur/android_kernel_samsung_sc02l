@@ -322,4 +322,6 @@ extern int s2mpu08_read_word(struct i2c_client *i2c, u8 reg);
 extern int s2mpu08_update_reg(struct i2c_client *i2c, u8 reg, u8 val, u8 mask);
 
 extern void set_codec_notifier_flag(void);
+
+extern unsigned int lpcharge;
 #endif /* __LINUX_MFD_S2MPU08_PRIV_H */

@@ -11,6 +11,9 @@
 #include <scsc/scsc_logring.h>
 #include "scsc_mif_abs.h"
 #include "scsc_mx_impl.h"
+#ifdef CONFIG_SCSC_WLBTD
+#include "scsc_wlbtd.h"
+#endif
 
 #define SCSC_MX_CORE_MODDESC "mx140 Core Driver"
 
@@ -99,20 +102,11 @@ static struct scsc_mif_abs_driver mx_module_mif_if = {
 
 static int __init scsc_mx_module_init(void)
 {
-#ifdef CONFIG_SCSC_BUILD_TYPE
-	SCSC_TAG_INFO(MXMAN, SCSC_MX_CORE_MODDESC " scsc_release %d.%d.%d.%d (build type: %s\n)",
-		SCSC_RELEASE_PRODUCT,
-		SCSC_RELEASE_ITERATION,
-		SCSC_RELEASE_CANDIDATE,
-		SCSC_RELEASE_POINT,
-		CONFIG_SCSC_BUILD_TYPE);
-#else
 	SCSC_TAG_INFO(MXMAN, SCSC_MX_CORE_MODDESC " scsc_release %d.%d.%d.%d\n",
 		SCSC_RELEASE_PRODUCT,
 		SCSC_RELEASE_ITERATION,
 		SCSC_RELEASE_CANDIDATE,
 		SCSC_RELEASE_POINT);
-#endif
 
 	scsc_mif_abs_register(&mx_module_mif_if);
 	return 0;

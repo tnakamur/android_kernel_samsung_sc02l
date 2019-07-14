@@ -53,9 +53,6 @@
 #define ABS_CUR_LEVEL		ABS_X
 #define ABS_INT_DIRECTION	ABS_Y
 
-#define PS_CANCELLATION_ARRAY_NUM 5
-#define PS_CANCELLATION_POLLING_DELAY 10
-
 #define CONTROL_INT_ISR_PS_REPORT	0x00
 #define CONTROL_ALS					0x01
 #define CONTROL_PS					0x02
@@ -64,7 +61,10 @@
  /*lightsensor log time 6SEC 200mec X 30*/
 #define LIGHT_LOG_TIME		30
 
-#define PROX_READ_NUM		40
+#define PS_CANCELLATION_ARRAY_NUM 	5
+#define PROX_READ_NUM				25
+#define PS_WAIT						30000 // 20 ms * 1.5  (PS_PERIOD * 1.5)
+#define PS_WAIT_CALIB				15000 // 10 ms * 1.5  (PS_PERIOD * 1.5)
 
 #define DEFAULT_ADC			10
 #define ADC_MAX_VALUE		4095
@@ -95,8 +95,10 @@ struct cm36658_data {
 
 	struct input_dev *light_input_dev;
 	struct input_dev *prox_input_dev;
-	struct mutex power_lock;
-	struct mutex read_lock;
+
+	// Same mutex need to be used for enable and irq/calibration work function.
+	// When sensor is disabled, ADC is 0. So, during calibration,
+	// sensor should remain active because 0 ADC & 0 Offset means sunlight mode.
 	struct mutex control_mutex;
 
 	struct work_struct work_light;
@@ -121,6 +123,8 @@ struct cm36658_data {
 	int vdd_ldo_pin;
 	int led_ldo_pin;
 
+	u8 sunlight_detect;
+
 	int (*power)(int, uint8_t); /* power to the chip */
 
 	struct wake_lock prox_wake_lock;
@@ -129,7 +133,6 @@ struct cm36658_data {
 	uint16_t current_adc;
 	uint16_t inte_cancel_set;
 	uint16_t ps_conf1_val;
-	uint16_t ps_period;
 	uint16_t ps_conf3_val;
 	uint16_t red_data;
 	uint16_t green_data;
@@ -234,7 +237,7 @@ static void cm36658_get_avg_val(struct cm36658_data *cm36658)
 	u16 ps_data = 0;
 
 	for (i = 0; i < PROX_READ_NUM; i++) {
-		msleep(40);
+		usleep_range(PS_WAIT, PS_WAIT);
 		cm36658_i2c_read_word(cm36658, PS_DATA, &ps_data);
 		avg += ps_data;
 
@@ -279,29 +282,57 @@ static int cm36658_get_calibration_result(struct cm36658_data *cm36658, int is_f
 	int i = 0;
 	uint16_t value[PS_CANCELLATION_ARRAY_NUM];
 	uint32_t ps_average = 0;
+	uint16_t ps_period_conf;
 
-	/* Disable interrupt */
-	cm36658_i2c_read_word(cm36658, PS_CONF1, &cm36658->ps_conf1_val);
-	cm36658->ps_conf1_val &= CM36658_PS_INT_MASK;
-	/*change ps_period to 10ms*/
-	cm36658->ps_conf1_val &= CM36658_PS_PERIOD_10MS;
-	cm36658_i2c_write_word(cm36658, PS_CONF1, cm36658->ps_conf1_val);
-
-	/* Initialize */
-	cm36658_i2c_write_word(cm36658, PS_CANC, 0);
 	cm36658->autocal = 1;
 
+	cm36658_i2c_read_word(cm36658, PS_CONF1, &cm36658->ps_conf1_val);
+
+	/* Disable interrupt */
+	cm36658->ps_conf1_val &= CM36658_PS_INT_MASK;
+	cm36658_i2c_write_word(cm36658, PS_CONF1, cm36658->ps_conf1_val);
+
+	/* Set offset to 0 */
+	cm36658_i2c_write_word(cm36658, PS_CANC, 0);
+
+	/* Store current ps period register bits configuration */
+	ps_period_conf = cm36658->ps_conf1_val & ~CM36658_PS_PERIOD_MASK;
+
+	/* Change ps period to 10 ms for fast calibration & less sensor enable time */
+	cm36658->ps_conf1_val &= CM36658_PS_PERIOD_MASK;
+	cm36658->ps_conf1_val |= CM36658_PS_PERIOD_10MS;
+	cm36658_i2c_write_word(cm36658, PS_CONF1, cm36658->ps_conf1_val);
+
+	// Delay for update offset and new ps period
+	// This is just for safer side as ps period is reduced from high to low value
+	usleep_range(PS_WAIT, PS_WAIT);
+
 	for (i = 0; i < PS_CANCELLATION_ARRAY_NUM; i++) {
-		/* delay = (PS_PERIOD) * 1.5,  current PS_PERIOD = 10ms */
-		msleep(PS_CALI_DELAY);
+		/* Delay for ps period update */
+		usleep_range(PS_WAIT_CALIB, PS_WAIT_CALIB);
 		ret = cm36658_get_ps_adc_value(&value[i]);
 		if (ret < 0) {
 			pr_err("[PS_ERR][cm36658 error]%s: cm36658_get_ps_adc_value\n",
 				__func__);
 			return ret;
 		}
+
+		// If ADC is 0 & offset is 0, it means device entered sunlight mode,
+		// so skip calibration and reset ps period to previous value (20 ms)
+		if (value[i] == 0) {
+				cm36658->sunlight_detect = 1;
+				cm36658->ps_conf1_val &= CM36658_PS_PERIOD_MASK;
+				cm36658->ps_conf1_val |= ps_period_conf;
+				cm36658_i2c_write_word(cm36658, PS_CONF1, cm36658->ps_conf1_val);
+				usleep_range(PS_WAIT, PS_WAIT);
+				SENSOR_INFO("Skip Calibration, Entered Sunlight Mode, good offset : %d\n",
+								cm36658->offset);
+				return 0;
+		}
+
 		ps_average += value[i];
 	}
+
 	ps_average /= PS_CANCELLATION_ARRAY_NUM;
 
 	if (ps_average < DEFAULT_ADC)
@@ -313,18 +344,21 @@ static int cm36658_get_calibration_result(struct cm36658_data *cm36658, int is_f
 	else
 		cm36658->offset = ps_average - DEFAULT_ADC;
 
-	SENSOR_INFO("ps_average : %d, offset : %d\n", ps_average,
-			cm36658->offset);
-
-	cm36658_i2c_write_word(cm36658, PS_CANC, cm36658->offset);
-	/* write ps_period from device tree */
-	cm36658_i2c_read_word(cm36658, PS_CONF1, &cm36658->ps_conf1_val);
+	/* Reset ps period to previous value (20 ms) */
 	cm36658->ps_conf1_val &= CM36658_PS_PERIOD_MASK;
-	cm36658->ps_conf1_val |= cm36658->ps_period;
+	cm36658->ps_conf1_val |= ps_period_conf;
 	cm36658_i2c_write_word(cm36658, PS_CONF1, cm36658->ps_conf1_val);
-	
-	/* delay for update PS_CANC */
-	msleep(PS_CALI_DELAY);
+
+	ps_period_conf = cm36658->ps_conf1_val & ~CM36658_PS_PERIOD_MASK;
+
+	/* Write new offset value */
+	cm36658_i2c_write_word(cm36658, PS_CANC, cm36658->offset);
+
+	/* Delay for update offset and ps period */
+	usleep_range(PS_WAIT, PS_WAIT);
+
+	SENSOR_INFO("ps_average : %d, offset : %d, sunlight_detect : %d, ps_period_conf 0x%04x\n",
+			ps_average, cm36658->offset, cm36658->sunlight_detect, ps_period_conf);
 
 	return 0;
 }
@@ -375,34 +409,39 @@ static void cm36658_power_onoff(struct cm36658_data *cm36658, int onoff)
 
 static void cm36658_proximity_enable(struct cm36658_data *cm36658)
 {
-	mutex_lock(&cm36658->power_lock);
+	mutex_lock(&cm36658->control_mutex);
+
 	SENSOR_INFO("\n");
 
 	if (cm36658->ps_enable == ON) {
 		SENSOR_INFO("already enabled\n");
 	} else {
 		cm36658_led_onoff(cm36658, ON);
-		cm36658->ps_enable = ON;
+		cm36658->sunlight_detect = 0;
 		if (cm36658->als_enable == 0)
 			cm36658_power_onoff(cm36658, 1);
 		cm36658->ps_conf1_val &= CM36658_PS_SD_MASK;
 		cm36658->ps_conf1_val |= CM36658_PS_INT_ENABLE;
 		cm36658_i2c_write_word(cm36658, PS_CONF1, cm36658->ps_conf1_val);
+		cm36658->ps_enable = ON;
+
+		// mutex already acquired
 		control_and_report(cm36658, CONTROL_PS);
 
 		enable_irq(cm36658->irq);
 		enable_irq_wake(cm36658->irq);
 	}
 
-	mutex_unlock(&cm36658->power_lock);
+	mutex_unlock(&cm36658->control_mutex);
 }
 
 static void cm36658_proximity_disable(struct cm36658_data *cm36658)
 {
-	mutex_lock(&cm36658->power_lock);
+	mutex_lock(&cm36658->control_mutex);
 	SENSOR_INFO("\n");
 
 	if (cm36658->ps_enable == ON) {
+		cm36658->ps_enable = OFF;
 		disable_irq_wake(cm36658->irq);
 		disable_irq(cm36658->irq);
 		cm36658->ps_conf1_val |= CM36658_PS_SD;
@@ -413,19 +452,18 @@ static void cm36658_proximity_disable(struct cm36658_data *cm36658)
 				cm36658_thd_tbl[cm36658->cur_lv][0]);
 		cm36658_i2c_write_word(cm36658, PS_THDH,
 				cm36658_thd_tbl[cm36658->cur_lv][1]);
-		cm36658->ps_enable = OFF;
 		cm36658_led_onoff(cm36658, OFF);
 	}
 
 	if (cm36658->als_enable == 0)
 			cm36658_power_onoff(cm36658, 0);
 
-	mutex_unlock(&cm36658->power_lock);
+	mutex_unlock(&cm36658->control_mutex);
 }
 
 static void cm36658_light_enable(struct cm36658_data *cm36658)
 {
-	mutex_lock(&cm36658->power_lock);
+	mutex_lock(&cm36658->control_mutex);
 
 	if (cm36658->als_enable == OFF) {
 		cm36658->als_enable = ON;
@@ -437,12 +475,12 @@ static void cm36658_light_enable(struct cm36658_data *cm36658)
 			HRTIMER_MODE_REL);
 	}
 
-	mutex_unlock(&cm36658->power_lock);
+	mutex_unlock(&cm36658->control_mutex);
 }
 
 static void cm36658_light_disable(struct cm36658_data *cm36658)
 {
-	mutex_lock(&cm36658->power_lock);
+	mutex_lock(&cm36658->control_mutex);
 
 	if (cm36658->als_enable == ON) {
 		cm36658->ls_cmd |= CM36658_CS_SD;
@@ -455,7 +493,7 @@ static void cm36658_light_disable(struct cm36658_data *cm36658)
 	if (cm36658->ps_enable == 0)
 			cm36658_power_onoff(cm36658, 0);
 
-	mutex_unlock(&cm36658->power_lock);
+	mutex_unlock(&cm36658->control_mutex);
 }
 
 static ssize_t cm36658_poll_delay_show(struct device *dev,
@@ -478,12 +516,10 @@ static ssize_t cm36658_poll_delay_store(struct device *dev,
 	if (err < 0)
 		return err;
 
-	mutex_lock(&cm36658->power_lock);
 	if (new_delay != ktime_to_ns(cm36658->light_poll_delay)) {
 		SENSOR_INFO("poll_delay = %lld\n", new_delay);
 		cm36658->light_poll_delay = ns_to_ktime(new_delay);
 	}
-	mutex_unlock(&cm36658->power_lock);
 
 	return size;
 }
@@ -635,9 +671,8 @@ static ssize_t proximity_state_show(struct device *dev,
 	struct cm36658_data *cm36658 = dev_get_drvdata(dev);
 	u16 ps_data;
 
-	mutex_lock(&cm36658->read_lock);
 	cm36658_i2c_read_word(cm36658, PS_DATA, &ps_data);
-	mutex_unlock(&cm36658->read_lock);
+
 	return snprintf(buf, PAGE_SIZE, "%u\n", ps_data);
 }
 
@@ -949,12 +984,11 @@ static void cm36658_work_func_light(struct work_struct *work)
 {
 	struct cm36658_data *cm36658 = container_of(work, struct cm36658_data,
 						work_light);
-	mutex_lock(&cm36658->read_lock);
+
 	cm36658_i2c_read_word(cm36658, CS_R_DATA, &cm36658->red_data);
 	cm36658_i2c_read_word(cm36658, CS_G_DATA, &cm36658->green_data);
 	cm36658_i2c_read_word(cm36658, CS_B_DATA, &cm36658->blue_data);
 	cm36658_i2c_read_word(cm36658, CS_IR_DATA, &cm36658->ir_data);
-	mutex_unlock(&cm36658->read_lock);
 
 	input_report_rel(cm36658->light_input_dev, REL_RED,
 		cm36658->red_data + 1);
@@ -1025,7 +1059,9 @@ static void cm36658_irq_do_work(struct work_struct *work)
 {
 	struct cm36658_data *cm36658 = lp_info;
 
+	mutex_lock(&cm36658->control_mutex);
 	control_and_report(cm36658, CONTROL_INT_ISR_PS_REPORT);
+	mutex_unlock(&cm36658->control_mutex);
 
 	enable_irq(cm36658->irq);
 }
@@ -1336,7 +1372,6 @@ static int cm36658_parse_dt(struct device *dev,
 	} else {
 		cm36658->ps_conf1_val = temp;
 	}
-	cm36658->ps_period = cm36658->ps_conf1_val & CM36658_PS_PERIOD_REVERSEMASK;
 
 	/* Proximity CONF3 register Setting */
 	if (of_property_read_u32(np, "cm36658,ps_conf3_reg", &temp) < 0) {
@@ -1347,7 +1382,10 @@ static int cm36658_parse_dt(struct device *dev,
 		cm36658->ps_conf3_val = temp;
 	}
 
-	cm36658->offset = 0;
+	// When proximity is activated for first time after boot under sunlight, then upon
+	// leaving sunlight mode, no good offset value is available so some high offset (600)
+	// is required to set to prevent easy auto trigger of close event under sunlight.
+	cm36658->offset = cm36658_thd_tbl[2][0];
 
 	p = pinctrl_get_select_default(dev);
 	if (IS_ERR(p)) {
@@ -1392,9 +1430,7 @@ static int cm36658_probe(struct i2c_client *client,
 	cm36658->ls_cmd = CS_RESERVED_1;
 	cm36658->power = NULL;
 	cm36658->autocal = 0;
-
-	mutex_init(&cm36658->power_lock);
-	mutex_init(&cm36658->read_lock);
+	cm36658->sunlight_detect = 0;
 
 	SENSOR_INFO("ls_cmd 0x%x\n", cm36658->ls_cmd);
 
@@ -1417,12 +1453,6 @@ static int cm36658_probe(struct i2c_client *client,
 		goto err_setup_reg;
 	}
 
-	ret = cm36658_setup_irq(cm36658);
-	if (ret < 0) {
-		SENSOR_ERR("cm36658_setup_irq error!\n");
-		goto err_cm36658_setup_irq;
-	}
-
 	ret = light_setup(cm36658);
 	if (ret < 0) {
 		SENSOR_ERR("light_setup error!!\n");
@@ -1435,10 +1465,17 @@ static int cm36658_probe(struct i2c_client *client,
 		goto err_proximity_setup;
 	}
 
+	ret = cm36658_setup_irq(cm36658);
+	if (ret < 0) {
+		SENSOR_ERR("cm36658_setup_irq error!\n");
+		goto err_cm36658_setup_irq;
+	}
+
 	SENSOR_INFO("Probe success!\n");
 
 	return ret;
 
+err_cm36658_setup_irq:
 err_proximity_setup:
 	sensors_unregister(cm36658->prox_dev, prox_sensor_attrs);
 	destroy_workqueue(cm36658->light_wq);
@@ -1450,11 +1487,8 @@ err_proximity_setup:
 	mutex_destroy(&cm36658->control_mutex);
 err_light_setup:
 	gpio_free(cm36658->irq_gpio);
-err_cm36658_setup_irq:
 err_setup_reg:
 	wake_lock_destroy(&cm36658->prox_wake_lock);
-	mutex_destroy(&cm36658->read_lock);
-	mutex_destroy(&cm36658->power_lock);
 err_parse_dt_fail:
 	kfree(cm36658);
 	return ret;
@@ -1467,55 +1501,86 @@ static int control_and_report(struct cm36658_data *cm36658, uint8_t mode) {
 	int direction = 1;
 	int err;
 
-	mutex_lock(&cm36658->control_mutex);
-
 	if (mode == CONTROL_PS) {
 		changeThd = 1;
 
 		cm36658_get_calibration_result(cm36658, 1);
-
-		mutex_lock(&cm36658->read_lock);
 		cm36658_get_ps_adc_value(&ps_data);
-		mutex_unlock(&cm36658->read_lock);
+
 		if (ps_data > cm36658_thd_tbl[cm36658->cur_lv][1])
 			direction = 0;
 	} else if (mode == CONTROL_INT_ISR_PS_REPORT) {
 		usleep_range(2900, 3100);
 		err = cm36658_i2c_read_word(cm36658, INT_FLAG, &int_flag);
-		SENSOR_INFO("irq status: %d\n", int_flag);
+		if (cm36658->sunlight_detect == 1)
+			SENSOR_INFO("irq status: %d (sunlight leave)\n", int_flag);
+		else
+			SENSOR_INFO("irq status: %d\n", int_flag);
 		if (err < 0) {
 			SENSOR_ERR("INT_FLAG read error, ret=%d\n", err);
-			mutex_unlock(&cm36658->control_mutex);
 			return 0;
 		}
 
-		if (int_flag & INT_FLAG_PS_IF_CLOSE) {
-			direction = 0;
-			mutex_lock(&cm36658->read_lock);
-			cm36658_get_ps_adc_value(&ps_data);
-			mutex_unlock(&cm36658->read_lock);
+		if (int_flag & INT_FLAG_PS_SPFLAG) {
+			cm36658->sunlight_detect = 1;
+			cm36658->cur_lv	= 0;
+			changeThd = 1;			
+			direction = 1;
+			ps_data = 0;
+
+			/* Set Offset to 0 to detect sunlight leave clearly */
+			cm36658_i2c_write_word(cm36658, PS_CANC, 0);
+			usleep_range(PS_WAIT, PS_WAIT);
+
+			SENSOR_INFO("Entered Sunlight Mode\n");
+		} else if (int_flag & INT_FLAG_PS_IF_CLOSE) {
+			if (cm36658->sunlight_detect == 1) {
+				cm36658->sunlight_detect = 0;
+				cm36658->cur_lv = 0;
+				changeThd = 1;
+
+				// Reset Offset to previous good offset value
+				cm36658_i2c_write_word(cm36658, PS_CANC, cm36658->offset);
+				usleep_range(PS_WAIT, PS_WAIT);
+
+				cm36658_get_ps_adc_value(&ps_data);
+
+				if (ps_data > cm36658_thd_tbl[cm36658->cur_lv][1])
+					direction = 0;
+
+				SENSOR_INFO("Leave Sunlight Mode, ps_data = %d dir = %d offset = %d\n",
+								ps_data, direction, cm36658->offset);
+			} else {
+				direction = 0;
+				cm36658_get_ps_adc_value(&ps_data);
+			}
 		} else if (int_flag & INT_FLAG_PS_IF_AWAY) {
 			direction = 1;
-			mutex_lock(&cm36658->read_lock);
 			cm36658_get_ps_adc_value(&ps_data);
-			mutex_unlock(&cm36658->read_lock);
 			if (ps_data == 0 || ((cm36658->cur_lv == 2) &&
 					(ps_data < cm36658_thd_tbl[2][0]))) {
 				cm36658_get_calibration_result(cm36658, 0);
+
+				if (cm36658->sunlight_detect == 1) {
+					cm36658->cur_lv	= 0;
+					changeThd = 1;			
+					direction = 1;
+					ps_data = 0;
+
+					/* Offset is already set to 0*/
+				}
 			}
 		} else {
-			mutex_lock(&cm36658->read_lock);
 			cm36658_get_ps_adc_value(&ps_data);
-			mutex_unlock(&cm36658->read_lock);
 			SENSOR_ERR("Unknown event, int_flag=0x%x, ps_data = %d\n",
 					int_flag, ps_data);
-			mutex_unlock(&cm36658->control_mutex);
 			return 0;
 		}
 	}
 
 	SENSOR_INFO("dir = %d (0 : CLOSE, 1 : FAR), ps_data = %d\n",
 			direction, ps_data);
+
 	if ((direction && (ps_data < cm36658_thd_tbl[cm36658->cur_lv][0])) ||
 			((!direction) &&
 			(ps_data > cm36658_thd_tbl[cm36658->cur_lv][1])) ||
@@ -1530,20 +1595,24 @@ static int control_and_report(struct cm36658_data *cm36658, uint8_t mode) {
 				cm36658_thd_tbl[cm36658->cur_lv][1],
 				cm36658_thd_tbl[cm36658->cur_lv][0]);
 
-	if ((direction == 0) && (ps_data > cm36658_thd_tbl[cm36658->cur_lv][1]) &&
-			(cm36658->cur_lv == 0 || cm36658->cur_lv == 1)) {
-		cm36658->cur_lv++;
-		changeThd = 1;
-	} else if ((direction == 1) && (ps_data < cm36658_thd_tbl[cm36658->cur_lv][0]) &&
-			(cm36658->cur_lv == 1 || cm36658->cur_lv == 2)) {
-		cm36658->cur_lv--;
-		changeThd = 1;
-	} else if (cm36658->autocal) {
-		/* Enable INT */
-		cm36658_i2c_read_word(cm36658, PS_CONF1, &cm36658->ps_conf1_val);
-		cm36658->ps_conf1_val |= CM36658_PS_INT_ENABLE;
-		cm36658_i2c_write_word(cm36658, PS_CONF1, cm36658->ps_conf1_val);
-		cm36658->autocal = 0;
+	if (cm36658->sunlight_detect == 1) {
+		SENSOR_INFO("Skip changing threshold level in sunlight enter case\n");
+	} else {
+		if ((direction == 0) && (ps_data > cm36658_thd_tbl[cm36658->cur_lv][1]) &&
+				(cm36658->cur_lv == 0 || cm36658->cur_lv == 1)) {
+			cm36658->cur_lv++;
+			changeThd = 1;
+		} else if ((direction == 1) && (ps_data < cm36658_thd_tbl[cm36658->cur_lv][0]) &&
+				(cm36658->cur_lv == 1 || cm36658->cur_lv == 2)) {
+			cm36658->cur_lv--;
+			changeThd = 1;
+		} else if (cm36658->autocal) {
+			/* Enable INT */
+			cm36658_i2c_read_word(cm36658, PS_CONF1, &cm36658->ps_conf1_val);
+			cm36658->ps_conf1_val |= CM36658_PS_INT_ENABLE;
+			cm36658_i2c_write_word(cm36658, PS_CONF1, cm36658->ps_conf1_val);
+			cm36658->autocal = 0;
+		}
 	}
 
 	if (changeThd == 1) {
@@ -1555,16 +1624,23 @@ static int control_and_report(struct cm36658_data *cm36658, uint8_t mode) {
 		cm36658_i2c_write_word(cm36658, PS_CONF1,
 				cm36658->ps_conf1_val);
 
-		/* Set THD */
-		cm36658_i2c_write_word(cm36658, PS_THDL,
+		/* Set Threshold */
+		if (cm36658->sunlight_detect == 1) {
+			cm36658_i2c_write_word(cm36658, PS_THDL, 0);
+			cm36658_i2c_write_word(cm36658, PS_THDH, 0);
+
+			SENSOR_INFO("Set Sunlight Threshold (0, 0)\n");
+		} else {
+			cm36658_i2c_write_word(cm36658, PS_THDL,
 				cm36658_thd_tbl[cm36658->cur_lv][0]);
-		cm36658_i2c_write_word(cm36658, PS_THDH,
+			cm36658_i2c_write_word(cm36658, PS_THDH,
 				cm36658_thd_tbl[cm36658->cur_lv][1]);
 
-		SENSOR_INFO("next_lv = %d, (high_thd, low_thd) = (%d,%d)\n",
-				cm36658->cur_lv,
-				cm36658_thd_tbl[cm36658->cur_lv][1],
-				cm36658_thd_tbl[cm36658->cur_lv][0]);
+			SENSOR_INFO("next_lv = %d, (high_thd, low_thd) = (%d,%d)\n",
+					cm36658->cur_lv,
+					cm36658_thd_tbl[cm36658->cur_lv][1],
+					cm36658_thd_tbl[cm36658->cur_lv][0]);
+		}
 
 		/* Enable INT */
 		cm36658_i2c_read_word(cm36658, PS_CONF1,
@@ -1574,7 +1650,7 @@ static int control_and_report(struct cm36658_data *cm36658, uint8_t mode) {
 		cm36658_i2c_write_word(cm36658, PS_CONF1,
 				cm36658->ps_conf1_val);
 	}
-	mutex_unlock(&cm36658->control_mutex);
+
 	return 0;
 }
 
@@ -1613,8 +1689,7 @@ static int cm36658_i2c_remove(struct i2c_client *client)
 				&proximity_attribute_group);
 	input_unregister_device(cm36658->prox_input_dev);
 	/* lock destroy */
-	mutex_destroy(&cm36658->read_lock);
-	mutex_destroy(&cm36658->power_lock);
+	mutex_destroy(&cm36658->control_mutex);
 	wake_lock_destroy(&cm36658->prox_wake_lock);
 
 	kfree(cm36658);

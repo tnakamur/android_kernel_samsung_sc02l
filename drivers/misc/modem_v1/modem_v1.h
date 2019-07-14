@@ -74,8 +74,6 @@ enum legacy_ipc_map {
 	MAX_SIPC_MAP,
 };
 
-#define MAX_SIPC5_DEVICES	(IPC_RAW + 1) /* FMT, RAW */
-
 #define MAX_SIPC_CHANNELS	256	/* 2 ^ 8		*/
 #define MAX_LINK_CHANNELS	32	/* up to 32 channels	*/
 
@@ -156,6 +154,8 @@ enum sipc_ch_id {
 	SIPC_CH_ID_CPLOG2,	/*ID:29*/
 	SIPC_CH_ID_LOOPBACK1,	/*ID:30*/
 	SIPC_CH_ID_LOOPBACK2,	/*ID:31*/
+
+	SIPC_CH_ID_CASS = 35,
 
 	/* 32 ~ 214 are reserved */
 
@@ -497,9 +497,6 @@ struct modem_data {
 	/* SIPC version */
 	enum sipc_ver ipc_version;
 
-	/* the number of real IPC devices -> (IPC_RAW + 1) or (IPC_RFS + 1) */
-	unsigned int max_ipc_dev;
-
 	/* Information of IO devices */
 	unsigned int num_iodevs;
 	struct modem_io_t *iodevs;
@@ -523,6 +520,7 @@ struct modem_irq {
 	char name[MAX_NAME_LEN];
 	unsigned long flags;
 	bool active;
+	bool registered;
 };
 
 #define MODEM_BOOT_DEV_SPI "spi_boot_link"
@@ -545,31 +543,39 @@ struct modem_boot_spi {
 #define mif_dt_read_enum(np, prop, dest) \
 	do { \
 		u32 val; \
-		if (of_property_read_u32(np, prop, &val)) \
+		if (of_property_read_u32(np, prop, &val)) { \
+			mif_err("%s is not defined\n", prop); \
 			return -EINVAL; \
+		} \
 		dest = (__typeof__(dest))(val); \
 	} while (0)
 
 #define mif_dt_read_bool(np, prop, dest) \
 	do { \
 		u32 val; \
-		if (of_property_read_u32(np, prop, &val)) \
+		if (of_property_read_u32(np, prop, &val)) { \
+			mif_err("%s is not defined\n", prop); \
 			return -EINVAL; \
+		} \
 		dest = val ? true : false; \
 	} while (0)
 
 #define mif_dt_read_string(np, prop, dest) \
 	do { \
 		if (of_property_read_string(np, prop, \
-				(const char **)&dest)) \
+				(const char **)&dest)) { \
+			mif_err("%s is not defined\n", prop); \
 			return -EINVAL; \
+		} \
 	} while (0)
 
 #define mif_dt_read_u32(np, prop, dest) \
 	do { \
 		u32 val; \
-		if (of_property_read_u32(np, prop, &val)) \
+		if (of_property_read_u32(np, prop, &val)) { \
+			mif_err("%s is not defined\n", prop); \
 			return -EINVAL; \
+		} \
 		dest = val; \
 	} while (0)
 

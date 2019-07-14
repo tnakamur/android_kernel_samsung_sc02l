@@ -96,7 +96,7 @@ enum com_index {
 };
 
 #if IS_ENABLED(CONFIG_HICCUP_CHARGER)
-#define GND_PATH COM_UART_CP
+#define GND_PATH COM_USB_CP
 #endif
 
 enum{

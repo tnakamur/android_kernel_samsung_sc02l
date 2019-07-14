@@ -531,7 +531,10 @@ static int muic_handle_ccic_ATTACH(muic_data_t *pmuic, CC_NOTI_ATTACH_TYPEDEF *p
 		/* CCIC ATTACH means NO WATER */
 		if (pmuic->afc_water_disable) {
 			pr_info("%s: Water is not detected, AFC Enable\n", __func__);
+			if (pvendor && pvendor->enable_chgdet)
+				pvendor->enable_chgdet(pmuic->regmapdesc, 1);
 			pmuic->afc_water_disable = false;
+			pmuic->is_hiccup_mode = false;
 		}
 
 #if !defined(CONFIG_SEC_FACTORY)
@@ -699,14 +702,20 @@ static int muic_handle_ccic_RID(muic_data_t *pmuic, CC_NOTI_RID_TYPEDEF *pnoti)
 
 static int muic_handle_ccic_WATER(muic_data_t *pmuic, CC_NOTI_ATTACH_TYPEDEF *pnoti)
 {
+	struct vendor_ops *pvendor = pmuic->regmapdesc->vendorops;
+
 	pr_info("%s: src:%d dest:%d id:%d attach:%d cable_type:%d rprd:%d\n", __func__,
 		pnoti->src, pnoti->dest, pnoti->id, pnoti->attach, pnoti->cable_type, pnoti->rprd);
 
 	if (pnoti->attach == CCIC_NOTIFY_ATTACH) {
 		pr_info("%s: Water detect\n", __func__);
+		if (pvendor && pvendor->enable_chgdet)
+			pvendor->enable_chgdet(pmuic->regmapdesc, 0);
 		pmuic->afc_water_disable = true;
 	} else {
-		pr_info("%s: Undefined notification, Discard\n", __func__);
+		pr_info("%s: dry detect\n", __func__);
+		pmuic->afc_water_disable = false;
+		pmuic->is_hiccup_mode = false;
 	}
 
 	return 0;

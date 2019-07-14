@@ -1,5 +1,8 @@
 /* individual sequence descriptor for each core - on, off, status */
 struct pmucal_seq core00_on[] = {
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER0_SHORTSTOP", 0x10900000, 0x0820, (0xffffffff << 0), (0xFFFFFFFF << 0), 0, 0, 0xffffffff, 0),
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER0_CPUSEQUENCER_OPTION", 0x11C80000, 0x2488, (0x1 << 4), (0x1 << 4), 0, 0, 0xffffffff, 0),
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER0_CPUSEQUENCER_OPTION", 0x11C80000, 0x2488, (0x1 << 0), (0x0 << 0), 0, 0, 0xffffffff, 0),
 	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER0_CPU0_CONFIGURATION", 0x11C80000, 0x2000, (0xf << 0), (0xF << 0), 0, 0, 0xffffffff, 0),
 };
 struct pmucal_seq core00_off[] = {
@@ -9,6 +12,9 @@ struct pmucal_seq core00_status[] = {
 	PMUCAL_SEQ_DESC(PMUCAL_READ, "CLUSTER0_CPU0_STATUS", 0x11C80000, 0x2004, (0xf << 0), 0, 0, 0, 0xffffffff, 0),
 };
 struct pmucal_seq core01_on[] = {
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER0_SHORTSTOP", 0x10900000, 0x0820, (0xffffffff << 0), (0xFFFFFFFF << 0), 0, 0, 0xffffffff, 0),
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER0_CPUSEQUENCER_OPTION", 0x11C80000, 0x2488, (0x1 << 4), (0x1 << 4), 0, 0, 0xffffffff, 0),
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER0_CPUSEQUENCER_OPTION", 0x11C80000, 0x2488, (0x1 << 0), (0x0 << 0), 0, 0, 0xffffffff, 0),
 	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER0_CPU1_CONFIGURATION", 0x11C80000, 0x2080, (0xf << 0), (0xF << 0), 0, 0, 0xffffffff, 0),
 };
 struct pmucal_seq core01_off[] = {
@@ -54,6 +60,9 @@ struct pmucal_seq core13_status[] = {
 	PMUCAL_SEQ_DESC(PMUCAL_READ, "CLUSTER1_CPU3_STATUS", 0x11C80000, 0x2384, (0xf << 0), 0, 0, 0, 0xffffffff, 0),
 };
 struct pmucal_seq core20_on[] = {
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER2_SHORTSTOP", 0x10A00000, 0x0820, (0xffffffff << 0), (0xFFFFFFFF << 0), 0, 0, 0xffffffff, 0),
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER2_CPUSEQUENCER_OPTION", 0x11C80000, 0x24C8, (0x1 << 4), (0x1 << 4), 0, 0, 0xffffffff, 0),
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER2_CPUSEQUENCER_OPTION", 0x11C80000, 0x24C8, (0x1 << 0), (0x0 << 0), 0, 0, 0xffffffff, 0),
 	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER2_CPU0_CONFIGURATION", 0x11C80000, 0x2100, (0xf << 0), (0xF << 0), 0, 0, 0xffffffff, 0),
 };
 struct pmucal_seq core20_off[] = {
@@ -63,6 +72,9 @@ struct pmucal_seq core20_status[] = {
 	PMUCAL_SEQ_DESC(PMUCAL_READ, "CLUSTER2_CPU0_STATUS", 0x11C80000, 0x2104, (0xf << 0), 0, 0, 0, 0xffffffff, 0),
 };
 struct pmucal_seq core21_on[] = {
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER2_SHORTSTOP", 0x10A00000, 0x0820, (0xffffffff << 0), (0xFFFFFFFF << 0), 0, 0, 0xffffffff, 0),
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER2_CPUSEQUENCER_OPTION", 0x11C80000, 0x24C8, (0x1 << 4), (0x1 << 4), 0, 0, 0xffffffff, 0),
+	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER2_CPUSEQUENCER_OPTION", 0x11C80000, 0x24C8, (0x1 << 0), (0x0 << 0), 0, 0, 0xffffffff, 0),
 	PMUCAL_SEQ_DESC(PMUCAL_WRITE, "CLUSTER2_CPU1_CONFIGURATION", 0x11C80000, 0x2180, (0xf << 0), (0xF << 0), 0, 0, 0xffffffff, 0),
 };
 struct pmucal_seq core21_off[] = {

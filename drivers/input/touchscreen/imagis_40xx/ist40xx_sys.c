@@ -119,9 +119,39 @@ err_read_sponge_reg:
 int ist40xx_cmd_gesture(struct ist40xx_data *data, u16 value)
 {
 	int ret = -EIO;
+#ifdef USE_SPONGE_LIB
+	struct timeval utc_time;
+#endif
 
 	if (value == IST40XX_ENABLE) {
-#ifndef USE_SPONGE_LIB
+#ifdef USE_SPONGE_LIB
+		ret = ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL,
+					(u16*)&data->lpm_mode, 1);
+		if (ret)
+			input_err(true, &data->client->dev,
+					"fail to write sponge reg (lpm_mode)\n", __func__);
+
+		ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+					(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
+		if (ret)
+			input_err(true, &data->client->dev,
+					"fail to write Sponge Notify\n", __func__);
+
+		do_gettimeofday(&utc_time);
+		input_info(true, &data->client->dev, "Write UTC to Sponge = %X\n",
+					(int)utc_time.tv_sec);
+		ret = ist40xx_write_sponge_reg(data, IST40XX_SPONGE_UTC,
+					(u16 *)&utc_time.tv_sec, 2);
+		if (ret)
+			input_err(true, &data->client->dev,
+					"fail to write Sponge UTC\n", __func__);
+
+		ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+					(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
+		if (ret)
+			input_err(true, &data->client->dev,
+					"fail to write Sponge Notify\n", __func__);
+#else
 		data->g_reg.b.evt = 0;
 		data->g_reg.b.evt_x = 0;
 		data->g_reg.b.evt_y = 0;
@@ -661,13 +691,6 @@ int ist40xx_reset(struct ist40xx_data *data, bool download)
 	ist40xx_delay(30);
 	ist40xx_power_on(data, download);
 
-#ifdef USE_SPONGE_LIB
-	ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL,
-						(u16*)&data->lpm_mode, 1);
-
-	ist40xx_write_cmd(data, IST40XX_HIB_CMD,
-				(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
-#endif
 	if (temp_sys_mode == STATE_LPM) {
 		if (data->lpm_mode & IST40XX_GETURE_CTRL_AOD)
 			ist40xx_write_sponge_reg(data, IST40XX_SPONGE_RECT, 

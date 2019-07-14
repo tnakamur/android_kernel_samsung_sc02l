@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright (c) 2014 - 2016 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2014 - 2017 Samsung Electronics Co., Ltd. All rights reserved
  *
  *****************************************************************************/
 
@@ -179,6 +179,14 @@ struct mbulk *mbulk_with_signal_alloc(enum mbulk_class clas, size_t sig_bufsz,
  */
 struct mbulk *mbulk_with_signal_alloc_by_pool(u8 pool_id, u16 colour,
 					      enum mbulk_class clas, size_t sig_bufsz, size_t dat_bufsz);
+
+/**
+ * Get the number of free mbulk slots in a pool
+ *
+ * Returns the number of mbulk slots available in a given pool.
+ */
+int mbulk_pool_get_free_count(u8 pool_id);
+
 /**
  * Get a signal buffer address
  *

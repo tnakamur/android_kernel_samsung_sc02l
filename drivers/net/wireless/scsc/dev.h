@@ -48,6 +48,9 @@
 #include "hip4.h"
 
 #include "nl80211_vendor.h"
+#define FAPI_MAJOR_VERSION(v) (((v) >> 8) & 0xFF)
+#define FAPI_MINOR_VERSION(v) ((v) & 0xFF)
+
 
 /* Modes for CMDGETBSSINFO and CMDGETSTAINFO */
 #define SLSI_80211_MODE_11B 0
@@ -55,6 +58,57 @@
 #define SLSI_80211_MODE_11N 2
 #define SLSI_80211_MODE_11A 3
 #define SLSI_80211_MODE_11AC 4
+
+#define SLSI_FW_API_RATE_HT_SELECTOR_FIELD  0xc000
+#define SLSI_FW_API_RATE_NON_HT_SELECTED    0x4000
+#define SLSI_FW_API_RATE_HT_SELECTED        0x8000
+#define SLSI_FW_API_RATE_VHT_SELECTED       0xc000
+
+#define SLSI_FW_API_RATE_VHT_MCS_FIELD          0x000F
+#define SLSI_FW_API_RATE_HT_MCS_FIELD          0x003F
+#define SLSI_FW_API_RATE_INDEX_FIELD        0x1fff
+#define SLSI_FW_API_RATE_VHT_NSS_FIELD          0x0070
+#define SLSI_FW_API_RATE_HT_NSS_FIELD          0x0040
+
+#define SLSI_FW_API_RATE_BW_FIELD           0x0600
+#define SLSI_FW_API_RATE_BW_40MHZ           0x0200
+#define SLSI_FW_API_RATE_BW_20MHZ           0x0000
+
+#define SLSI_FW_API_RATE_SGI                0x0100
+#define SLSI_FW_API_RATE_GF                 0x0080
+
+/* indices: 3= BW20->idx_0, BW40->idx_1, BW80->idx_2.
+ *             2= noSGI->idx_0, SGI->idx_1
+ *             10= mcs index
+ * rate units 100kbps
+ * This table for single stream Nss=1and does not include 160MHz BW and 80+80MHz BW.
+ */
+static const u16 slsi_rates_table[3][2][10] = {
+	{         /* BW20 */
+		{ /* no SGI */
+			65, 130, 195, 260, 390, 520, 585, 650, 780, 0
+		},
+		{       /* SGI */
+			72, 144, 217, 289, 433, 578, 650, 722, 867, 0
+		}
+	},
+	{         /* BW40 */
+		{ /* no SGI */
+			135, 270, 405, 540, 810, 1080, 1215, 1350, 1620, 1800
+		},
+		{       /* SGI */
+			150, 300, 450, 600, 900, 1200, 1350, 1500, 1800, 2000
+		}
+	},
+	{         /* BW80 */
+		{ /* no SGI */
+			293, 585, 878, 1170, 1755, 2340, 2633, 2925, 3510, 3900
+		},
+		{       /* SGI */
+			325, 650, 975, 1300, 1950, 2600, 2925, 3250, 3900, 4333
+		}
+	}
+};
 
 #define SLSI_TX_PROCESS_ID_MIN       (0xC001)
 #define SLSI_TX_PROCESS_ID_MAX       (0xCF00)
@@ -70,7 +124,9 @@
 #define NUM_BA_SESSIONS_PER_PEER 8
 #define MAX_CHANNEL_LIST 20
 #define SLSI_MAX_RX_BA_SESSIONS (8)
-#define SLSI_STA_ACTION_FRAME_BITMAP (SLSI_ACTION_FRAME_PUBLIC | SLSI_ACTION_FRAME_WMM | SLSI_ACTION_FRAME_WNM | SLSI_ACTION_FRAME_QOS)
+#define SLSI_STA_ACTION_FRAME_BITMAP (SLSI_ACTION_FRAME_PUBLIC | SLSI_ACTION_FRAME_WMM | SLSI_ACTION_FRAME_WNM |\
+				      SLSI_ACTION_FRAME_QOS | SLSI_ACTION_FRAME_PROTECTED_DUAL |\
+				      SLSI_ACTION_FRAME_RADIO_MEASUREMENT)
 
 /* Default value for MIB SLSI_PSID_UNIFI_DISCONNECT_TIMEOUT + 1 sec*/
 #define SLSI_DEFAULT_AP_DISCONNECT_IND_TIMEOUT 3000
@@ -239,6 +295,7 @@ struct slsi_scan_result {
 struct slsi_scan {
 	/* When a Scan is running this not NULL. */
 	struct cfg80211_scan_request       *scan_req;
+	struct slsi_acs_request            *acs_request;
 	struct cfg80211_sched_scan_request *sched_req;
 	bool                               requeue_timeout_work;
 
@@ -481,6 +538,9 @@ struct slsi_vif_unsync {
 
 struct slsi_last_disconnected_sta {
 	u8 address[ETH_ALEN];
+	u32 rx_retry_packets;
+	u32 rx_bc_mc_packets;
+	u16 capabilities;
 	int bandwidth;
 	int antenna_mode;
 	int rssi;
@@ -488,6 +548,7 @@ struct slsi_last_disconnected_sta {
 	u16 tx_data_rate;
 	bool mimo_used;
 	u16 reason;
+	int support_mode;
 };
 
 struct slsi_vif_ap {
@@ -510,6 +571,14 @@ struct slsi_vif_ap {
 	u16                               channel_freq;
 	u8                                ssid[IEEE80211_MAX_SSID_LEN];
 	u8                                ssid_len;
+};
+
+#define SLSI_NAN_MAX_PUBLISH_ID 16
+#define SLSI_NAN_MAX_SUBSCRIBE_ID 16
+
+struct slsi_vif_nan {
+	u32 publish_id_map;
+	u32 subscribe_id_map;
 };
 
 #define TCP_ACK_SUPPRESSION_RECORDS_MAX				16
@@ -662,18 +731,15 @@ struct netdev_vif {
 	struct slsi_vif_unsync      unsync;
 	struct slsi_vif_sta         sta;
 	struct slsi_vif_ap          ap;
+	struct slsi_vif_nan         nan;
 
 	/* TCP ack suppression. */
 	struct slsi_tcp_ack_s *last_tcp_ack;
 	struct slsi_tcp_ack_s ack_suppression[TCP_ACK_SUPPRESSION_RECORDS_MAX];
 	struct slsi_tcp_ack_stats tcp_ack_stats;
-#ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
-	bool wifi_sharing;
-#endif
 };
 
 struct slsi_802_11d_reg_domain {
-	u8                         alpha2[3];
 	u8                         *countrylist;
 	struct ieee80211_regdomain *regdomain;
 	int                        country_len;
@@ -745,6 +811,7 @@ struct slsi_dev_config {
 
 	int                                      rssi_boost_5g;
 	int                                      rssi_boost_2g;
+	bool                                   disable_ch12_ch13;
 };
 
 #define SLSI_DEVICE_STATE_ATTACHING 0
@@ -756,6 +823,7 @@ struct slsi_dev_config {
 #define SLSI_NET_INDEX_WLAN 1
 #define SLSI_NET_INDEX_P2P  2
 #define SLSI_NET_INDEX_P2PX_SWLAN 3
+#define SLSI_NET_INDEX_NAN  4
 
 /* States used during P2P operations */
 enum slsi_p2p_states {
@@ -773,10 +841,10 @@ enum slsi_p2p_states {
 	 */
 };
 
-enum slsi_hs2_state {
-	HS2_NO_VIF = 0,           /* Initial state - Unsync vif is not present */
-	HS2_VIF_ACTIVE,           /* Unsync vif is activated but no HS procedure in progress */
-	HS2_VIF_TX                /* Unsync vif is activated and HS procedure in progress */
+enum slsi_wlan_state {
+	WLAN_UNSYNC_NO_VIF = 0,           /* Initial state - Unsync vif is not present */
+	WLAN_UNSYNC_VIF_ACTIVE,           /* Unsync vif is activated but no wlan procedure in progress */
+	WLAN_UNSYNC_VIF_TX                /* Unsync vif is activated and wlan procedure in progress */
 };
 
 /* Wakelock timeouts */
@@ -813,10 +881,37 @@ static inline char *slsi_p2p_state_text(u8 state)
 	}
 }
 
+#define SLSI_WLAN_MAX_HCF_PLATFORM_LEN	   (128)
+
 struct slsi_dev_mib_info {
 	char                       *mib_file_name;
 	unsigned int               mib_hash;
+
+	/* Cached File MIB Configuration values from User Space */
+	u8                         *mib_data;
+	u32                         mib_len;
+	char			   platform[SLSI_WLAN_MAX_HCF_PLATFORM_LEN];
 };
+
+#define SLSI_WLAN_MAX_MIB_FILE     2 /* Number of WLAN HCFs to load */
+
+#ifdef CONFIG_SCSC_LOG_COLLECTION
+struct slsi_dev_mib_collect_file {
+	char		file_name[32];
+	u16		len;
+	u8		*data;
+} __packed;
+
+struct slsi_dev_mib_collect {
+	bool		enabled;
+	/* Serialize writers/readers */
+	spinlock_t	in_collection;
+	char			num_files;
+	/* +1 represents local_mib */
+	struct slsi_dev_mib_collect_file  file[SLSI_WLAN_MAX_MIB_FILE + 1];
+};
+
+#endif
 
 struct slsi_dev {
 	/* Devices */
@@ -836,15 +931,16 @@ struct slsi_dev {
 
 #ifdef CONFIG_SCSC_WLAN_MUTEX_DEBUG
 	struct slsi_mutex          netdev_add_remove_mutex;
-    struct slsi_mutex          netdev_remove_mutex;
+	struct slsi_mutex          netdev_remove_mutex;
 #else
 	/* a std mutex */
 	struct mutex               netdev_add_remove_mutex;
-    /* a std mutex */
-    struct mutex               netdev_remove_mutex;
+	/* a std mutex */
+	struct mutex               netdev_remove_mutex;
 #endif
 	int                        netdev_up_count;
 	struct net_device          __rcu *netdev[CONFIG_SCSC_WLAN_MAX_INTERFACES + 1];               /* 0 is reserved */
+	struct net_device          __rcu *netdev_ap;
 	u8                         netdev_addresses[CONFIG_SCSC_WLAN_MAX_INTERFACES + 1][ETH_ALEN];  /* 0 is reserved */
 
 	int                        device_state;
@@ -874,16 +970,14 @@ struct slsi_dev {
 
 	/* Configuration */
 	u8                         hw_addr[ETH_ALEN];
-	struct slsi_dev_mib_info   mib;
+	struct slsi_dev_mib_info   mib[SLSI_WLAN_MAX_MIB_FILE];
 	struct slsi_dev_mib_info   local_mib;
-
+#ifdef CONFIG_SCSC_LOG_COLLECTION
+	struct slsi_dev_mib_collect  collect_mib;
+#endif
 	char                       *maddr_file_name;
 	bool                       *term_udi_users;   /* Try to terminate UDI users during unload */
 	int                        *sig_wait_cfm_timeout;
-
-	/* Cached File MIB Configuration values from User Space */
-	u8                         *mib_data;
-	u32                         mib_len;
 
 	struct slsi_wake_lock      wlan_wl;
 	struct slsi_wake_lock      wlan_wl_to;
@@ -909,7 +1003,7 @@ struct slsi_dev {
 	struct workqueue_struct    *device_wq;              /* Driver Workqueue */
 	enum slsi_p2p_states       p2p_state;               /* Store current P2P operation */
 
-	enum slsi_hs2_state        hs2_state; /* Store current HS2 operations */
+	enum slsi_wlan_state        wlan_unsync_vif_state; /* Store current sate of unsync wlan vif */
 
 	int                        current_tspec_id;
 	int                        tspec_error_code;
@@ -926,8 +1020,10 @@ struct slsi_dev {
 	struct slsi_bucket         bucket[SLSI_GSCAN_MAX_BUCKETS];
 	struct list_head           hotlist_results;
 	bool                       epno_active;
-	u8                         scan_oui[6];
-	bool                       scan_oui_active;
+#endif
+#ifdef CONFIG_SCSC_WLAN_ENABLE_MAC_RANDOMISATION
+	u8                         scan_mac_addr[6];
+	bool                       scan_addr_set;
 #endif
 #ifdef CONFIG_SCSC_WLAN_HIP4_PROFILING
 	int                        minor_prof;
@@ -959,27 +1055,31 @@ struct slsi_dev {
 	int                        num_5g_restricted_channels;
 #endif
 	bool                       fw_2g_40mhz_enabled;
+	bool                       nan_enabled;
 	u16                        assoc_result_code; /* Status of latest association in STA mode */
 	bool                       allow_switch_40_mhz; /* Used in AP cert to disable HT40 when not configured */
 	bool                       allow_switch_80_mhz; /* Used in AP cert to disable VHT when not configured */
 #ifdef CONFIG_SCSC_WLAN_AP_INFO_FILE
-	/* Parameters in '/data/misc/conn/.softap.info' */
+	/* Parameters in '/data/vendor/conn/.softap.info' */
 	bool                       dualband_concurrency;
 	u32                        softap_max_client;
 #endif
+	u32                        fw_dwell_time;
 
-
-#ifdef CONFIG_SCSC_WLAN_ENHANCED_LOGGING
 #ifdef CONFIG_SCSC_WLAN_MUTEX_DEBUG
 	struct slsi_mutex          logger_mutex;
 #else
 	/* a std mutex */
 	struct mutex               logger_mutex;
 #endif
-#endif
-
 	int                        lls_num_radio;
-
+	/*Store vif index corresponding to rtt id for FTM*/
+	u16                             rtt_vif[8];
+	bool                            acs_channel_switched;
+	int                        recovery_timeout; /* ms autorecovery completion timeout */
+#ifdef CONFIG_SCSC_WLAN_ENABLE_MAC_RANDOMISATION
+	bool                            fw_mac_randomization_enabled;
+#endif
 };
 
 /* Compact representation of channels a ESS has been seen on
@@ -1040,6 +1140,9 @@ bool slsi_dev_epno_supported(void);
 bool slsi_dev_vo_vi_block_ack(void);
 int slsi_dev_get_scan_result_count(void);
 bool slsi_dev_llslogs_supported(void);
+int slsi_dev_nan_supported(struct slsi_dev *sdev);
+void slsi_regd_init(struct slsi_dev *sdev);
+bool slsi_dev_rtt_supported(void);
 
 static inline u16 slsi_tx_host_tag(struct slsi_dev *sdev, enum slsi_traffic_q tq)
 {
@@ -1104,5 +1207,9 @@ static inline int slsi_get_supported_mode(const u8 *peer_ie)
 	}
 	return SLSI_80211_MODE_11B;
 }
+
+/* Names of full mode HCF files */
+extern char *slsi_mib_file;
+extern char *slsi_mib_file2;
 
 #endif

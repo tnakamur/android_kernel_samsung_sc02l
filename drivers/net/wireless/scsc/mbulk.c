@@ -167,6 +167,31 @@ static struct mbulk *mbulk_seg_generic_alloc(struct mbulk_pool *pool,
 	return m;
 }
 
+int mbulk_pool_get_free_count(u8 pool_id)
+{
+	struct mbulk_pool *pool;
+	int num_free;
+
+	if (pool_id >= MBULK_POOL_ID_MAX) {
+		WARN_ON(pool_id >= MBULK_POOL_ID_MAX);
+		return -EIO;
+	}
+
+	spin_lock_bh(&mbulk_pool_lock);
+	pool = &mbulk_pools[pool_id];
+
+	if (!pool->valid) {
+		WARN_ON(!pool->valid);
+		spin_unlock_bh(&mbulk_pool_lock);
+		return -EIO;
+	}
+
+	num_free = pool->free_cnt;
+	spin_unlock_bh(&mbulk_pool_lock);
+
+	return num_free;
+}
+
 /**
  * Allocate a bulk buffer with an in-lined signal buffer
  *

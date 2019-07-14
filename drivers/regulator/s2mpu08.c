@@ -864,6 +864,14 @@ static int s2mpu08_pmic_probe(struct platform_device *pdev)
 	s2mpu08_i2cdata = debugfs_create_file("i2cdata", 0644, s2mpu08_root, NULL, &s2mpu08_i2cdata_fops);
 #endif
 
+	/* Turn off CP regulators for LPM charging: L16 -> L17 -> L15 -> B9 */
+	if (lpcharge) {
+		s2mpu08_update_reg(s2mpu08->i2c, 0x3C, 0x00, 0xC0);	// LDO16
+		s2mpu08_update_reg(s2mpu08->i2c, 0x3D, 0x00, 0xC0);	// LDO17
+		s2mpu08_update_reg(s2mpu08->i2c, 0x3B, 0x00, 0xC0);	// LDO15
+		s2mpu08_update_reg(s2mpu08->i2c, 0x26, 0x00, 0xC0);	// Buck9
+	}
+
 	pr_info("%s s2mpu08 pmic driver Loading end\n", __func__);
 
 	return 0;

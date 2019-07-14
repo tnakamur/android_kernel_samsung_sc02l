@@ -687,7 +687,9 @@ int sensor_6b2_cis_stream_on(struct v4l2_subdev *subdev)
 
 	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
-	sensor_6b2_cis_group_param_hold_func(subdev, 0x00);
+	ret = sensor_6b2_cis_group_param_hold_func(subdev, 0x00);
+	if (ret < 0)
+		err("group_param_hold_func failed at stream on");
 
 #ifdef DEBUG_4H5_PLL
 	{
@@ -767,7 +769,9 @@ int sensor_6b2_cis_stream_off(struct v4l2_subdev *subdev)
 
 	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
-	sensor_6b2_cis_group_param_hold_func(subdev, 0x00);
+	ret = sensor_6b2_cis_group_param_hold_func(subdev, 0x00);
+	if (ret < 0)
+		err("group_param_hold_func failed at stream off");
 
 	/* Sensor stream off */
 	fimc_is_sensor_write16(client, 0x6028, 0x4000);

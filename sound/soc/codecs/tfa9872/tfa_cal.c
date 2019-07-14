@@ -22,12 +22,17 @@
 
 #define TFA_CLASS_NAME	"nxp"
 #define TFA_CAL_DEV_NAME	"tfa_cal"
-#define FILEPATH_RDC_CAL	"/efs/nxp/rdc_cal"
 #define FILESIZE_RDC_CAL	12
-#define FILEPATH_TEMP_CAL	"/efs/nxp/temp_cal"
 #define FILESIZE_TEMP_CAL	12
+#define FILEPATH_RDC_CAL	"/efs/nxp/rdc_cal"
+#define FILEPATH_TEMP_CAL	"/efs/nxp/temp_cal"
+#if defined(TFA_WRITE_CAL_TO_FILE)
 #if defined(FOLDER_DOESNT_EXIST)
 #define FOLDERPATH_NXP	"/efs/nxp/"
+#endif
+#else
+static char rdc_string[FILESIZE_RDC_CAL] = {0};
+static char temp_string[FILESIZE_TEMP_CAL] = {0};
 #endif
 
 /* ---------------------------------------------------------------------- */
@@ -73,7 +78,9 @@ static int cur_status;
 /* ---------------------------------------------------------------------- */
 
 static int tfa_cal_read_file(char *filename, char *data, size_t size);
+#if defined(TFA_WRITE_CAL_TO_FILE)
 static int tfa_cal_write_file(char *filename, char *data, size_t size);
+#endif
 
 /* ---------------------------------------------------------------------- */
 
@@ -83,18 +90,42 @@ static ssize_t tfa_cal_rdc_show(struct device *dev,
 	int idx, devcount = tfa98xx_cnt_max_device();
 	uint16_t value;
 	int size;
-	int ret = 0;
+#if !defined(TFA_WRITE_CAL_TO_FILE)
+	int rstr_len = 0;
+#endif
+	int ret = -1;
 	char cal_done_string[FILESIZE_RDC_CAL] = {0};
 
+#if !defined(TFA_WRITE_CAL_TO_FILE)
+	if (rdc_string[0] != 0) {
+		rstr_len = strlcpy(cal_done_string,
+			rdc_string, FILESIZE_RDC_CAL);
+		if (rstr_len > 0)
+			ret = 0;
+		goto tfa_cal_rdc_show_exit;
+	} else {
+		ret = tfa_cal_read_file(FILEPATH_RDC_CAL,
+			cal_done_string, sizeof(cal_done_string));
+		if (ret >= 0) {
+			ret = kstrtou16(cal_done_string, 0, &value);
+			strlcpy(rdc_string, cal_done_string, FILESIZE_RDC_CAL);
+			pr_info("%s: get from file\n", __func__);
+			goto tfa_cal_rdc_show_exit;
+		}
+	}
+#else
 	ret = tfa_cal_read_file(FILEPATH_RDC_CAL,
 		cal_done_string, sizeof(cal_done_string));
 	if (ret >= 0) {
 		ret = kstrtou16(cal_done_string, 0, &value);
+		pr_info("%s: get from file\n", __func__);
 		goto tfa_cal_rdc_show_exit;
 	}
+#endif
 
 	pr_info("%s: failed to read %s and get from amplifier\n",
 		__func__, FILEPATH_RDC_CAL);
+
 	for (idx = 0; idx < devcount; idx++) {
 		ret = tfa_read_calibrate(idx, &value);
 		if (ret) {
@@ -112,6 +143,7 @@ static ssize_t tfa_cal_rdc_show(struct device *dev,
 				cal_done_string, value);
 	}
 
+#if defined(TFA_WRITE_CAL_TO_FILE)
 	ret = tfa_cal_write_file(FILEPATH_RDC_CAL,
 		cal_done_string, sizeof(cal_done_string));
 	if (ret < 0) {
@@ -120,12 +152,18 @@ static ssize_t tfa_cal_rdc_show(struct device *dev,
 		return -EINVAL;
 	}
 	ret = 0;
+#else
+	strlcpy(rdc_string, cal_done_string, FILESIZE_RDC_CAL);
+#endif
 
 tfa_cal_rdc_show_exit:
-	if (ret)
-		size = sprintf(buf, "no_data");
+	if (ret || cal_done_string[0] == 0)
+		size = snprintf(buf,
+			7 + 1, "no_data");
 	else
-		size = sprintf(buf, "%d", value);
+		size = snprintf(buf,
+			strlen(cal_done_string) + 1,
+			"%s", cal_done_string);
 
 	if (size <= 0) {
 		pr_err("%s: failed to show in sysfs file\n", __func__);
@@ -150,19 +188,41 @@ static ssize_t tfa_cal_temp_show(struct device *dev,
 	int idx, devcount = tfa98xx_cnt_max_device();
 	uint16_t value, value_file = 0;
 	int size;
+#if !defined(TFA_WRITE_CAL_TO_FILE)
+	int tstr_len = 0;
+#endif
 	int ret = 0, ret2 = -1;
 	char cal_done_string[FILESIZE_TEMP_CAL] = {0};
 
+#if !defined(TFA_WRITE_CAL_TO_FILE)
+	if (temp_string[0] != 0) {
+		tstr_len = strlcpy(cal_done_string,
+			temp_string, FILESIZE_TEMP_CAL);
+		if (tstr_len > 0)
+			ret2 = 0;
+		goto tfa_cal_temp_show_exit;
+	} else {
+		ret = tfa_cal_read_file(FILEPATH_TEMP_CAL,
+			cal_done_string, sizeof(cal_done_string));
+		if (ret >= 0) {
+			ret2 = kstrtou16(cal_done_string, 0, &value_file);
+			strlcpy(temp_string, cal_done_string, FILESIZE_TEMP_CAL);
+			pr_info("%s: get from file\n", __func__);
+			goto tfa_cal_temp_show_exit;
+		}
+	}
+#else
 	ret = tfa_cal_read_file(FILEPATH_TEMP_CAL,
 		cal_done_string, sizeof(cal_done_string));
 	if (ret >= 0) {
 		ret2 = kstrtou16(cal_done_string, 0, &value_file);
-		pr_info("%s: get from driver to double check\n",
-			__func__);
-	} else {
-		pr_info("%s: failed to read %s and get from driver\n",
-			__func__, FILEPATH_TEMP_CAL);
+		pr_info("%s: get from file\n", __func__);
+		goto tfa_cal_temp_show_exit;
 	}
+#endif
+
+	pr_info("%s: failed to read %s and get from driver\n",
+		__func__, FILEPATH_TEMP_CAL);
 
 	for (idx = 0; idx < devcount; idx++) {
 		ret = tfa_read_cal_temp(idx, &value);
@@ -170,6 +230,12 @@ static ssize_t tfa_cal_temp_show(struct device *dev,
 			pr_info("%s: failed to read temp from driver\n",
 				__func__);
 			continue;
+		}
+
+		if (value_file != 0xffff && value == 0xffff) {
+			pr_info("%s: driver has no temp, to be updated\n",
+				__func__);
+			value = value_file;
 		}
 
 		if (idx == 0)
@@ -181,17 +247,10 @@ static ssize_t tfa_cal_temp_show(struct device *dev,
 				cal_done_string, value);
 	}
 
-	if (value == value_file) {
+	if ((ret == 0) && (value == value_file)) {
 		pr_info("%s: driver has the same temp as file\n",
 			__func__);
-		goto tfa_cal_temp_show_exit;
-	}
-
-	if (ret2 == 0
-		&& value_file != 0xffff && value == 0xffff) {
-		value = value_file;
-		pr_info("%s: driver has no temp, to be updated\n",
-			__func__);
+		ret2 = 0;
 		goto tfa_cal_temp_show_exit;
 	}
 
@@ -201,6 +260,7 @@ static ssize_t tfa_cal_temp_show(struct device *dev,
 		goto tfa_cal_temp_show_exit;
 	}
 
+#if defined(TFA_WRITE_CAL_TO_FILE)
 	ret = tfa_cal_write_file(FILEPATH_TEMP_CAL,
 		cal_done_string, sizeof(cal_done_string));
 	if (ret < 0) {
@@ -208,13 +268,19 @@ static ssize_t tfa_cal_temp_show(struct device *dev,
 			__func__, FILEPATH_TEMP_CAL);
 		return -EINVAL;
 	}
+#else
+	strlcpy(temp_string, cal_done_string, FILESIZE_TEMP_CAL);
+#endif
 	ret2 = 0;
 
 tfa_cal_temp_show_exit:
 	if (ret2)
-		size = sprintf(buf, "no_data");
+		size = snprintf(buf,
+			7 + 1, "no_data");
 	else
-		size = sprintf(buf, "%d", value);
+		size = snprintf(buf,
+			strlen(cal_done_string) + 1,
+			"%s", cal_done_string);
 
 	if (size <= 0) {
 		pr_err("%s: failed to show in sysfs file\n", __func__);
@@ -270,7 +336,7 @@ static ssize_t tfa_cal_status_store(struct device *dev,
 
 	pr_info("%s: begin\n", __func__);
 
-	cur_status = status; // run - changed to active
+	cur_status = status; /* run - changed to active */
 	for (idx = 0; idx < devcount; idx++) {
 		/* run calibration and read data to store */
 		ret = tfa_run_calibrate(idx, &value);
@@ -315,6 +381,7 @@ static ssize_t tfa_cal_status_store(struct device *dev,
 				cal_done_string2, value2);
 	}
 
+#if defined(TFA_WRITE_CAL_TO_FILE)
 	ret = tfa_cal_write_file(FILEPATH_RDC_CAL,
 		cal_done_string, sizeof(cal_done_string));
 	if (ret < 0) {
@@ -330,6 +397,10 @@ static ssize_t tfa_cal_status_store(struct device *dev,
 			__func__, FILEPATH_TEMP_CAL);
 		return -EINVAL;
 	}
+#else
+	strlcpy(rdc_string, cal_done_string, FILESIZE_RDC_CAL);
+	strlcpy(temp_string, cal_done_string2, FILESIZE_TEMP_CAL);
+#endif
 
 	pr_info("%s: end\n", __func__);
 
@@ -365,6 +436,7 @@ static int tfa_cal_read_file(char *filename, char *data, size_t size)
 	return ret;
 }
 
+#if defined(TFA_WRITE_CAL_TO_FILE)
 /* filp_open/close() needs to be used to access file */
 static int tfa_cal_write_file(char *filename, char *data, size_t size)
 {
@@ -378,7 +450,8 @@ static int tfa_cal_write_file(char *filename, char *data, size_t size)
 
 #if defined(FOLDER_DOESNT_EXIST)
 	if (!folder_created) {
-		cal_filp = filp_open(FOLDERPATH_NXP, O_DIRECTORY | O_CREAT, 0660);
+		cal_filp = filp_open(FOLDERPATH_NXP,
+			O_DIRECTORY | O_CREAT, 0660);
 		if (IS_ERR(cal_filp)) {
 			pr_err("%s: failed to create folder: nxp\n", __func__);
 			set_fs(old_fs);
@@ -409,6 +482,7 @@ static int tfa_cal_write_file(char *filename, char *data, size_t size)
 
 	return ret;
 }
+#endif /* TFA_WRITE_CAL_TO_FILE */
 
 static int __init tfa98xx_cal_init(void)
 {

@@ -29,6 +29,8 @@ struct isdbt_platform_data {
 	int gpio_ant_ctrl1;
 	int gpio_ant_ctrl2;
 	u32 gpio_ant_ctrl_sel[6];
+	int gpio_fm_dtv_ctrl1;
+	int gpio_fm_dtv_ctrl2;
 	struct clk *isdbt_clk;
 #ifdef CONFIG_ISDBT_F_TYPE_ANTENNA
 	int gpio_tmm_sw;

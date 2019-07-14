@@ -47,6 +47,7 @@
 
 #define BQ25898S_CHG_REG_0B			0x0B
 #define BQ25898S_CHG_REG_0C			0x0C
+#define BQ25898S_CHG_REG_0D			0x0D
 #define BQ25898S_CHG_REG_11			0x11
 #define BQ25898S_CHG_REG_14			0x14
 enum bq25898s_watchdog_timer {

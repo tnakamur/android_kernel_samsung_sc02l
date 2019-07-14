@@ -35,6 +35,8 @@
 #include <sdp/dek_aes.h>
 #include <sdp/kek_pack.h>
 
+#include "../../fs/ext4/sdp/fscrypto_sdp_cache.h"
+
 /*
  * Need to move this to defconfig
  */
@@ -47,7 +49,9 @@
 
 #define DEK_LOG_COUNT		100
 
+#if defined(CONFIG_SDP) && !defined(CONFIG_EXT4CRYPT_SDP)
 extern void ecryptfs_mm_drop_cache(int userid, int engineid);
+#endif
 
 /* Log buffer */
 struct log_struct
@@ -493,7 +497,9 @@ static int dek_on_boot(dek_arg_on_boot *evt) {
 }
 
 static int dek_on_device_locked(dek_arg_on_device_locked *evt) {
+#if defined(CONFIG_SDP) && !defined(CONFIG_EXT4CRYPT_SDP)
     int user_id = evt->user_id;
+#endif
 	int engine_id = evt->engine_id;
 
 	del_kek(engine_id, KEK_TYPE_SYM);
@@ -501,7 +507,11 @@ static int dek_on_device_locked(dek_arg_on_device_locked *evt) {
 	del_kek(engine_id, KEK_TYPE_DH_PRIV);
 	del_kek(engine_id, KEK_TYPE_ECDH256_PRIV);
 
+#if defined(CONFIG_SDP) && !defined(CONFIG_EXT4CRYPT_SDP)
 	ecryptfs_mm_drop_cache(user_id, engine_id);
+#elif defined(CONFIG_EXT4CRYPT_SDP)
+	fscrypt_sdp_cache_drop_inode_mappings(engine_id);
+#endif
 
 #ifdef CONFIG_SDP_KEY_DUMP
     if(get_sdp_sysfs_key_dump()) {
@@ -770,7 +780,11 @@ static long dek_do_ioctl_evt(unsigned int minor, unsigned int cmd,
 			goto err;
 		}
 
+#if defined(CONFIG_SDP) && !defined(CONFIG_EXT4CRYPT_SDP)
 		ecryptfs_mm_drop_cache(evt->user_id, evt->engine_id);
+#elif defined(CONFIG_EXT4CRYPT_SDP)
+		fscrypt_sdp_cache_drop_inode_mappings(evt->engine_id);
+#endif
 		ret = 0;
 		dek_add_to_log(evt->engine_id, "Disk cache clean up");
 		break;
@@ -857,7 +871,7 @@ static long dek_do_ioctl_req(unsigned int minor, unsigned int cmd,
 	 */
 	case DEK_ENCRYPT_DEK: {
 		dek_arg_encrypt_dek req;
-
+		dek_t *tempPlain_dek, *tempEnc_dek;
 		DEK_LOGD("DEK_ENCRYPT_DEK\n");
 
 		memset(&req, 0, sizeof(dek_arg_encrypt_dek));
@@ -873,19 +887,48 @@ static long dek_do_ioctl_req(unsigned int minor, unsigned int cmd,
 			ret = -EFAULT;
 			goto err;
 		}
+		tempPlain_dek = kmalloc(sizeof(dek_t), GFP_NOFS);
+		if (tempPlain_dek == NULL) {
+			return -ENOMEM;
+		}
+		tempEnc_dek = kmalloc(sizeof(dek_t), GFP_NOFS);
+		if (tempEnc_dek == NULL) {
+			kzfree(tempPlain_dek);
+			return -ENOMEM;
+		}
+
+		tempPlain_dek->type = req.plain_dek.type;
+		tempPlain_dek->len = req.plain_dek.len;
+		memcpy(tempPlain_dek->buf, req.plain_dek.buf, req.plain_dek.len);
+
 		ret = dek_encrypt_dek(req.engine_id,
-				&req.plain_dek, &req.enc_dek);
+				tempPlain_dek, tempEnc_dek);
+
+		memset(tempPlain_dek->buf, 0, DEK_MAXLEN);
+
 		if (ret < 0) {
 			zero_out((char *)&req, sizeof(dek_arg_encrypt_dek));
+			kzfree(tempPlain_dek);
+			kzfree(tempEnc_dek);
 			goto err;
 		}
+
+		req.enc_dek.type = tempEnc_dek->type;
+		req.enc_dek.len = tempEnc_dek->len;
+		memcpy(req.enc_dek.buf, tempEnc_dek->buf, tempEnc_dek->len);
+
 		if(copy_to_user(ubuf, &req, sizeof(req))) {
 			DEK_LOGE("can't copy to user req\n");
 			zero_out((char *)&req, sizeof(dek_arg_encrypt_dek));
 			ret = -EFAULT;
+			kzfree(tempPlain_dek);
+			kzfree(tempEnc_dek);
 			goto err;
 		}
 		zero_out((char *)&req, sizeof(dek_arg_encrypt_dek));
+
+		kzfree(tempPlain_dek);
+		kzfree(tempEnc_dek);
 		break;
 	}
 	/*
@@ -897,7 +940,7 @@ static long dek_do_ioctl_req(unsigned int minor, unsigned int cmd,
 	 */
 	case DEK_DECRYPT_DEK: {
 		dek_arg_decrypt_dek req;
-
+		dek_t *tempPlain_dek, *tempEnc_dek;
 		DEK_LOGD("DEK_DECRYPT_DEK\n");
 
 		memset(&req, 0, sizeof(dek_arg_decrypt_dek));
@@ -913,19 +956,46 @@ static long dek_do_ioctl_req(unsigned int minor, unsigned int cmd,
 			ret = -EFAULT;
 			goto err;
 		}
+		tempPlain_dek = kmalloc(sizeof(dek_t), GFP_NOFS);
+		if (tempPlain_dek == NULL) {
+			return -ENOMEM;
+		}
+		tempEnc_dek = kmalloc(sizeof(dek_t), GFP_NOFS);
+		if (tempEnc_dek == NULL) {
+			kzfree(tempPlain_dek);
+			return -ENOMEM;
+		}		
+		tempEnc_dek->type = req.enc_dek.type;
+		tempEnc_dek->len = req.enc_dek.len;
+		memcpy(tempEnc_dek->buf, req.enc_dek.buf, req.enc_dek.len);
+
 		ret = dek_decrypt_dek(req.engine_id,
-				&req.enc_dek, &req.plain_dek);
+				tempEnc_dek, tempPlain_dek);
+
 		if (ret < 0) {
 			zero_out((char *)&req, sizeof(dek_arg_decrypt_dek));
+			kzfree(tempPlain_dek);
+			kzfree(tempEnc_dek);
 			goto err;
 		}
+
+		req.plain_dek.type = tempPlain_dek->type;
+		req.plain_dek.len = tempPlain_dek->len;
+		memcpy(req.plain_dek.buf, tempPlain_dek->buf, tempPlain_dek->len);
+		memset(tempPlain_dek->buf, 0, DEK_MAXLEN);
+
 		if(copy_to_user(ubuf, &req, sizeof(req))) {
 			DEK_LOGE("can't copy to user req\n");
 			zero_out((char *)&req, sizeof(dek_arg_decrypt_dek));
 			ret = -EFAULT;
+			kzfree(tempPlain_dek);
+			kzfree(tempEnc_dek);
 			goto err;
 		}
 		zero_out((char *)&req, sizeof(dek_arg_decrypt_dek));
+
+		kzfree(tempPlain_dek);
+		kzfree(tempEnc_dek);
 		break;
 	}
 
@@ -1166,6 +1236,10 @@ static int __init dek_init(void) {
 
 	printk("dek: initialized\n");
 	dek_add_to_log(000, "Initialized");
+
+#ifdef CONFIG_EXT4CRYPT_SDP
+	fscrypt_sdp_cache_init();
+#endif
 
 	return 0;
 }

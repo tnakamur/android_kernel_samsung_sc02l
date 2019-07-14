@@ -18,6 +18,7 @@
 #ifndef __SEC_MULTI_CHARGER_H
 #define __SEC_MULTI_CHARGER_H __FILE__
 
+#include <linux/of_gpio.h>
 #include "sec_charging_common.h"
 
 #define SEC_SUB_CHARGER_CONDITION_NONE			0x00
@@ -39,6 +40,8 @@ enum sec_multi_charger_mode {
 	SEC_MULTI_CHARGER_MAIN_ONLY,
 	SEC_MULTI_CHARGER_SUB_ONLY,
 	SEC_MULTI_CHARGER_ALL_ENABLE,
+	SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_OFF,
+	SEC_MULTI_CHARGER_LOAD_SWITCH_CHARGING_ON,
 };
 
 struct sec_multi_charger_platform_data {
@@ -56,6 +59,11 @@ struct sec_multi_charger_platform_data {
 	int sub_charger_condition_fast_current;
 	unsigned int *sub_charger_condition_online;
 	unsigned int sub_charger_condition_online_size;
+
+	int load_switch_control;
+	unsigned int load_switch_condition_charge_power;
+	unsigned int *load_switch_condition_online;
+	unsigned int load_switch_condition_online_size;
 };
 
 struct sec_multi_charger_info {
@@ -70,6 +78,8 @@ struct sec_multi_charger_info {
 	/* sub_charger should be disabled before 1st EOC */
 	bool sub_is_charging;
 	int multi_mode;
+
+	unsigned int float_voltage;
 
 	sec_charging_current_t total_current;
 	sec_charging_current_t main_current;
@@ -92,6 +102,7 @@ struct sec_multi_charger_info {
 	int reg_data;
 	int irq_base;
 #endif
+	int load_switch_state;
 };
 
 #endif /* __SEC_MULTI_CHARGER_H */

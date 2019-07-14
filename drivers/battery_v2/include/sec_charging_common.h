@@ -63,10 +63,11 @@ enum power_supply_ext_property {
 	POWER_SUPPLY_EXT_PROP_FUELGAUGE_FACTORY,
 	POWER_SUPPLY_EXT_PROP_CURRENT_MEASURE,
 	POWER_SUPPLY_EXT_PROP_DISABLE_FACTORY_MODE,
-#if defined(CONFIG_FUELGAUGE_S2MU004) || defined(CONFIG_FUELGAUGE_S2MU005)
+#if defined(CONFIG_FUELGAUGE_S2MU004) || defined(CONFIG_FUELGAUGE_S2MU005) || defined(CONFIG_FUELGAUGE_S2MU106) || defined(CONFIG_FUELGAUGE_S2MU205)
 	POWER_SUPPLY_EXT_PROP_UPDATE_BATTERY_DATA,
 #endif
 	POWER_SUPPLY_EXT_PROP_HV_DISABLE,
+	POWER_SUPPLY_EXT_PROP_WD_QBATTOFF,
 };
 
 enum sec_battery_usb_conf {
@@ -126,7 +127,8 @@ enum sec_battery_cable {
 	SEC_BATTERY_CABLE_TIMEOUT,				/* 30 */
 	SEC_BATTERY_CABLE_SMART_OTG,			/* 31 */
 	SEC_BATTERY_CABLE_SMART_NOTG,			/* 32 */
-	SEC_BATTERY_CABLE_MAX,					/* 33 */
+	SEC_BATTERY_CABLE_FACTORY_UART,			/* 33 */
+	SEC_BATTERY_CABLE_MAX,					/* 34 */
 };
 
 enum sec_battery_voltage_mode {
@@ -348,6 +350,8 @@ enum sec_battery_full_charged {
 enum sec_battery_inbat_fgsrc_switching {
 	SEC_BAT_INBAT_FGSRC_SWITCHING_ON = 0,
 	SEC_BAT_INBAT_FGSRC_SWITCHING_OFF,
+	SEC_BAT_FGSRC_SWITCHING_ON,
+	SEC_BAT_FGSRC_SWITCHING_OFF,
 };
 
 #define sec_battery_full_charged_t \
@@ -507,6 +511,11 @@ enum sec_battery_temp_check {
   * check cable by GPIO polling
   */
 #define SEC_BATTERY_CABLE_CHECK_POLLING			32
+/* SEC_BATTERY_CABLE_CHECK_USBCHARGEOFF
+  * for USB cable in tablet model,
+  * status is stuck into discharging
+  */
+#define SEC_BATTERY_CABLE_CHECK_USBCHARGEOFF		64
 
 /* check cable source (can be used overlapped) */
 #define sec_battery_cable_source_t unsigned int
@@ -602,6 +611,9 @@ struct sec_age_data {
 	unsigned int recharge_condition_vcell;
 	unsigned int full_condition_vcell;
 	unsigned int full_condition_soc;
+#if defined(CONFIG_STEP_CHARGING)
+	unsigned int step_charging_condition;
+#endif
 };
 
 #define sec_age_data_t \
@@ -684,11 +696,13 @@ struct sec_battery_platform_data {
 	int swelling_low_temp_block_2nd;
 	int swelling_low_temp_recov_2nd;
 	unsigned int swelling_low_temp_current;
+	unsigned int swelling_low_temp_current_2nd;
 	unsigned int swelling_low_temp_topoff;
 	unsigned int swelling_high_temp_current;
 	unsigned int swelling_high_temp_topoff;
 	unsigned int swelling_wc_high_temp_current;
 	unsigned int swelling_wc_low_temp_current;
+	unsigned int swelling_wc_low_temp_current_2nd;
 
 	unsigned int swelling_normal_float_voltage;
 	unsigned int swelling_drop_float_voltage;
@@ -711,7 +725,9 @@ struct sec_battery_platform_data {
 #if defined(CONFIG_STEP_CHARGING)
 	/* step charging */
 	unsigned int *step_charging_condition;
+	unsigned int *step_charging_condition_curr;
 	unsigned int *step_charging_current;
+	unsigned int *step_charging_float_voltage;
 #endif
 
 	/* Monitor setting */
@@ -812,6 +828,9 @@ struct sec_battery_platform_data {
 	int mix_high_temp;
 	int mix_high_chg_temp;
 	int mix_high_temp_recovery;
+	int mix_temp_input_current;
+	int mix_temp_charging_current;
+	int mix_high_chg_temp_recovery;
 
 	/* If these is NOT full check type or NONE full check type,
 	 * it is skipped
@@ -846,6 +865,9 @@ struct sec_battery_platform_data {
 	unsigned int normal_charging_total_time;
 	unsigned int usb_charging_total_time;
 
+	/* moisture detect function support for non-water proof USB type-b models */
+	bool detect_moisture;
+	
 	/* fuel gauge */
 	char *fuelgauge_name;
 	int fg_irq;
@@ -886,6 +908,7 @@ struct sec_battery_platform_data {
 	/* float voltage (mV) */
 	unsigned int chg_float_voltage;
 	unsigned int chg_float_voltage_conv;
+	unsigned int swelling_low_rechg_thr;
 
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 	int num_age_step;
@@ -894,6 +917,8 @@ struct sec_battery_platform_data {
 	sec_age_data_t* age_data;
 #endif
 	int fg_cycle_check_value;
+
+	unsigned int siop_default_power;
 
 	unsigned int siop_event_check_type;
 	unsigned int siop_call_cc_current;
@@ -910,10 +935,19 @@ struct sec_battery_platform_data {
 	int siop_wireless_charging_limit_current;
 	int siop_hv_wireless_input_limit_current;
 	int siop_hv_wireless_charging_limit_current;
+
+	/* if siop level 0, set minimum fast charging current */
+	int minimum_charging_current_by_siop_0;
+	int input_current_by_siop_20;
+	int input_current_by_siop_40;
+	int charging_current_browsing_mode;
+	
 	int wc_hero_stand_cc_cv;
 	int wc_hero_stand_cv_current;
 	int wc_hero_stand_hv_cv_current;
 
+	int default_input_current;
+	int default_charging_current;
 	int max_input_voltage;
 	int max_input_current;
 	int pre_afc_work_delay;
@@ -934,6 +968,8 @@ struct sec_battery_platform_data {
 	unsigned int cisd_cap_limit;
 	unsigned int max_voltage_thr;
 	unsigned int cisd_alg_index;
+	unsigned int *ignore_cisd_index;
+	unsigned int *ignore_cisd_index_d;
 #endif
 
 	/* ADC setting */
@@ -949,6 +985,7 @@ struct sec_battery_platform_data {
 	int standard_curr;
 
 	bool recovery_cable;
+	bool lowtemp_support_full_volt;
 	/* ADC type for each channel */
 	unsigned int adc_type[];
 };
@@ -1122,4 +1159,6 @@ static inline struct power_supply *get_power_supply_by_name(char *name)
 #define is_hv_wire_type(cable_type) ( \
 	is_hv_afc_wire_type(cable_type) || is_hv_qc_wire_type(cable_type))
 
+#define is_pd_wire_type(cable_type) ( \
+		cable_type == SEC_BATTERY_CABLE_PDIC)
 #endif /* __SEC_CHARGING_COMMON_H */

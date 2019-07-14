@@ -146,9 +146,10 @@ static int mmc_queue_thread(void *d)
 	struct request_queue *q = mq->queue;
 	struct sched_param scheduler_params = {0};
 
-	scheduler_params.sched_priority = 1;
-
-	sched_setscheduler(current, SCHED_FIFO, &scheduler_params);
+	if (mq->card->type != MMC_TYPE_SD) {
+		scheduler_params.sched_priority = 1;
+		sched_setscheduler(current, SCHED_FIFO, &scheduler_params);
+	}
 
 	current->flags |= PF_MEMALLOC;
 
@@ -616,6 +617,7 @@ enum blk_eh_timer_return mmc_cmdq_rq_timed_out(struct request *req)
 	struct mmc_queue *mq = req->q->queuedata;
 	struct mmc_host *host = mq->card->host;
 	struct mmc_cmdq_context_info *ctx_info = &host->cmdq_ctx;
+	struct cmdq_host *cq_host = mmc_cmdq_private(mq->card->host);
 	const char op[] = {'D', 'F', 'W', 'R'};
 
 	test_and_set_bit(CMDQ_STATE_ERR_HOST, &ctx_info->curr_state);
@@ -649,11 +651,11 @@ enum blk_eh_timer_return mmc_cmdq_rq_timed_out(struct request *req)
 				op[3], req->tag, req->cmd_flags);
 #endif
 	}
-	{
-		struct cmdq_host *cq_host = mmc_cmdq_private(mq->card->host);
 
-		cmdq_dumpregs(cq_host);
-	}
+	ctx_info->dump_state = CMDQ_DUMP_SWTIMOUT;
+
+	cmdq_dumpregs(cq_host);
+
 	return mq->cmdq_req_timed_out(req);
 }
 

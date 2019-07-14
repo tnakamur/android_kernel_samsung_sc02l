@@ -20,14 +20,15 @@
 #include <linux/err.h>
 #include <sdp/dek_common.h>
 #include <sdp/dek_aes.h>
+#include <crypto/skcipher.h>
 
-static struct crypto_blkcipher *dek_aes_key_setup(kek_t *kek)
+static struct crypto_skcipher *dek_aes_key_setup(kek_t *kek)
 {
-	struct crypto_blkcipher *tfm = NULL;
+	struct crypto_skcipher *tfm = NULL;
 
-	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
+	tfm = crypto_alloc_skcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
 	if (!IS_ERR(tfm)) {
-		crypto_blkcipher_setkey(tfm, kek->buf, kek->len);
+		crypto_skcipher_setkey(tfm, kek->buf, kek->len);
 	} else {
 		printk("dek: failed to alloc blkcipher\n");
 		tfm = NULL;
@@ -35,72 +36,70 @@ static struct crypto_blkcipher *dek_aes_key_setup(kek_t *kek)
 	return tfm;
 }
 
-
-static void dek_aes_key_free(struct crypto_blkcipher *tfm)
+static void dek_aes_key_free(struct crypto_skcipher *tfm)
 {
-	crypto_free_blkcipher(tfm);
+	crypto_free_skcipher(tfm);
 }
 
-static int __dek_aes_encrypt(struct crypto_blkcipher *tfm, char *src, char *dst, int len) {
-	struct blkcipher_desc desc;
-	struct scatterlist src_sg, dst_sg;
-	int bsize = crypto_blkcipher_ivsize(tfm);
-	u8 iv[bsize];
+#define DEK_AES_CBC_IV_SIZE 16
 
-	memset(&iv, 0, sizeof(iv));
-	desc.tfm = tfm;
-	desc.info = iv;
-	desc.flags = 0;
+static int __dek_aes_do_crypt(struct crypto_skcipher *tfm,
+		unsigned char *src, unsigned char *dst, int len, bool encrypt) {
+	int rc = 0;
+	struct skcipher_request *req = NULL;
+	DECLARE_CRYPTO_WAIT(wait);
+	struct scatterlist src_sg, dst_sg;
+	u8 iv[DEK_AES_CBC_IV_SIZE] = {0,};
+
+	req = skcipher_request_alloc(tfm, GFP_NOFS);
+	if (!req) {
+		return -ENOMEM;
+	}
+
+	skcipher_request_set_callback(req,
+					CRYPTO_TFM_REQ_MAY_BACKLOG | CRYPTO_TFM_REQ_MAY_SLEEP,
+					crypto_req_done, &wait);
 
 	sg_init_one(&src_sg, src, len);
 	sg_init_one(&dst_sg, dst, len);
 
-	return crypto_blkcipher_encrypt_iv(&desc, &dst_sg, &src_sg, len);
+	skcipher_request_set_crypt(req, &src_sg, &dst_sg, len, iv);
+
+	if (encrypt)
+		rc = crypto_wait_req(crypto_skcipher_encrypt(req), &wait);
+	else
+		rc = crypto_wait_req(crypto_skcipher_decrypt(req), &wait);
+
+	skcipher_request_free(req);
+	return rc;
 }
 
-static int __dek_aes_decrypt(struct crypto_blkcipher *tfm, char *src, char *dst, int len) {
-	struct blkcipher_desc desc;
-	struct scatterlist src_sg, dst_sg;
-	int bsize = crypto_blkcipher_ivsize(tfm);
-	u8 iv[bsize];
-
-	memset(&iv, 0, sizeof(iv));
-	desc.tfm = tfm;
-	desc.info = iv;
-	desc.flags = 0;
-
-	sg_init_one(&src_sg, src, len);
-	sg_init_one(&dst_sg, dst, len);
-
-	return crypto_blkcipher_decrypt_iv(&desc, &dst_sg, &src_sg, len);
-}
-
-int dek_aes_encrypt(kek_t *kek, char *src, char *dst, int len) {
+int dek_aes_encrypt(kek_t *kek, unsigned char *src, unsigned char *dst, int len) {
 	int rc;
-	struct crypto_blkcipher *tfm;
+	struct crypto_skcipher *tfm;
 
 	if(kek == NULL) return -EINVAL;
 
 	tfm = dek_aes_key_setup(kek);
 
 	if(tfm) {
-		rc = __dek_aes_encrypt(tfm, src, dst, len);
+		rc = __dek_aes_do_crypt(tfm, src, dst, len, true);
 		dek_aes_key_free(tfm);
 		return rc;
 	} else
 		return -ENOMEM;
 }
 
-int dek_aes_decrypt(kek_t *kek, char *src, char *dst, int len) {
+int dek_aes_decrypt(kek_t *kek, unsigned char *src, unsigned char *dst, int len) {
 	int rc;
-	struct crypto_blkcipher *tfm;
+	struct crypto_skcipher *tfm;
 
 	if(kek == NULL) return -EINVAL;
 
 	tfm = dek_aes_key_setup(kek);
 
 	if(tfm) {
-		rc = __dek_aes_decrypt(tfm, src, dst, len);
+		rc = __dek_aes_do_crypt(tfm, src, dst, len, false);
 		dek_aes_key_free(tfm);
 		return rc;
 	} else

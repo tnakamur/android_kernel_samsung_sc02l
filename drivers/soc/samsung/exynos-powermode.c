@@ -36,15 +36,6 @@
 #endif /* CONFIG_CCIC_NOTIFIER */
 #endif /* CONFIG_SEC_PM && CONFIG_MUIC_NOTIFIER */
 
-#ifdef CONFIG_EXYNOS_REBOOT
-extern void mngs_reset_control(int en);
-#else
-static inline void mngs_reset_control(int en)
-{
-	return ;
-}
-#endif
-
 struct exynos_powermode_info {
 	unsigned int	cpd_residency;		/* target residency of cpd */
 	unsigned int	sicd_residency;		/* target residency of sicd */
@@ -141,7 +132,6 @@ static void cluster_enable(unsigned int cpu)
 	unsigned int phycluster = MPIDR_AFFINITY_LEVEL(mpidr, 1);
 
 	cal_cluster_enable(phycluster);
-	mngs_reset_control(1);
 }
 
 static void cluster_disable(unsigned int cpu)
@@ -149,7 +139,6 @@ static void cluster_disable(unsigned int cpu)
 	unsigned int mpidr = cpu_logical_map(cpu);
 	unsigned int phycluster = MPIDR_AFFINITY_LEVEL(mpidr, 1);
 
-	mngs_reset_control(0);
 	cal_cluster_disable(phycluster);
 }
 

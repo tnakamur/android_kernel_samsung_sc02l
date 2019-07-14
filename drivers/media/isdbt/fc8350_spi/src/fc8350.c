@@ -427,6 +427,24 @@ int isdbt_hw_setting(HANDLE hDevice)
 
 		gpio_direction_output(isdbt_pdata->gpio_lna_en, 0);
 	}
+	
+	if (gpio_is_valid(isdbt_pdata->gpio_fm_dtv_ctrl1)) {
+		err = gpio_request(isdbt_pdata->gpio_fm_dtv_ctrl1, "isdbt_fm_dtv_ctrl1");
+		if (err)
+			pr_err("isdbt_hw_setting: Couldn't request isdbt_fm_dtv_ctrl1 err=%d\n"
+				, err);
+
+		gpio_direction_output(isdbt_pdata->gpio_fm_dtv_ctrl1, 0);
+	}
+	
+	if (gpio_is_valid(isdbt_pdata->gpio_fm_dtv_ctrl2)) {
+		err = gpio_request(isdbt_pdata->gpio_fm_dtv_ctrl2, "isdbt_fm_dtv_ctrl2");
+		if (err)
+			pr_err("isdbt_hw_setting: Couldn't request isdbt_fm_dtv_ctrl2 err=%d\n"
+				, err);
+
+		gpio_direction_output(isdbt_pdata->gpio_fm_dtv_ctrl2, 0);
+	}
 
 #ifndef BBM_I2C_TSIF
 	err =	gpio_request(isdbt_pdata->gpio_int, "isdbt_irq");
@@ -580,14 +598,29 @@ void isdbt_hw_init(void)
 	if (gpio_is_valid(isdbt_pdata->gpio_lna_en))
 		gpio_direction_output(isdbt_pdata->gpio_lna_en, 1);
 
-	if (gpio_is_valid(isdbt_pdata->gpio_ant_ctrl1))
+	if (gpio_is_valid(isdbt_pdata->gpio_ant_ctrl1)){
+		pr_err("%s, gpio_ant_ctrl1 = %d \n", __func__,
+			gpio_get_value(isdbt_pdata->gpio_ant_ctrl1));
 		gpio_direction_output(isdbt_pdata->gpio_ant_ctrl1, isdbt_pdata->gpio_ant_ctrl_sel[0]);
-	if (gpio_is_valid(isdbt_pdata->gpio_ant_ctrl2))
+	}
+	if (gpio_is_valid(isdbt_pdata->gpio_ant_ctrl2)) {
+		pr_err("%s, gpio_ant_ctrl2 = %d \n", __func__,
+			gpio_get_value(isdbt_pdata->gpio_ant_ctrl2));
 		gpio_direction_output(isdbt_pdata->gpio_ant_ctrl2, isdbt_pdata->gpio_ant_ctrl_sel[1]);
-
-	pr_err("%s, gpio_ant_ctrl1 = %d gpio_ant_ctrl2 = %d \n", __func__,
-			gpio_get_value(isdbt_pdata->gpio_ant_ctrl1), gpio_get_value(isdbt_pdata->gpio_ant_ctrl2));
-
+	}
+	
+	if (gpio_is_valid(isdbt_pdata->gpio_fm_dtv_ctrl1)) {
+		pr_err("%s, gpio_fm_dtv_ctrl1 = %d \n", __func__,
+			gpio_get_value(isdbt_pdata->gpio_fm_dtv_ctrl1));
+		gpio_direction_output(isdbt_pdata->gpio_fm_dtv_ctrl1, 1);
+	}
+			
+	if (gpio_is_valid(isdbt_pdata->gpio_fm_dtv_ctrl2)) {
+		pr_err("%s, gpio_fm_dtv_ctrl2 = %d \n", __func__,
+			gpio_get_value(isdbt_pdata->gpio_fm_dtv_ctrl2));
+		gpio_direction_output(isdbt_pdata->gpio_fm_dtv_ctrl2, 1);
+	}
+	
 	gpio_direction_output(isdbt_pdata->gpio_rst, 0);
 
 	if (gpio_is_valid(isdbt_pdata->gpio_en))
@@ -644,6 +677,12 @@ void isdbt_hw_deinit(void)
 		gpio_direction_output(isdbt_pdata->gpio_ant_ctrl1, isdbt_pdata->gpio_ant_ctrl_sel[2]);
 	if (gpio_is_valid(isdbt_pdata->gpio_ant_ctrl2))
 		gpio_direction_output(isdbt_pdata->gpio_ant_ctrl2, isdbt_pdata->gpio_ant_ctrl_sel[3]);
+	
+	if (gpio_is_valid(isdbt_pdata->gpio_fm_dtv_ctrl1))
+		gpio_direction_output(isdbt_pdata->gpio_fm_dtv_ctrl1,0);
+	
+	if (gpio_is_valid(isdbt_pdata->gpio_fm_dtv_ctrl2))
+		gpio_direction_output(isdbt_pdata->gpio_fm_dtv_ctrl2,0);
 
 #if defined(CONFIG_SEC_GPIO_SETTINGS)
 	isdbt_pinctrl = devm_pinctrl_get_select(isdbt_pdata->isdbt_device
@@ -1198,6 +1237,8 @@ long isdbt_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case IOCTL_ISDBT_SCAN_STATUS:
 		pr_err("[FC8350] IOCTL_ISDBT_SCAN_STATUS\n");
 		res = bbm_com_scan_status(hInit, DIV_BROADCAST);
+		if (res)
+			pr_err("[FC8350] ERROR ON IOCTL_ISDBT_SCAN_STATUS\n");
 		break;
 	case IOCTL_ISDBT_TUNER_GET_RSSI:
 
@@ -1422,6 +1463,32 @@ static struct isdbt_platform_data *isdbt_populate_dt_pdata(struct device *dev)
 		pr_err("%s : isdbt-detect-gpio gpio_lna_en =%d\n"
 			, __func__, pdata->gpio_lna_en);
 	}
+	
+	/* Antenna FM-DTV Control1 for Latin DTV */
+	pdata->gpio_fm_dtv_ctrl1 = of_get_named_gpio(dev->of_node, "isdbt,gpio-fm-dtv-ctrl1", 0);
+	if (pdata->gpio_fm_dtv_ctrl1 < 0)
+		of_property_read_u32(dev->of_node
+			, "isdbt,gpio-fm-dtv-ctrl1", &pdata->gpio_fm_dtv_ctrl1);
+	if (pdata->gpio_fm_dtv_ctrl1 < 0) {
+		pr_err("%s : can not find the isdbt-detect-gpio-fm-dtv-ctrl1 in the dt\n"
+			, __func__);
+	} else {
+		pr_err("%s : isdbt-detect-gpio gpio_fm_dtv_ctrl1 =%d\n"
+			, __func__, pdata->gpio_fm_dtv_ctrl1);
+	}
+	
+	/* Antenna FM-DTV Control2 for Latin DTV */
+	pdata->gpio_fm_dtv_ctrl2 = of_get_named_gpio(dev->of_node, "isdbt,gpio-fm-dtv-ctrl2", 0);
+	if (pdata->gpio_fm_dtv_ctrl2 < 0)
+		of_property_read_u32(dev->of_node
+			, "isdbt,gpio-fm-dtv-ctrl2", &pdata->gpio_fm_dtv_ctrl2);
+	if (pdata->gpio_fm_dtv_ctrl2 < 0) {
+		pr_err("%s : can not find the isdbt-detect-gpio-fm-dtv-ctrl2 in the dt\n"
+			, __func__);
+	} else {
+		pr_err("%s : isdbt-detect-gpio gpio_fm_dtv_ctrl2 =%d\n"
+			, __func__, pdata->gpio_fm_dtv_ctrl2);
+	}
 
 	/*B28 filter for latin DTV*/
 	pdata->gpio_b28_ctrl = of_get_named_gpio(dev->of_node, "isdbt,gpio-b28-ctrl", 0);
@@ -1460,7 +1527,7 @@ static struct isdbt_platform_data *isdbt_populate_dt_pdata(struct device *dev)
 		pr_err("%s : isdbt-detect-gpio-ant-ctrl2 =%d\n"
 			, __func__, pdata->gpio_ant_ctrl2);
 	}
-	if (gpio_is_valid(pdata->gpio_ant_ctrl1) && gpio_is_valid(pdata->gpio_ant_ctrl1)) {
+	if (gpio_is_valid(pdata->gpio_ant_ctrl1) && gpio_is_valid(pdata->gpio_ant_ctrl2)) {
 		if (!of_get_property(dev->of_node, "isdbt,gpio-ant-ctrl-sel", &len)) {
 			pr_err("%s : can not find size of the gpio-ant-ctrl-sel in the dt\n"
 				, __func__);

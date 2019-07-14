@@ -25,9 +25,13 @@
 #include "kic.h"
 #endif
 
-static char *mib_file = "wlan.hcf";
-module_param(mib_file, charp, S_IRUGO | S_IWUSR);
+char *slsi_mib_file = "wlan.hcf";
+module_param_named(mib_file, slsi_mib_file, charp, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mib_file, "mib data filename");
+
+char *slsi_mib_file2 = "wlan_sw.hcf";
+module_param_named(mib_file2, slsi_mib_file2, charp, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mib_file2, "sw mib data filename");
 
 static char *local_mib_file = "localmib.hcf";
 module_param(local_mib_file, charp, S_IRUGO | S_IWUSR);
@@ -41,7 +45,7 @@ static bool term_udi_users = true;
 module_param(term_udi_users, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(term_udi_users, "Try to terminate UDI user space users (applications) connected on the cdev (0, 1)");
 
-static int sig_wait_cfm_timeout = 3000;
+static int sig_wait_cfm_timeout = 6000;
 module_param(sig_wait_cfm_timeout, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(sig_wait_cfm_timeout, "Signal wait timeout in milliseconds (default: 3000)");
 
@@ -73,10 +77,22 @@ MODULE_PARM_DESC(vo_vi_block_ack_disabled, "Disable VO VI Block Ack logic added 
 static int max_scan_result_count = 200;
 module_param(max_scan_result_count, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(max_scan_result_count, "Max scan results to be reported");
+static bool rtt_disabled = 1;
+module_param(rtt_disabled, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(rtt_disabled, "Disable rtt: to disable rtt set 1");
+
+static bool nan_disabled;
+module_param(nan_disabled, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(nan_disabled, "Disable NAN: to disable NAN set 1.");
 
 bool slsi_dev_gscan_supported(void)
 {
 	return !gscan_disabled;
+}
+
+bool slsi_dev_rtt_supported(void)
+{
+	return !rtt_disabled;
 }
 
 bool slsi_dev_llslogs_supported(void)
@@ -102,6 +118,17 @@ bool slsi_dev_vo_vi_block_ack(void)
 int slsi_dev_get_scan_result_count(void)
 {
 	return max_scan_result_count;
+}
+
+int slsi_dev_nan_supported(struct slsi_dev *sdev)
+{
+#if CONFIG_SCSC_WLAN_MAX_INTERFACES >= 4
+	if (sdev)
+		return sdev->nan_enabled && !nan_disabled;
+	return false;
+#else
+	return false;
+#endif
 }
 
 static int slsi_dev_inetaddr_changed(struct notifier_block *nb, unsigned long data, void *arg)
@@ -172,7 +199,7 @@ static int slsi_dev_inet6addr_changed(struct notifier_block *nb, unsigned long d
 }
 #endif
 
-static void slsi_regd_init(struct slsi_dev *sdev)
+void slsi_regd_init(struct slsi_dev *sdev)
 {
 	struct ieee80211_regdomain *slsi_world_regdom_custom = sdev->device_config.domain_info.regdomain;
 	struct ieee80211_reg_rule  reg_rules[] = {
@@ -224,12 +251,10 @@ struct slsi_dev *slsi_dev_attach(struct device *dev, struct scsc_mx *core, struc
 	sdev->mlme_blocked = false;
 
 	SLSI_MUTEX_INIT(sdev->netdev_add_remove_mutex);
-    SLSI_MUTEX_INIT(sdev->netdev_remove_mutex);
+	SLSI_MUTEX_INIT(sdev->netdev_remove_mutex);
 	SLSI_MUTEX_INIT(sdev->start_stop_mutex);
 	SLSI_MUTEX_INIT(sdev->device_config_mutex);
-#ifdef CONFIG_SCSC_WLAN_ENHANCED_LOGGING
 	SLSI_MUTEX_INIT(sdev->logger_mutex);
-#endif
 
 	sdev->dev = dev;
 	sdev->maxwell_core = core;
@@ -239,10 +264,12 @@ struct slsi_dev *slsi_dev_attach(struct device *dev, struct scsc_mx *core, struc
 	sdev->p2p_certif = false;
 	sdev->allow_switch_40_mhz = true;
 	sdev->allow_switch_80_mhz = true;
-	sdev->mib.mib_file_name = mib_file;
+	sdev->mib[0].mib_file_name = slsi_mib_file;
+	sdev->mib[1].mib_file_name = slsi_mib_file2;
 	sdev->local_mib.mib_file_name = local_mib_file;
 	sdev->maddr_file_name = maddr_file;
 	sdev->device_config.qos_info = -1;
+	sdev->acs_channel_switched = false;
 	memset(&sdev->chip_info_mib, 0xFF, sizeof(struct slsi_chip_info_mib));
 
 #ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
@@ -346,6 +373,29 @@ struct slsi_dev *slsi_dev_attach(struct device *dev, struct scsc_mx *core, struc
 		SLSI_ERR(sdev, "failed to register with p2p netdev\n");
 		goto err_wlan_registered;
 	}
+#ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
+#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000)
+	if (slsi_netif_register(sdev, sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN]) != 0) {
+		SLSI_ERR(sdev, "failed to register with p2px_wlan1 netdev\n");
+		goto err_p2p_registered;
+	}
+	rcu_assign_pointer(sdev->netdev_ap, sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN]);
+#endif
+#endif
+#if CONFIG_SCSC_WLAN_MAX_INTERFACES >= 4
+	if (slsi_netif_register(sdev, sdev->netdev[SLSI_NET_INDEX_NAN]) != 0) {
+		SLSI_ERR(sdev, "failed to register with NAN netdev\n");
+#ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
+#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000)
+		goto err_p2px_wlan_registered;
+#else
+		goto err_p2p_registered;
+#endif
+#else
+		goto err_p2p_registered;
+#endif
+	}
+#endif
 #endif
 #ifdef CONFIG_SCSC_WLAN_KIC_OPS
 	if (wifi_kic_register(sdev) < 0)
@@ -361,9 +411,37 @@ struct slsi_dev *slsi_dev_attach(struct device *dev, struct scsc_mx *core, struc
 	sdev->device_wq = alloc_ordered_workqueue("slsi_wlan_wq", 0);
 	if (!sdev->device_wq) {
 		SLSI_ERR(sdev, "Cannot allocate workqueue\n");
-		goto err_wlan_registered;
+#if CONFIG_SCSC_WLAN_MAX_INTERFACES >= 4
+		goto err_nan_registered;
+#else
+#ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
+#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000)
+		goto err_p2px_wlan_registered;
+#else
+		goto err_p2p_registered;
+#endif
+#else
+		goto err_p2p_registered;
+#endif
+#endif
 	}
 	return sdev;
+
+#if CONFIG_SCSC_WLAN_MAX_INTERFACES >= 4
+err_nan_registered:
+	slsi_netif_remove(sdev, sdev->netdev[SLSI_NET_INDEX_NAN]);
+#endif
+
+#ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
+#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000)
+err_p2px_wlan_registered:
+	slsi_netif_remove(sdev, sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN]);
+	rcu_assign_pointer(sdev->netdev_ap, NULL);
+#endif
+#endif
+
+err_p2p_registered:
+	slsi_netif_remove(sdev, sdev->netdev[SLSI_NET_INDEX_P2P]);
 
 err_wlan_registered:
 	slsi_netif_remove(sdev, sdev->netdev[SLSI_NET_INDEX_WLAN]);
@@ -494,6 +572,10 @@ int __init slsi_dev_load(void)
 	sap_dbg_init();
 	sap_test_init();
 
+/* Always create devnode if TW Android P on */
+#if defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000
+	slsi_create_sysfs_macaddr();
+#endif
 	SLSI_INFO_NODEV("--- Maxwell Wi-Fi driver loaded successfully ---\n");
 	return 0;
 }
@@ -502,6 +584,9 @@ void __exit slsi_dev_unload(void)
 {
 	SLSI_INFO_NODEV("Unloading Maxwell Wi-Fi driver\n");
 
+#if defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000
+	slsi_destroy_sysfs_macaddr();
+#endif
 	/* Unregister SAPs */
 	sap_mlme_deinit();
 	sap_ma_deinit();

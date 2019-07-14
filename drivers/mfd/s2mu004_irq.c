@@ -213,7 +213,9 @@ static irqreturn_t s2mu004_irq_thread(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
+
 static int irq_is_enable = true;
+
 int s2mu004_irq_init(struct s2mu004_dev *s2mu004)
 {
 	int i;

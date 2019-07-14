@@ -305,10 +305,23 @@ enum usbpd_port_vconn_role {
 	USBPD_VCONN_ON,
 };
 
+enum usbpd_power_role_swap {
+	USBPD_SINK_OFF,
+	USBPD_SINK_ON,
+	USBPD_SOURCE_OFF,
+	USBPD_SOURCE_ON,
+};
+
 enum usbpd_port_role {
 	USBPD_Rp	= 0x01,
 	USBPD_Rd	= 0x01 << 1,
 	USBPD_Ra	= 0x01 << 2,
+};
+
+enum usbpd_port_rp_level {
+    USBPD_56k   = 1,
+    USBPD_22k   = 3,
+    USBPD_10k   = 7,
 };
 
 enum {

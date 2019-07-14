@@ -54,10 +54,13 @@
 
 static const u32 *sensor_imx576_global;
 static u32 sensor_imx576_global_size;
+static const u32 *sensor_imx576_imageQuality;
+static u32 sensor_imx576_imageQuality_size;
 static const u32 **sensor_imx576_setfiles;
 static const u32 *sensor_imx576_setfile_sizes;
 static const struct sensor_pll_info_compact **sensor_imx576_pllinfos;
 static u32 sensor_imx576_max_setfile_num;
+static bool sensor_imx576_cal_write_flag;
 
 extern struct fimc_is_lib_support gPtr_lib_support;
 
@@ -110,7 +113,7 @@ static void sensor_imx576_set_integration_min(u32 mode, cis_shared_data *cis_dat
 			cis_data->min_coarse_integration_time = SENSOR_IMX576_COARSE_INTEGRATION_TIME_MIN;
 			dbg_sensor(1, "min_coarse_integration_time(%d)\n",
 				cis_data->min_coarse_integration_time);
-			break;	
+			break;
 		case SENSOR_IMX576_2832X2124_QBCHDR_30FPS:
 		case SENSOR_IMX576_2832X1592_QBCHDR_30FPS:
 		case SENSOR_IMX576_2832X1376_QBCHDR_30FPS:
@@ -285,7 +288,7 @@ int sensor_imx576_cis_check_rev(struct fimc_is_cis *cis)
 	if ((status & 0x1) == false)
 		err("status fail, (%d)", status);
 
-	/* Readout data 
+	/* Readout data
 	 * addr = 0x0018
 	 * value = 0x10 ---> MP0 (frist sample)
 	 * value = 0x11 ---> MP  (for MP)
@@ -347,12 +350,19 @@ int sensor_imx576_cis_init(struct v4l2_subdev *subdev)
 		ret = 0;
 	}
 
+	// Check that QSC and DPC Cal is written for Remosaic Capture.
+	// false : Not yet write the QSC and DPC
+	// true  : Written the QSC and DPC
+	sensor_imx576_cal_write_flag = false;
+
 	info("[%s] cis_rev=%#x\n", __func__, cis->cis_data->cis_rev);
 
 	if (cis->cis_data->cis_rev == 0x11) {
 		probe_info("%s setfile_A for MP\n", __func__);
 		sensor_imx576_global = sensor_imx576_setfile_A_Global;
 		sensor_imx576_global_size = sizeof(sensor_imx576_setfile_A_Global) / sizeof(sensor_imx576_setfile_A_Global[0]);
+		sensor_imx576_imageQuality = sensor_imx576_setfile_A_ImageQuality;
+		sensor_imx576_imageQuality_size = sizeof(sensor_imx576_setfile_A_ImageQuality) / sizeof(sensor_imx576_setfile_A_ImageQuality[0]);
 		sensor_imx576_setfiles = sensor_imx576_setfiles_A;
 		sensor_imx576_setfile_sizes = sensor_imx576_setfile_A_sizes;
 		sensor_imx576_pllinfos = sensor_imx576_pllinfos_A;
@@ -361,6 +371,8 @@ int sensor_imx576_cis_init(struct v4l2_subdev *subdev)
 		probe_info("%s setfile_B for MP0\n", __func__);
 		sensor_imx576_global = sensor_imx576_setfile_B_Global;
 		sensor_imx576_global_size = sizeof(sensor_imx576_setfile_B_Global) / sizeof(sensor_imx576_setfile_B_Global[0]);
+		sensor_imx576_imageQuality = sensor_imx576_setfile_B_ImageQuality;
+		sensor_imx576_imageQuality_size = sizeof(sensor_imx576_setfile_B_ImageQuality) / sizeof(sensor_imx576_setfile_B_ImageQuality[0]);
 		sensor_imx576_setfiles = sensor_imx576_setfiles_B;
 		sensor_imx576_setfile_sizes = sensor_imx576_setfile_B_sizes;
 		sensor_imx576_pllinfos = sensor_imx576_pllinfos_B;
@@ -369,6 +381,8 @@ int sensor_imx576_cis_init(struct v4l2_subdev *subdev)
 		probe_info("%s chip_rev(%d) is wrong! setfile_A for MP (default)\n", __func__, cis->cis_data->cis_rev);
 		sensor_imx576_global = sensor_imx576_setfile_A_Global;
 		sensor_imx576_global_size = sizeof(sensor_imx576_setfile_A_Global) / sizeof(sensor_imx576_setfile_A_Global[0]);
+		sensor_imx576_imageQuality = sensor_imx576_setfile_A_ImageQuality;
+		sensor_imx576_imageQuality_size = sizeof(sensor_imx576_setfile_A_ImageQuality) / sizeof(sensor_imx576_setfile_A_ImageQuality[0]);
 		sensor_imx576_setfiles = sensor_imx576_setfiles_A;
 		sensor_imx576_setfile_sizes = sensor_imx576_setfile_A_sizes;
 		sensor_imx576_pllinfos = sensor_imx576_pllinfos_A;
@@ -466,7 +480,6 @@ p_err:
 int sensor_imx576_cis_QuadSensCal_write(struct v4l2_subdev *subdev)
 {
 	int ret = 0;
-	int i;
 	struct fimc_is_cis *cis;
 	struct i2c_client *client = NULL;
 	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
@@ -474,6 +487,7 @@ int sensor_imx576_cis_QuadSensCal_write(struct v4l2_subdev *subdev)
 	int position;
 	u16 start_addr;
 	ulong cal_addr;
+	u16 data_size;
 	u8 cal_data[SENSOR_IMX576_QUAD_SENS_CAL_SIZE] = {0, };
 
 	BUG_ON(!subdev);
@@ -514,13 +528,10 @@ int sensor_imx576_cis_QuadSensCal_write(struct v4l2_subdev *subdev)
 	I2C_MUTEX_LOCK(cis->i2c_lock);
 
 	start_addr = SENSOR_IMX576_QUAD_SENS_REG_ADDR;
-	for ( i = 0; i < SENSOR_IMX576_QUAD_SENS_CAL_SIZE; i++) {
-		ret = fimc_is_sensor_write8(client, (start_addr + i), cal_data[i]);
-		if (ret < 0) {
-			err("cis_imx576 QSC write Error(%d). Addr(0x%04X), Val(0x%02X)\n",
-				ret, (start_addr + i), cal_data[i]);
-			break;
-		}
+	data_size = SENSOR_IMX576_QUAD_SENS_CAL_SIZE;
+	ret = fimc_is_sensor_write8_sequential(client, start_addr, cal_data, data_size);
+	if (ret < 0) {
+		err("cis_imx576 QSC write Error(%d)\n", ret);
 	}
 
 p_err:
@@ -531,7 +542,6 @@ p_err:
 int sensor_imx576_cis_DPC_write(struct v4l2_subdev *subdev)
 {
 	int ret = 0;
-	int i;
 	struct fimc_is_cis *cis;
 	struct i2c_client *client = NULL;
 	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
@@ -595,13 +605,9 @@ int sensor_imx576_cis_DPC_write(struct v4l2_subdev *subdev)
 
 	I2C_MUTEX_LOCK(cis->i2c_lock);
 	if (start_addr < 0xFFFF && data_size > 0x0) {
-		for ( i = 0; i < data_size; i++) {
-			ret = fimc_is_sensor_write8(client, (start_addr + i), cal_data[i]);
-			if (ret < 0) {
-				err("cis_imx576 DPC write Error(%d). Addr(0x%4X), Val(0x%2X)\n",
-					ret, (start_addr + i), cal_data[i]);
-				break;
-			}
+		ret = fimc_is_sensor_write8_sequential(client, start_addr, cal_data, data_size);
+		if (ret < 0) {
+			err("cis_imx576 DPC write Error(%d).\n", ret);
 		}
 	}
 
@@ -610,7 +616,7 @@ p_err:
 
 	if(cal_data)
 		kfree(cal_data);
-	
+
 	return ret;
 }
 
@@ -731,32 +737,29 @@ int sensor_imx576_cis_set_global_setting(struct v4l2_subdev *subdev)
 {
 	int ret = 0;
 	struct fimc_is_cis *cis = NULL;
-	struct fimc_is_module_enum *module;
-	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
-	struct sensor_open_extended *ext_info;
 
 	BUG_ON(!subdev);
 
 	cis = (struct fimc_is_cis *)v4l2_get_subdevdata(subdev);
 	BUG_ON(!cis);
 
-	sensor_peri = container_of(cis, struct fimc_is_device_sensor_peri, cis);
-	module = sensor_peri->module;
-	ext_info = &module->ext;
-
 	I2C_MUTEX_LOCK(cis->i2c_lock);
 	/* setfile global setting is at camera entrance */
 	info("[%s] global setting start\n", __func__);
 	ret = sensor_cis_set_registers(subdev, sensor_imx576_global, sensor_imx576_global_size);
 	if (ret < 0) {
-		err("sensor_imx576_set_registers fail!!");
+		err("sensor_imx576_set_global registers fail!!");
 		goto p_err;
 	}
-
 	dbg_sensor(1, "[%s] global setting done\n", __func__);
 
 p_err:
 	I2C_MUTEX_UNLOCK(cis->i2c_lock);
+
+	// Check that QSC and DPC Cal is written for Remosaic Capture.
+	// false : Not yet write the QSC and DPC
+	// true  : Written the QSC and DPC
+	sensor_imx576_cal_write_flag = false;
 	return ret;
 }
 
@@ -764,9 +767,6 @@ int sensor_imx576_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 {
 	int ret = 0;
 	struct fimc_is_cis *cis = NULL;
-	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
-	struct fimc_is_module_enum *module;
-	struct sensor_open_extended *ext_info;
 
 	BUG_ON(!subdev);
 
@@ -796,10 +796,6 @@ int sensor_imx576_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 #endif
 	sensor_imx576_set_integration_max_margin(mode, cis->cis_data);
 
-	sensor_peri = container_of(cis, struct fimc_is_device_sensor_peri, cis);
-	module = sensor_peri->module;
-	ext_info = &module->ext;
-
 	I2C_MUTEX_LOCK(cis->i2c_lock);
 
 	info("[%s] mode=%d, mode change setting start\n", __func__, mode);
@@ -810,8 +806,11 @@ int sensor_imx576_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 	}
 	dbg_sensor(1, "[%s] mode changed(%d)\n", __func__, mode);
 
-	if (mode >= SENSOR_IMX576_5664X4248_QBCREMOSAIC_30FPS &&
-		mode <= SENSOR_IMX576_4248X4248_QBCREMOSAIC_30FPS) {
+	if (mode >= SENSOR_IMX576_5664X4248_QBCREMOSAIC_30FPS
+		&& mode <= SENSOR_IMX576_4248X4248_QBCREMOSAIC_30FPS
+		&& sensor_imx576_cal_write_flag == false) {
+		sensor_imx576_cal_write_flag = true;
+
 		info("[%s] %d mode is QBC Remosaic Mode! Write QSC and DPC data.\n", __func__, mode);
 		ret = sensor_imx576_cis_QuadSensCal_write(subdev);
 		if (ret < 0) {
@@ -824,6 +823,7 @@ int sensor_imx576_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 			goto p_err;
 		}
 	}
+
 
 p_err:
 	I2C_MUTEX_UNLOCK(cis->i2c_lock);
@@ -1361,6 +1361,7 @@ int sensor_imx576_cis_adjust_frame_duration(struct v4l2_subdev *subdev,
 	u32 line_length_pck = 0;
 	u32 frame_length_lines = 0;
 	u32 frame_duration = 0;
+	u32 max_frame_us_time = 0;
 
 #ifdef DEBUG_SENSOR_TIME
 	struct timeval st, end;
@@ -1383,13 +1384,15 @@ int sensor_imx576_cis_adjust_frame_duration(struct v4l2_subdev *subdev,
 	frame_length_lines += cis_data->max_margin_coarse_integration_time;
 
 	frame_duration = (frame_length_lines * line_length_pck) / vt_pic_clk_freq_mhz;
+	max_frame_us_time = 1000000/cis->min_fps;
 
 	dbg_sensor(1, "[%s](vsync cnt = %d) input exp(%d), adj duration, frame duraion(%d), min_frame_us(%d)\n",
 			__func__, cis_data->sen_vsync_count, input_exposure_time, frame_duration, cis_data->min_frame_us_time);
-	dbg_sensor(1, "[%s](vsync cnt = %d) adj duration, frame duraion(%d), min_frame_us(%d)\n",
-			__func__, cis_data->sen_vsync_count, frame_duration, cis_data->min_frame_us_time);
+	dbg_sensor(1, "[%s](vsync cnt = %d) adj duration, frame duraion(%d), min_frame_us(%d), max_frame_us_time(%d)\n",
+			__func__, cis_data->sen_vsync_count, frame_duration, cis_data->min_frame_us_time, max_frame_us_time);
 
 	*target_duration = MAX(frame_duration, cis_data->min_frame_us_time);
+	*target_duration = MIN(frame_duration, max_frame_us_time);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
@@ -2171,6 +2174,7 @@ static struct fimc_is_cis_ops cis_ops_imx576 = {
 	.cis_data_calculation = sensor_imx576_cis_data_calc,
 	.cis_set_long_term_exposure = sensor_imx576_cis_long_term_exposure,
 	.cis_set_wb_gains = sensor_imx576_cis_set_wb_gain,
+	.cis_set_initial_exposure = sensor_cis_set_initial_exposure,
 };
 
 int cis_imx576_probe(struct i2c_client *client,
@@ -2278,6 +2282,9 @@ int cis_imx576_probe(struct i2c_client *client,
 		cis->use_dgain = true;
 		cis->hdr_ctrl_by_again = false;
 		cis->use_wb_gain = true;
+
+		cis->use_initial_ae = of_property_read_bool(dnode, "use_initial_ae");
+		probe_info("%s use_initial_ae(%d)\n", __func__, cis->use_initial_ae);
 
 		v4l2_set_subdevdata(subdev_cis, cis);
 		v4l2_set_subdev_hostdata(subdev_cis, device);

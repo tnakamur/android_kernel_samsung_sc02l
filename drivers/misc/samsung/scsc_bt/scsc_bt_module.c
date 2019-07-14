@@ -40,10 +40,10 @@
 #define SCSC_MODDESC "SCSC MX BT Driver"
 #define SCSC_MODAUTH "Samsung Electronics Co., Ltd"
 #define SCSC_MODVERSION "-devel"
-#define SCSC_BT_LOGGER "/system/bin/bt_dump.sh"
 
 #define SLSI_BT_SERVICE_CLOSE_RETRY 60
 #define SLSI_BT_SERVICE_STOP_RECOVERY_TIMEOUT 20000
+#define SLSI_BT_SERVICE_STOP_RECOVERY_DISABLED_TIMEOUT 2000
 
 #define SCSC_ANT_MAX_TIMEOUT (20*HZ)
 
@@ -62,6 +62,8 @@ static int bt_recovery_in_progress;
 static int ant_recovery_in_progress;
 #endif
 
+static int recovery_timeout = SLSI_BT_SERVICE_STOP_RECOVERY_TIMEOUT;
+
 struct scsc_common_service common_service;
 struct scsc_bt_service bt_service;
 #ifdef CONFIG_SCSC_ANT
@@ -74,15 +76,15 @@ static int ant_service_start_count;
 #endif
 
 static u64 bluetooth_address;
+#ifdef CONFIG_ARCH_EXYNOS
+static char bluetooth_address_fallback[] = "00:00:00:00:00:00";
+#endif
 static u32 bt_info_trigger;
 static u32 bt_info_interrupt;
 static u32 firmware_control;
 static bool firmware_control_reset = true;
 static u32 firmware_mxlog_filter;
 static bool disable_service;
-static bool call_usermode_helper;
-static char *envp[] = { "HOME=/", "PATH=/system/bin:/sbin:", NULL };
-static char *argv[] = { SCSC_BT_LOGGER, NULL };
 
 /* Audio */
 static struct scsc_bt_audio_driver *audio_driver;
@@ -92,6 +94,13 @@ static struct scsc_bt_audio bt_audio;
 module_param(bluetooth_address, ullong, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(bluetooth_address,
 		 "Bluetooth address");
+
+#ifdef CONFIG_ARCH_EXYNOS
+module_param_string(bluetooth_address_fallback, bluetooth_address_fallback,
+		    sizeof(bluetooth_address_fallback), 0444);
+MODULE_PARM_DESC(bluetooth_address_fallback,
+		 "Bluetooth address as proposed by the driver");
+#endif
 
 module_param(service_start_count, int, S_IRUGO);
 MODULE_PARM_DESC(service_start_count,
@@ -112,9 +121,6 @@ MODULE_PARM_DESC(firmware_control_reset,
 module_param(disable_service, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(disable_service,
 		 "Disables service startup");
-
-module_param(call_usermode_helper, bool, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(call_usermode_helper, "Allows the call to the usermode helper");
 
 /*
  * Service event callbacks called from mx-core when things go wrong
@@ -192,17 +198,6 @@ static struct scsc_service_client mx_ant_client = {
 };
 #endif
 
-static void scsc_bt_invoke_usermode_helper(void)
-{
-	int ret = 0;
-
-	ret = call_usermodehelper(SCSC_BT_LOGGER, argv, envp, UMH_WAIT_EXEC);
-	if (ret != 0)
-		SCSC_TAG_ERR(BT_COMMON, "Bluetooth logger failed with error: %i\n", ret);
-	else
-		SCSC_TAG_INFO(BT_COMMON, "Bluetooth logger invoked successfully\n");
-}
-
 static void slsi_sm_bt_service_cleanup_interrupts(void)
 {
 	u16 int_src = bt_service.bsmhcp_protocol->header.info_bg_to_ap_int_src;
@@ -230,8 +225,8 @@ static int slsi_sm_bt_service_cleanup_stop_service(void)
 			scsc_mx_service_service_failed(bt_service.service, "BT service stop failed");
 			SCSC_TAG_DEBUG(BT_COMMON,
 				       "force service fail complete\n");
-			return -EIO;
 		}
+		return -EIO;
 	}
 
 	return 0;
@@ -503,7 +498,7 @@ static int setup_bhcs(struct scsc_service *service,
 	SCSC_TAG_DEBUG(BT_COMMON,
 		"loading configuration: " SCSC_BT_CONF "\n");
 	err = mx140_file_request_conf(common_service.maxwell_core,
-				      &firm, SCSC_BT_CONF);
+				      &firm, "bluetooth", SCSC_BT_CONF);
 	if (err) {
 		/* Not found - just silently ignore this */
 		SCSC_TAG_DEBUG(BT_COMMON, "configuration not found\n");
@@ -572,7 +567,8 @@ static int setup_bhcs(struct scsc_service *service,
 			(bluetooth_address & 0x000000FFFFFF);
 	}
 
-	/* Request the EFS Bluetooth address file */
+#ifdef CONFIG_SCSC_BT_BLUEZ
+	/* Request the Bluetooth address file */
 	SCSC_TAG_DEBUG(BT_COMMON,
 		"loading Bluetooth address configuration file: "
 		SCSC_BT_ADDR "\n");
@@ -583,7 +579,6 @@ static int setup_bhcs(struct scsc_service *service,
 	} else if (firm && firm->size) {
 		u32 u[SCSC_BT_ADDR_LEN];
 
-#ifdef CONFIG_SCSC_BT_BLUEZ
 		/* Convert the data into a native format */
 		if (sscanf(firm->data, "%04x %02X %06x",
 			   &u[0], &u[1], &u[2])
@@ -594,19 +589,7 @@ static int setup_bhcs(struct scsc_service *service,
 		} else
 			SCSC_TAG_WARNING(BT_COMMON,
 				"data size incorrect = %zu\n", firm->size);
-#else
-		/* Convert the data into a native format */
-		if (sscanf(firm->data, "%02X:%02X:%02X:%02X:%02X:%02X",
-			   &u[0], &u[1], &u[2], &u[3], &u[4], &u[5])
-		    == SCSC_BT_ADDR_LEN) {
-			bhcs->bluetooth_address_lap =
-				(u[3] << 16) | (u[4] << 8) | u[5];
-			bhcs->bluetooth_address_uap = u[2];
-			bhcs->bluetooth_address_nap = (u[0] << 8) | u[1];
-		} else
-			SCSC_TAG_WARNING(BT_COMMON,
-				"data size incorrect = %zu\n", firm->size);
-#endif
+
 		/* Relase the configuration information */
 		mx140_release_file(common_service.maxwell_core, firm);
 		firm = NULL;
@@ -615,7 +598,9 @@ static int setup_bhcs(struct scsc_service *service,
 		mx140_release_file(common_service.maxwell_core, firm);
 		firm = NULL;
 	}
+#endif
 
+#ifdef CONFIG_SCSC_DEBUG
 	SCSC_TAG_DEBUG(BT_COMMON, "Bluetooth address: %04X:%02X:%06X\n",
 		       bhcs->bluetooth_address_nap,
 		       bhcs->bluetooth_address_uap,
@@ -626,6 +611,7 @@ static int setup_bhcs(struct scsc_service *service,
 		bhcs->bluetooth_address_nap,
 		bhcs->bluetooth_address_uap,
 		bhcs->bluetooth_address_lap);
+#endif /* CONFIG_SCSC_DEBUG */
 
 	return err;
 }
@@ -712,6 +698,14 @@ int slsi_sm_bt_service_start(void)
 		err = -EINVAL;
 		goto exit;
 	}
+
+	/* Shorter completion timeout if autorecovery is disabled, as it will
+	 * never be signalled.
+	 */
+	if (mxman_recovery_disabled())
+		recovery_timeout = SLSI_BT_SERVICE_STOP_RECOVERY_DISABLED_TIMEOUT;
+	else
+		recovery_timeout = SLSI_BT_SERVICE_STOP_RECOVERY_TIMEOUT;
 
 	/* Get shared memory region for the configuration structure from
 	 * the MIF
@@ -928,6 +922,15 @@ int slsi_sm_ant_service_start(void)
 		goto exit;
 	}
 
+	/* Shorter completion timeout if autorecovery is disabled, as it will
+	 * never be signalled.
+	 */
+	if (mxman_recovery_disabled())
+		recovery_timeout = SLSI_BT_SERVICE_STOP_RECOVERY_DISABLED_TIMEOUT;
+	else
+		recovery_timeout = SLSI_BT_SERVICE_STOP_RECOVERY_TIMEOUT;
+
+
 	/* Get shared memory region for the configuration structure from
 	 * the MIF
 	 */
@@ -1070,15 +1073,7 @@ static int scsc_bt_h4_open(struct inode *inode, struct file *file)
 		ret = slsi_sm_bt_service_start();
 		if (0 == ret)
 			bt_service.h4_users = true;
-		else if (call_usermode_helper) {
-			scsc_bt_invoke_usermode_helper();
-			call_usermode_helper = false;
-		}
 	} else {
-		if (call_usermode_helper) {
-			scsc_bt_invoke_usermode_helper();
-			call_usermode_helper = false;
-		}
 		ret = -EBUSY;
 	}
 
@@ -1120,7 +1115,7 @@ recovery:
 		mutex_unlock(&bt_start_mutex);
 
 		ret = wait_for_completion_timeout(&bt_service.recovery_probe_complete,
-		       msecs_to_jiffies(SLSI_BT_SERVICE_STOP_RECOVERY_TIMEOUT));
+		       msecs_to_jiffies(recovery_timeout));
 		if (ret == 0)
 			SCSC_TAG_INFO(BT_COMMON, "recovery_probe_complete timeout\n");
 	}
@@ -1164,7 +1159,7 @@ recovery:
 		mutex_unlock(&ant_start_mutex);
 
 		ret = wait_for_completion_timeout(&ant_service.recovery_probe_complete,
-		       msecs_to_jiffies(SLSI_BT_SERVICE_STOP_RECOVERY_TIMEOUT));
+		       msecs_to_jiffies(recovery_timeout));
 		if (ret == 0)
 			SCSC_TAG_INFO(BT_COMMON, "recovery_probe_complete timeout\n");
 	}
@@ -1194,15 +1189,7 @@ static int scsc_ant_open(struct inode *inode, struct file *file)
 		ret = slsi_sm_ant_service_start();
 		if (ret == 0)
 			ant_service.ant_users = true;
-		else if (call_usermode_helper) {
-			scsc_bt_invoke_usermode_helper();
-			call_usermode_helper = false;
-		}
 	} else {
-		if (call_usermode_helper) {
-			scsc_bt_invoke_usermode_helper();
-			call_usermode_helper = false;
-		}
 		ret = -EBUSY;
 	}
 
@@ -1398,17 +1385,14 @@ static void slsi_bt_service_remove(struct scsc_mx_module_client *module_client,
 		goto done;
 	}
 
-	slsi_bt_notify_remove();
-
 	if (reason == SCSC_MODULE_CLIENT_REASON_RECOVERY && bt_recovery_in_progress) {
-		int ret;
-
 		mutex_unlock(&bt_start_mutex);
-		ret = wait_for_completion_timeout(&bt_service.recovery_release_complete,
-		       msecs_to_jiffies(SLSI_BT_SERVICE_STOP_RECOVERY_TIMEOUT));
+
+		/* Wait forever for recovery_release_complete, as it will
+		 * arrive even if autorecovery is disabled.
+		 */
+		wait_for_completion(&bt_service.recovery_release_complete);
 		reinit_completion(&bt_service.recovery_release_complete);
-		if (ret == 0)
-			SCSC_TAG_INFO(BT_COMMON, "recovery_release_complete timeout\n");
 
 		mutex_lock(&bt_start_mutex);
 		if (slsi_sm_bt_service_stop() == -EIO)
@@ -1423,6 +1407,7 @@ static void slsi_bt_service_remove(struct scsc_mx_module_client *module_client,
 		bt_service.h4_write_offset = 0;
 	}
 
+	slsi_bt_notify_remove();
 	put_device(bt_service.dev);
 	common_service.maxwell_core = NULL;
 
@@ -1490,6 +1475,10 @@ static void slsi_ant_service_remove(struct scsc_mx_module_client *module_client,
 		int ret;
 
 		mutex_unlock(&ant_start_mutex);
+
+		/* Wait full duration for recovery_release_complete, as it will
+		 * arrive even if autorecovery is disabled.
+		 */
 		ret = wait_for_completion_timeout(&ant_service.recovery_release_complete,
 		       msecs_to_jiffies(SLSI_BT_SERVICE_STOP_RECOVERY_TIMEOUT));
 		reinit_completion(&ant_service.recovery_release_complete);
@@ -1940,6 +1929,16 @@ static int __init scsc_bt_module_init(void)
 
 	spin_lock_init(&bt_service.avdtp_detect.lock);
 	spin_lock_init(&bt_service.avdtp_detect.fw_write_lock);
+
+#ifdef CONFIG_ARCH_EXYNOS
+	sprintf(bluetooth_address_fallback, "%02LX:%02LX:%02LX:%02LX:%02LX:%02LX",
+	       (exynos_soc_info.unique_id & 0x000000FF0000) >> 16,
+	       (exynos_soc_info.unique_id & 0x00000000FF00) >> 8,
+	       (exynos_soc_info.unique_id & 0x0000000000FF) >> 0,
+	       (exynos_soc_info.unique_id & 0xFF0000000000) >> 40,
+	       (exynos_soc_info.unique_id & 0x00FF00000000) >> 32,
+	       (exynos_soc_info.unique_id & 0x0000FF000000) >> 24);
+#endif
 
 #ifdef CONFIG_SCSC_ANT
 	SCSC_TAG_DEBUG(BT_COMMON, "dev=%u class=%p\n",

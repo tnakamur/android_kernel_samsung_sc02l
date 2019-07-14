@@ -113,6 +113,7 @@ static int mmc_rpmb_access(struct _mmc_rpmb_ctx *ctx, struct _mmc_rpmb_req *req)
 	}
 
 	wake_lock(&ctx->wakelock);
+	fops->get_card(bdev, 1);
 
 	/* Initialize mmc ioc command */
 	mmc_cmd_init(&icmd);
@@ -146,6 +147,12 @@ static int mmc_rpmb_access(struct _mmc_rpmb_ctx *ctx, struct _mmc_rpmb_req *req)
 				security in: %d\n", ret);
 			break;
 		}
+		if (req->rpmb_data[RPMB_RESULT] || req->rpmb_data[RPMB_RESULT+1]) {
+			dev_info(dev, "GET_WRITE_COUNTER: REQ/RES = %02x%02x, RESULT = %02x%02x\n",
+			req->rpmb_data[RPMB_REQRES], req->rpmb_data[RPMB_REQRES+1],
+			req->rpmb_data[RPMB_RESULT], req->rpmb_data[RPMB_RESULT+1]);
+		}
+
 		update_rpmb_status_flag(ctx, req, RPMB_PASSED);
 		break;
 	case WRITE_DATA:
@@ -204,6 +211,12 @@ static int mmc_rpmb_access(struct _mmc_rpmb_ctx *ctx, struct _mmc_rpmb_req *req)
 			dev_err(dev, "Fail to read block for response: %d\n", ret);
 			goto wout;
 		}
+		if (result_buf[RPMB_RESULT] || result_buf[RPMB_RESULT+1]) {
+			dev_info(dev, "WRITE_DATA: REQ/RES = %02x%02x, RESULT = %02x%02x\n",
+			result_buf[RPMB_REQRES], result_buf[RPMB_REQRES+1],
+			result_buf[RPMB_RESULT], result_buf[RPMB_RESULT+1]);
+		}
+
 		memcpy(req->rpmb_data, result_buf, RPMB_PACKET_SIZE);
 		update_rpmb_status_flag(ctx, req, RPMB_PASSED);
 wout:
@@ -257,6 +270,12 @@ wout:
 			dev_err(dev, "Fail to read block for response: %d\n", ret);
 			break;
 		}
+		if (req->rpmb_data[RPMB_RESULT] || req->rpmb_data[RPMB_RESULT+1]) {
+			dev_info(dev, "READ_DATA: REQ/RES = %02x%02x, RESULT = %02x%02x\n",
+			req->rpmb_data[RPMB_REQRES], req->rpmb_data[RPMB_REQRES+1],
+			req->rpmb_data[RPMB_RESULT], req->rpmb_data[RPMB_RESULT+1]);
+		}
+
 		update_rpmb_status_flag(ctx, req, RPMB_PASSED);
 		break;
 	default:
@@ -264,6 +283,7 @@ wout:
 		update_rpmb_status_flag(ctx, req, RPMB_INVALID_COMMAND);
 		ret = -EINVAL;
 	}
+	fops->get_card(bdev, 0);
 
 	wake_unlock(&ctx->wakelock);
 	dev_info(dev, "finish rpmb workqueue with command(%d)\n", req->type);
@@ -380,8 +400,8 @@ static int init_mmc_srpmb(struct platform_device *pdev, struct _mmc_rpmb_ctx *ct
 		goto alloc_wsm_fail;
 	}
 
-	dev_info(dev, "srpmb dma addr: virt(%llx), phy(%llx)\n",
-			(uint64_t)ctx->wsm_virtaddr, (uint64_t)ctx->wsm_phyaddr);
+	dev_info(dev, "srpmb dma addr: virt_pK(%pK), phy(%llx)\n",
+			ctx->wsm_virtaddr, (uint64_t)ctx->wsm_phyaddr);
 
 	/* get mmc srpmb irq number */
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);

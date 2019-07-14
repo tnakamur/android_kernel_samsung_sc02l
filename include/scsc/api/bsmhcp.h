@@ -20,6 +20,7 @@
 #define BSMHCP_TRANSFER_RING_EVT_SIZE           (32)
 #define BSMHCP_TRANSFER_RING_ACL_SIZE           (32)
 #define BSMHCP_TRANSFER_RING_AVDTP_SIZE         (16)
+#define BSMHCP_TRANSFER_RING_IQ_REPORT_SIZE     (8)
 
 /* Of the buffers in BSMHCP_TRANSFER_RING_ACL_SIZE, reserve a number for ULP
  * operation. */
@@ -30,6 +31,7 @@
 
 #define BSMHCP_CMD_EVT_BUFFER_SIZE              (258)
 #define BSMHCP_ACL_BUFFER_SIZE                  (1024)
+#define BSMHCP_IQ_REPORT_BUFFER_SIZE            (164)
 
 #define BSMHCP_ACL_PACKET_SIZE                  (1021)
 #define BSMHCP_ULP_PACKET_SIZE                  BSMHCP_ACL_PACKET_SIZE
@@ -177,6 +179,22 @@ struct BSMHCP_FW_INFO {
 	uint32_t user_defined[BSMHCP_FW_INFO_USER_DEFINED_COUNT];
 };
 
+struct BSMHCP_TD_IQ_REPORTING_EVT {
+	uint8_t  subevent_code;
+	uint8_t  packet_status;
+	uint16_t connection_handle;
+	uint16_t sync_handle;
+	uint8_t  rx_phy;
+	uint8_t  channel_index;
+	int16_t  rssi;
+	uint8_t  rssi_antenna_id;
+	uint8_t  cte_type;
+	uint8_t  slot_durations;
+	uint8_t  sample_count;
+	uint16_t reserved;
+	uint8_t  data[BSMHCP_IQ_REPORT_BUFFER_SIZE];
+};
+
 struct BSMHCP_HEADER {
 	/* AP RW - M4/R4 RO - 64 octets */
 	uint32_t                        magic_value;                /* 0x00 */
@@ -218,7 +236,7 @@ struct BSMHCP_HEADER {
 	uint32_t                        mailbox_acl_free_write;     /* 0x64 */
 	uint32_t                        mailbox_acl_rx_write;       /* 0x68 */
 	uint32_t                        mailbox_timing_write;       /* 0x6C */
-	uint32_t                        reserved5_u32;              /* 0x70 */
+	uint32_t                        mailbox_iq_report_write;    /* 0x70 */
 	uint8_t                         reserved4[0x0C];            /* 0x74 */
 
 
@@ -229,7 +247,7 @@ struct BSMHCP_HEADER {
 	/* AP RW - M4/R4 RO */
 	uint32_t                        mailbox_timing_read;        /* 0xA0 */
 	uint32_t                        mailbox_avdtp_write;        /* 0xA4 */
-	uint32_t                        reserved8_u32;              /* 0xA8 */
+	uint32_t                        mailbox_iq_report_read;     /* 0xA8 */
 	uint32_t                        reserved9_u32;              /* 0xAC */
 	uint32_t                        reserved10_u32;             /* 0xB0 */
 	uint32_t                        reserved11_u32;             /* 0xB4 */
@@ -284,7 +302,10 @@ struct BSMHCP_PROTOCOL {
 		information;
 
 	uint8_t /* offset: 0x0000CCC0 + sizoef(struct BSMHCP_FW_INFO) */
-		from_air_reserved[0x1780 - sizeof(struct BSMHCP_FW_INFO)];
+		from_air_reserved[0x11E0 - sizeof(struct BSMHCP_FW_INFO)];
+
+	struct BSMHCP_TD_IQ_REPORTING_EVT /* offset: 0x0000DEA0 */
+		iq_reporting_transfer_ring[BSMHCP_TRANSFER_RING_IQ_REPORT_SIZE];
 
 	struct BSMHCP_TD_ACL_RX /* offset: 0x0000E440 */
 		acl_rx_transfer_ring[BSMHCP_TRANSFER_RING_ACL_SIZE];

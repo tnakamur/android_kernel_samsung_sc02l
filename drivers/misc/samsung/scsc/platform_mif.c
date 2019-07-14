@@ -40,9 +40,9 @@
 #include "platform_mif_module.h"
 #ifdef CONFIG_ARCH_EXYNOS
 #include <linux/soc/samsung/exynos-soc.h>
+#include <soc/samsung/exynos-pmu.h>
 #endif
 #include "mifintrbit.h"
-#include <soc/samsung/exynos-pmu.h>
 
 #if !defined(CONFIG_SOC_EXYNOS7872) && !defined(CONFIG_SOC_EXYNOS7570) && !defined(CONFIG_SOC_EXYNOS7885)
 #error Target processor CONFIG_SOC_EXYNOS7570 or CONFIG_SOC_EXYNOS7872 or CONFIG_SOC_EXYNOS7885 not selected
@@ -57,6 +57,9 @@
 extern int exynos_acpm_set_flag(void);
 #endif
 
+#ifdef CONFIG_SCSC_LOG_COLLECTION
+#include <scsc/scsc_log_collector.h>
+#endif
 #ifdef CONFIG_OF_RESERVED_MEM
 #include <linux/of_reserved_mem.h>
 #endif
@@ -388,12 +391,18 @@ static int platform_mif_start(struct scsc_mif_abs *interface, bool start)
 			"Failed to update WIFI_CTRL_S[WIFI_START]: %d\n", ret);
 		return ret;
 	}
+
 #ifdef CONFIG_SCSC_MX150_EXT_DUAL_FEM
-	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "exynos_pmu_update @@@ \n");
+	/* Control for device with external GPIO-controlled FEM.
+	 * Note this also needs a change in the board-specific dts file
+	 */
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "exynos_pmu_update ext-fem\n");
+
 	exynos_pmu_update(0x6200, (0x3 << 20), (0x3 << 20));
 	exynos_pmu_update(0x6200, (0x3 << 4), (0x3 << 4));
+
 	exynos_pmu_read(0x6200, &val);
-	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "exynos_pmu_read:UART_IO_SHARE_CTRL: %x \n", val);
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "UART_IO_SHARE_CTRL: 0x%x\n", val);
 #endif
 	return 0;
 }

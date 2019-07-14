@@ -38,8 +38,10 @@ static void cont_get_devs(struct tfa_container *cont);
 
 static int float_to_int(uint32_t x)
 {
-	unsigned e = (0x7F + 31) - ((*(unsigned *) &x & 0x7F800000) >> 23);
-	unsigned m = 0x80000000 | (*(unsigned *) &x << 8);
+	unsigned int e, m;
+
+	e = (0x7F + 31) - ((*(unsigned int *)&x & 0x7F800000) >> 23);
+	m = 0x80000000 | (*(unsigned int *)&x << 8);
 
 	return -(int)((m >> e) & -(e < 32));
 }
@@ -51,7 +53,7 @@ void tfa_set_partial_update(int enp)
 
 /*
  * check the container file and set module global
-*/
+ */
 enum tfa_error tfa_load_cnt(void *cnt, int length)
 {
 	struct tfa_container *cntbuf = (struct tfa_container  *)cnt;
@@ -266,7 +268,7 @@ int tfa_cont_get_max_vstep(int dev_idx, int prof_idx)
  * Get the file contents associated with the device or profile
  * Search within the device tree, if not found, search within the profile
  * tree. There can only be one type of file within profile or device.
-  */
+ */
 struct tfa_file_dsc *
 tfa_cont_get_file_data(int dev_idx,
 	int prof_idx, enum tfa_header_type type)
@@ -747,7 +749,7 @@ tfa_cont_write_vstepMax2(int dev_idx,
 	}
 
 	if (p_reg_info == NULL) {
-		pr_debug("Inital vstep write\n");
+		pr_debug("Initial vstep write\n");
 		enp = 0;
 	}
 
@@ -1243,7 +1245,7 @@ tfa_run_write_filter(tfa98xx_handle_t dev, union tfa_cont_biquad *bq)
 	}
 
 #if defined(FLOAT_COMPATIBLE)
-/* floating-point error from cross-complier compatiblity */
+/* floating-point error from cross-complier compatibility */
 	if (tfa98xx_cnt_verbose) {
 		char buf[50];
 
@@ -2137,6 +2139,15 @@ tfa_cont_write_profile(int dev_idx, int prof_idx, int vstep_idx)
 			return err;
 	}
 
+	if (handles_local[0].ext_dsp) { /* check only master device */
+		/* put SetRe25 message to indicate all messages are send */
+		pr_info("%s: tfa_set_calibration_values\n", __func__);
+		err = tfa_set_calibration_values(dev_idx);
+		if (err)
+			pr_info("%s: set calibration values error = %d\n",
+				__func__, err);
+	}
+
 	if ((prof->group != previous_prof->group || prof->group == 0)
 	    && (tfa98xx_dev_family(dev_idx) == 2) && (slave_address > 10)) {
 		if (TFA_GET_BF(dev_idx, REFCKSEL) == 0) {
@@ -2857,22 +2868,38 @@ int tfa_tib_dsp_msgblob(int devidx, int length, const char *buffer)
 		 __func__, length, buf[0], buf[1], buf[2]);
 	/* if (buf[1] == 0x81 && buf[2] == SB_PARAM_SET_RE25C) { */
 	if ((buf[0] == SB_PARAM_SET_RE25C && buf[1] == 0x81 && buf[2] == 0x00)
-		|| (buf[0] == FW_PAR_ID_GET_STATUS_CHANGE && buf[1] == 0x80)
+		|| (buf[0] == FW_PAR_ID_GET_MEMORY && buf[1] == 0x80)
+		|| (buf[0] == FW_PAR_ID_GLOBAL_GET_INFO && buf[1] == 0x80)
+		|| (buf[0] == FW_PAR_ID_GET_FEATURE_INFO && buf[1] == 0x80)
+		|| (buf[0] == FW_PAR_ID_GET_MEMTRACK && buf[1] == 0x80)
 		|| (buf[0] == FW_PAR_ID_GET_TAG && buf[1] == 0x80)
 		|| (buf[0] == FW_PAR_ID_GET_API_VERSION && buf[1] == 0x80)
-		|| (buf[0] == FW_PAR_ID_GET_MEMTRACK && buf[1] == 0x80)
-		|| (buf[0] == SB_PARAM_GET_ALGO_PARAMS
-			&& buf[1] == 0x81 && buf[2] == 0x04)
+		|| (buf[0] == FW_PAR_ID_GET_STATUS_CHANGE && buf[1] == 0x80)
 		|| (buf[0] == BFB_PAR_ID_GET_COEFS && buf[1] == 0x82)
-		|| (buf[0] == SB_PARAM_GET_RE25C
-			&& buf[1] == 0x81 && buf[2] == 0x04)) {
+		|| (buf[0] == BFB_PAR_ID_GET_CONFIG && buf[1] == 0x82)) {
 		pr_debug("%s: found last message - sending: buf[0]=%d\n",
 			 __func__, buf[0]);
 		return 1; /* 1 means last message is done! */
 	}
 
-	if ((buf[0] == SB_PARAM_SET_DATA_LOGGER && buf[1] == 0x81)
-		|| (buf[0] == SB_PARAM_GET_DATA_LOGGER && buf[1] == 0x81)) {
+	if ((buf[0] == SB_PARAM_GET_ALGO_PARAMS && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_LAGW && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_RE25C && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_LSMODEL && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_MBDRC && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_MBDRC_DYNAMICS && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_EXCURSION_FILTERS && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_TAG && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_STATE && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_XMODEL && buf[1] == 0x81)
+		|| (buf[0] == SB_PARAM_GET_XMODEL_COEFFS && buf[1] == 0x81)) {
+		pr_debug("%s: found last message - sending: buf[0]=%d CC=%d\n",
+			__func__, buf[0], buf[2]);
+		return 1; /* 1 means last message is done! with CC check */
+	}
+
+	/* SB_PARAM_SET_DATA_LOGGER to be handled at initializing */
+	if (buf[0] == SB_PARAM_GET_DATA_LOGGER && buf[1] == 0x81) {
 		pr_debug("%s: found blackbox message - sending: buf[0]=%d\n",
 			 __func__, buf[0]);
 		return 1; /* 1 means last message is done! */

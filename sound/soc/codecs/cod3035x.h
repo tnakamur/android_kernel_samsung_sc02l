@@ -15,9 +15,7 @@
 #include <sound/soc.h>
 #include <linux/switch.h>
 #include <linux/iio/consumer.h>
-#ifdef CONFIG_SND_SOC_COD30XX_EXT_ANT
 #include <linux/wakelock.h>
-#endif
 
 #define CONFIG_SND_SOC_SAMSUNG_VERBOSE_DEBUG 1
 
@@ -31,6 +29,11 @@ extern int cod3035x_jack_mic_register(struct snd_soc_codec *codec);
 
 #define MODEL_FLAG_EP_DC_OFFSET_SWEEP	0x01
 #define MODEL_FLAG_LDET_VTH_ENABLE		0x02
+#define MODEL_FLAG_5PIN_JACK			0x04
+#define MODEL_FLAG_5PIN_AUX_DET			0x08
+#define MODEL_FLAG_5PIN_BTN_DELAY		0x10
+#define MODEL_FLAG_JACKOUT_TDMA_NOISE	0x20
+#define MODEL_FLAG_5PIN_ANT 			0x40
 
 #define COD3035X_OTP_MAX_REG		0x0f
 #define COD3035X_MAX_REGISTER		0xf6
@@ -55,6 +58,9 @@ extern int cod3035x_jack_mic_register(struct snd_soc_codec *codec);
 #define JACK_ANT_3POLE	4
 #define JACK_ANT_4POLE	5
 #endif
+
+#define COD3035X_LASSENA02_ADDR 0x59
+#define COD3035X_LASSENA02_MASK 0x80
 
 struct cod3035x_jack_det {
 	bool jack_det;
@@ -104,7 +110,7 @@ struct cod3035x_priv {
 	unsigned int regulator_count;
 	bool is_suspend;
 	bool is_probe_done;
-	bool is_lassenA;
+	int is_lassenA;
 	struct cod3035x_jack_det jack_det;
 	struct mutex jackdet_lock;
 	struct mutex reset_lock;
@@ -122,7 +128,8 @@ struct cod3035x_priv {
 	unsigned int mic_bias1_voltage;
 	unsigned int mic_bias2_voltage;
 	unsigned int mic_bias_ldo_voltage;
-	unsigned int aifrate;
+	unsigned int playback_aifrate;
+	unsigned int capture_aifrate;
 	bool update_fw;
 	bool use_external_jd;
 	int mic_adc_range;
@@ -133,6 +140,10 @@ struct cod3035x_priv {
 	int water_threshold_adc_max;
 	int jack_imp_gap;
 	int fake_jack_adc;
+	int aux_cable_detect_adc;
+	unsigned int jackout_dbnc_time;
+	unsigned int jackin_dbnc_time;
+	unsigned int jackin_ldet_vth;
 	int water_finish_chk_adc_min;
 	struct jack_buttons_zone jack_buttons_zones[4];
 	struct work_struct buttons_work;
@@ -148,19 +159,25 @@ struct cod3035x_priv {
 	struct mutex adc_mute_lock;
 	struct workqueue_struct *adc_mute_wq;
 	struct work_struct adc_mute_work;
+	struct delayed_work btn_delay_work;
+	struct workqueue_struct *btn_delay_wq;
 	int adc_pin;
 	unsigned int lvol;
 	unsigned int rvol;
+	unsigned int dmic1_lmux;
+	unsigned int dmic1_rmux;
 	unsigned int mic_status;
 	unsigned int rcv_drv_current;
 	unsigned int model_feature_flag;
+	bool uhqa_rec_mode;
+	bool btn_delay_masking;
+	struct wake_lock codec_wake_lock;
 
 #ifdef CONFIG_SND_SOC_COD30XX_EXT_ANT
 	struct delayed_work jack_report_work;
 	struct workqueue_struct *jack_report_wq;
 
 	struct mutex jackreport_lock;
-	struct wake_lock jack_wake_lock;
 #endif
 };
 
@@ -1166,6 +1183,18 @@ struct cod3035x_priv {
 #define OSR32	2
 #define OSR16	3
 
+#define DMIC_ST1_SHIFT		1
+#define DMIC_ST1_MASK 		BIT(DMIC_ST1_SHIFT)
+
+#define DMIC_ST1_ENABLE 	1
+#define DMIC_ST1_DISABLE 	0
+
+#define DMIC_ST0_SHIFT		0
+#define DMIC_ST0_MASK 		BIT(DMIC_ST0_SHIFT)
+
+#define DMIC_ST0_ENABLE 	1
+#define DMIC_ST0_DISABLE 	0
+
 /* COD3035X_4B_ADC2 */
 #define ADC2_PDB_ADCDIG2_SHIFT		7
 #define ADC2_PDB_ADCDIG2_MASK		BIT(ADC2_PDB_ADCDIG2_SHIFT)
@@ -1197,6 +1226,9 @@ struct cod3035x_priv {
 #define ADC2_MUTE_AD_EN_MASK	BIT(ADC2_MUTE_AD_EN_SHIFT)
 
 /* COD3035X_4E_DMIC3 */
+#define DMIC_CLK_ZTE_SHIFT	7
+#define DMIC_CLK_ZTE_MASK	BIT(DMIC_CLK_ZTE_SHIFT)
+
 #define SEL_DMIC_2L_SHIFT	4
 #define SEL_DMIC_2L_WIDTH	3
 #define SEL_DMIC_2L_MASK		MASK(SEL_DMIC_2L_WIDTH, SEL_DMIC_2L_SHIFT)

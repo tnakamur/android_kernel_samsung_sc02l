@@ -67,6 +67,8 @@
 #include <linux/leds-s2mu005.h>
 #endif
 
+#include "fimc-is-vender-specific.h"
+
 /* Default setting values */
 #define DEFAULT_PREVIEW_STILL_WIDTH		(1280) /* sensor margin : 16 */
 #define DEFAULT_PREVIEW_STILL_HEIGHT		(720) /* sensor margin : 12 */
@@ -839,8 +841,8 @@ void fimc_is_ischain_version(enum fimc_is_bin_type type, const char *load_bin, u
 		}
 		break;
 	case FIMC_IS_BIN_DDK_LIBRARY:
-		if (size > FIMC_IS_VERSION_OFFSET) {
-			memcpy(ddk_version_str, &load_bin[size - FIMC_IS_VERSION_OFFSET],
+		if (size > DDK_VERSION_OFFSET) {
+			memcpy(ddk_version_str, &load_bin[size - DDK_VERSION_OFFSET],
 				FIMC_IS_VERSION_BIN_SIZE);
 			ddk_version_str[FIMC_IS_VERSION_BIN_SIZE] = '\0';
 			info("DDK version : %s\n", ddk_version_str);
@@ -849,8 +851,8 @@ void fimc_is_ischain_version(enum fimc_is_bin_type type, const char *load_bin, u
 		}
 		break;
 	case FIMC_IS_BIN_RTA_LIBRARY:
-		if (size > FIMC_IS_VERSION_OFFSET) {
-			memcpy(rta_version_str, &load_bin[size - FIMC_IS_VERSION_OFFSET],
+		if (size > RTA_VERSION_OFFSET) {
+			memcpy(rta_version_str, &load_bin[size - RTA_VERSION_OFFSET],
 				FIMC_IS_VERSION_BIN_SIZE);
 			rta_version_str[FIMC_IS_VERSION_BIN_SIZE] = '\0';
 			info("RTA version : %s\n", rta_version_str);
@@ -1471,6 +1473,8 @@ int fimc_is_itf_set_fwboot(struct fimc_is_device_ischain *device, u32 val)
 
 static void fimc_is_itf_param_init(struct is_region *region)
 {
+	memset(&region->parameter, 0x0, sizeof(struct is_param_region));
+
 	memcpy(&region->parameter.sensor, &init_sensor_param,
 		sizeof(struct sensor_param));
 	memcpy(&region->parameter.taa, &init_taa_param,
@@ -1491,6 +1495,10 @@ static void fimc_is_itf_param_init(struct is_region *region)
 #ifdef SOC_SCP
 	memcpy(&region->parameter.scalerp, &init_scp_param,
 		sizeof(struct scp_param));
+#endif
+#ifdef SOC_MCS
+	memcpy(&region->parameter.mcs, &init_mcs_param,
+		sizeof(struct mcs_param));
 #endif
 	memcpy(&region->parameter.vra, &init_vra_param,
 		sizeof(struct vra_param));
@@ -2078,7 +2086,6 @@ int fimc_is_itf_grp_shot(struct fimc_is_device_ischain *device,
 	struct fimc_is_frame *frame)
 {
 	int ret = 0;
-	int i;
 #ifdef CONFIG_USE_SENSOR_GROUP
 	unsigned long flags;
 	struct fimc_is_group *head;
@@ -2089,9 +2096,6 @@ int fimc_is_itf_grp_shot(struct fimc_is_device_ischain *device,
 	BUG_ON(!group);
 	BUG_ON(!frame);
 	BUG_ON(!frame->shot);
-
-	for (i = 0; i < frame->planes; i++)
-		frame->shot->uctl.scalerUd.sourceAddress[i] = frame->dvaddr_buffer[i];
 
 	/* Cache Flush */
 	fimc_is_ischain_meta_flush(frame);
@@ -2121,7 +2125,7 @@ int fimc_is_itf_grp_shot(struct fimc_is_device_ischain *device,
 
 #ifdef ENABLE_REMOSAIC_CAPTURE_WITH_ROTATION
 	if (!test_bit(FIMC_IS_ISCHAIN_REPROCESSING, &device->state)
-		&& CHK_REMOSAIC_SCN(frame->shot->ctl.aa.sceneMode))
+		&& CHK_REMOSAIC_SCN(frame->shot->ctl.aa.captureIntent))
 		is_remosaic_preview = true;
 #endif
 
@@ -2353,7 +2357,7 @@ int fimc_is_ischain_power(struct fimc_is_device_ischain *device, int on)
 	struct fimc_is_core *core;
 	struct fimc_is_vender *vender;
 	struct fimc_is_interface *itf;
-#ifdef CONFIG_VENDER_MCD
+#if defined(CONFIG_VENDER_MCD) || defined(CONFIG_VENDER_MCD_V2)
 	struct fimc_is_vender_specific *specific;
 #endif
 
@@ -2364,7 +2368,7 @@ int fimc_is_ischain_power(struct fimc_is_device_ischain *device, int on)
 	core = (struct fimc_is_core *)platform_get_drvdata(device->pdev);
 	vender = &core->vender;
 	itf = device->interface;
-#ifdef CONFIG_VENDER_MCD
+#if defined(CONFIG_VENDER_MCD) || defined(CONFIG_VENDER_MCD_V2)
 	specific = core->vender.private_data;
 #endif
 
@@ -2399,7 +2403,7 @@ int fimc_is_ischain_power(struct fimc_is_device_ischain *device, int on)
 		}
 
 		if (core->current_position == SENSOR_POSITION_FRONT
-#ifdef CONFIG_VENDER_MCD
+#if defined(CONFIG_VENDER_MCD) || defined(CONFIG_VENDER_MCD_V2)
 		|| specific->suspend_resume_disable
 #endif
 		) {
@@ -2463,7 +2467,7 @@ int fimc_is_ischain_power(struct fimc_is_device_ischain *device, int on)
 			goto p_err;
 		}
 
-#ifdef CONFIG_VENDER_MCD
+#if defined(CONFIG_VENDER_MCD) || defined(CONFIG_VENDER_MCD_V2)
 		if (specific->need_cold_reset)
 			specific->need_cold_reset = false;
 #endif
@@ -2626,6 +2630,7 @@ static int fimc_is_ischain_s_sensor_size(struct fimc_is_device_ischain *device,
 	u32 sensor_width, sensor_height;
 	u32 bns_width, bns_height;
 	u32 framerate;
+	enum fimc_is_ex_mode ex_mode;
 
 	BUG_ON(!device->sensor);
 
@@ -2635,6 +2640,7 @@ static int fimc_is_ischain_s_sensor_size(struct fimc_is_device_ischain *device,
 	bns_width = fimc_is_sensor_g_bns_width(device->sensor);
 	bns_height = fimc_is_sensor_g_bns_height(device->sensor);
 	framerate = fimc_is_sensor_g_framerate(device->sensor);
+	ex_mode = fimc_is_sensor_g_ex_mode(device->sensor);
 
 	if (test_bit(FIMC_IS_ISCHAIN_REPROCESSING, &device->state))
 		bns_binning = 1000;
@@ -2664,6 +2670,12 @@ static int fimc_is_ischain_s_sensor_size(struct fimc_is_device_ischain *device,
 	if (device->sensor->max_target_fps > 0)
 		sensor_config->max_target_fps = device->sensor->max_target_fps;
 #endif
+
+	if (ex_mode == EX_DUALFPS)
+		sensor_config->early_config_lock = 1;
+	else
+		sensor_config->early_config_lock = 0;
+
 	*lindex |= LOWBIT_OF(PARAM_SENSOR_CONFIG);
 	*hindex |= HIGHBIT_OF(PARAM_SENSOR_CONFIG);
 	(*indexes)++;
@@ -2747,6 +2759,7 @@ int fimc_is_ischain_buf_tag(struct fimc_is_device_ischain *device,
 	unsigned long flags;
 	struct fimc_is_framemgr *framemgr;
 	struct fimc_is_frame *frame;
+	struct camera2_node *capture;
 
 	framemgr = GET_SUBDEV_FRAMEMGR(subdev);
 	BUG_ON(!framemgr);
@@ -2809,6 +2822,101 @@ int fimc_is_ischain_buf_tag(struct fimc_is_device_ischain *device,
 			break;
 		}
 
+		capture = &ldr_frame->shot_ext->node_group.capture[subdev->cid];
+
+		if (ldr_frame->fcount == 0)
+			warn("%s : ldr_f_cnt (%d)", __func__, ldr_frame->fcount);
+
+		frame->fcount = ldr_frame->fcount;
+		frame->stream->findex = ldr_frame->index;
+		frame->stream->fcount = ldr_frame->fcount;
+
+		if (likely(capture->vid == subdev->vid)) {
+			frame->stream->input_crop_region[0] = capture->input.cropRegion[0];
+			frame->stream->input_crop_region[1] = capture->input.cropRegion[1];
+			frame->stream->input_crop_region[2] = capture->input.cropRegion[2];
+			frame->stream->input_crop_region[3] = capture->input.cropRegion[3];
+			frame->stream->output_crop_region[0] = capture->output.cropRegion[0];
+			frame->stream->output_crop_region[1] = capture->output.cropRegion[1];
+			frame->stream->output_crop_region[2] = capture->output.cropRegion[2];
+			frame->stream->output_crop_region[3] = capture->output.cropRegion[3];
+		} else {
+			mserr("capture vid is changed(%d != %d)", subdev, subdev, subdev->vid, capture->vid);
+			frame->stream->input_crop_region[0] = 0;
+			frame->stream->input_crop_region[1] = 0;
+			frame->stream->input_crop_region[2] = 0;
+			frame->stream->input_crop_region[3] = 0;
+			frame->stream->output_crop_region[0] = 0;
+			frame->stream->output_crop_region[1] = 0;
+			frame->stream->output_crop_region[2] = 0;
+			frame->stream->output_crop_region[3] = 0;
+		}
+
+		set_bit(subdev->id, &ldr_frame->out_flag);
+		trans_frame(framemgr, frame, FS_PROCESS);
+	} else {
+		for (i = 0; i < FIMC_IS_MAX_PLANES; i++)
+			target_addr[i] = 0;
+
+		ret = -EINVAL;
+	}
+
+#ifdef DBG_DRAW_DIGIT
+	frame->width = width;
+	frame->height = height;
+#endif
+
+	framemgr_x_barrier_irqr(framemgr, FMGR_IDX_24, flags);
+
+	return ret;
+}
+
+int fimc_is_ischain_buf_tag_64bit(struct fimc_is_device_ischain *device,
+	struct fimc_is_subdev *subdev,
+	struct fimc_is_frame *ldr_frame,
+	u32 pixelformat,
+	u32 width,
+	u32 height,
+	uint64_t target_addr[])
+{
+	int ret = 0;
+	int i;
+	unsigned long flags;
+	struct fimc_is_framemgr *framemgr;
+	struct fimc_is_frame *frame;
+	struct fimc_is_queue *queue;
+
+	framemgr = GET_SUBDEV_FRAMEMGR(subdev);
+	BUG_ON(!framemgr);
+
+	queue = GET_SUBDEV_QUEUE(subdev);
+	if (!queue) {
+		merr("queue is NULL", device);
+		ret = -EINVAL;
+		goto p_err;
+	}
+
+	framemgr_e_barrier_irqs(framemgr, FMGR_IDX_24, flags);
+
+	frame = peek_frame(framemgr, FS_REQUEST);
+	if (frame) {
+		if (!frame->stream) {
+			framemgr_x_barrier_irqr(framemgr, FMGR_IDX_24, flags);
+			merr("frame->stream is NULL", device);
+			BUG();
+		}
+
+		switch (pixelformat) {
+		case V4L2_PIX_FMT_Y12:	/* Only for ME : kernel virtual addr*/
+			for (i = 0; i < frame->planes; i++)
+				target_addr[i] = frame->kvaddr_buffer[i];
+			break;
+		default:
+			for (i = 0; i < frame->planes; i++)
+				target_addr[i] = (uint64_t)frame->dvaddr_buffer[i];
+			break;
+		}
+
 		frame->fcount = ldr_frame->fcount;
 		frame->stream->findex = ldr_frame->index;
 		frame->stream->fcount = ldr_frame->fcount;
@@ -2828,6 +2936,7 @@ int fimc_is_ischain_buf_tag(struct fimc_is_device_ischain *device,
 
 	framemgr_x_barrier_irqr(framemgr, FMGR_IDX_24, flags);
 
+p_err:
 	return ret;
 }
 
@@ -3235,7 +3344,9 @@ static int fimc_is_ischain_open(struct fimc_is_device_ischain *device)
 	clear_bit(FIMC_IS_ISCHAIN_REPROCESSING, &device->state);
 
 	/* 2. Init variables */
+#if !defined(FAST_FDAE)
 	memset(&device->fdUd, 0, sizeof(struct camera2_fd_uctl));
+#endif
 #ifdef ENABLE_SENSOR_DRIVER
 	memset(&device->peri_ctls, 0, sizeof(struct camera2_uctl)*SENSOR_MAX_CTL);
 #endif
@@ -3262,8 +3373,9 @@ static int fimc_is_ischain_open(struct fimc_is_device_ischain *device)
 	device->dvaddr_shared	= minfo->dvaddr +
 				(u32)((ulong)&device->is_region->shared[0] - minfo->kvaddr);
 
-	memset(&device->is_region->parameter, 0x0, sizeof(struct is_param_region));
-
+#ifdef ENABLE_HYBRID_FD
+	spin_lock_init(&device->is_region->fdae_info.slock);
+#endif
 #ifdef SOC_DRC
 	fimc_is_subdev_open(&device->drc, NULL, (void *)&init_drc_param.control);
 #endif
@@ -3633,6 +3745,8 @@ static int fimc_is_ischain_init_wrap(struct fimc_is_device_ischain *device,
 	struct fimc_is_device_sensor *sensor;
 	struct fimc_is_module_enum *module;
 	struct fimc_is_groupmgr *groupmgr;
+	struct fimc_is_vender_specific *priv;
+	u32 sensor_id;
 
 	BUG_ON(!device);
 	BUG_ON(!device->groupmgr);
@@ -3706,8 +3820,41 @@ static int fimc_is_ischain_init_wrap(struct fimc_is_device_ischain *device,
 				goto p_err;
 			}
 
-			if (module_id == module->sensor_id) {
+			priv = core->vender.private_data;
+
+			switch (module_id) {
+			case SENSOR_POSITION_REAR:
+				sensor_id = priv->rear_sensor_id;
+				break;
+			case SENSOR_POSITION_FRONT:
+				sensor_id = priv->front_sensor_id;
+				break;
+			case SENSOR_POSITION_REAR2:
+				sensor_id = priv->rear2_sensor_id;
+				break;
+			case SENSOR_POSITION_FRONT2:
+				sensor_id = priv->front2_sensor_id;
+				break;
+			case SENSOR_POSITION_REAR3:
+				sensor_id = priv->rear3_sensor_id;
+				break;
+			case SENSOR_POSITION_FRONT3:
+				sensor_id = priv->front3_sensor_id;
+				break;
+#ifdef CONFIG_SECURE_CAMERA_USE
+			case SENSOR_POSITION_SECURE:
+				sensor_id = priv->secure_sensor_id;
+				break;
+#endif
+			default:
+				merr("invalid module position(%d)", device, module->position);
+				ret = -EINVAL;
+				goto p_err;
+			}
+
+			if (module->sensor_id == sensor_id) {
 				device->sensor = sensor;
+				module_id = sensor_id;
 				break;
 			}
 		}
@@ -3808,8 +3955,10 @@ static int fimc_is_ischain_start(struct fimc_is_device_ischain *device)
 		goto p_err;
 	}
 
+#if !defined(FAST_FDAE)
 	/* previous fd infomation should be clear */
 	memset(&device->fdUd, 0x0, sizeof(struct camera2_fd_uctl));
+#endif
 
 #ifdef ENABLE_ULTRA_FAST_SHOT
 	memset(&device->fastctlmgr, 0x0, sizeof(struct fast_control_mgr));
@@ -6060,7 +6209,7 @@ static int fimc_is_ischain_3aa_shot(struct fimc_is_device_ischain *device,
 	}
 
 	/* fd information copy */
-#if !defined(ENABLE_SHARED_METADATA)
+#if !defined(ENABLE_SHARED_METADATA) && !defined(FAST_FDAE)
 	memcpy(&frame->shot->uctl.fdUd, &device->fdUd, sizeof(struct camera2_fd_uctl));
 #endif
 
@@ -6154,12 +6303,12 @@ p_err:
 		set_bit(group->leader.id, &frame->out_flag);
 		framemgr_e_barrier_irqs(framemgr, FMGR_IDX_25, flags);
 		trans_frame(framemgr, frame, FS_PROCESS);
-#ifdef SENSOR_CONTROL_DELAY
+#ifdef SENSOR_REQUEST_DELAY
 		if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &group->state) &&
-			((frame->shot->uctl.opMode == CAMERA_OP_MODE_HAL3_GED) ||
-			(frame->shot->uctl.opMode == CAMERA_OP_MODE_HAL3_TW))) {
-				if (framemgr->queued_count[FS_REQUEST] < SENSOR_CONTROL_DELAY)
-					mgrwarn(" late sensor control shot", device, group, frame);
+			(frame->shot->uctl.opMode == CAMERA_OP_MODE_HAL3_GED
+			|| frame->shot->uctl.opMode == CAMERA_OP_MODE_HAL3_SDK)) {
+			if (framemgr->queued_count[FS_REQUEST] < SENSOR_REQUEST_DELAY)
+				mgrwarn(" late sensor control shot", device, group, frame);
 		}
 #endif
 		framemgr_x_barrier_irqr(framemgr, FMGR_IDX_25, flags);

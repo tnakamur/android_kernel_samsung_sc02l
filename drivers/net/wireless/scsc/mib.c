@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright (c) 2012 - 2017 Samsung Electronics Co., Ltd and its Licensors.
+ * Copyright (c) 2012 - 2018 Samsung Electronics Co., Ltd and its Licensors.
  * All rights reserved.
  *
  *****************************************************************************/
@@ -148,6 +148,27 @@ size_t slsi_mib_decode_uint32(u8 *buffer, u32 *value)
 	return 1 + length;
 }
 
+size_t slsi_mib_decodeUint64(u8 *buffer, u64 *value)
+{
+	size_t i;
+	u64    v = 0;
+	size_t length = buffer[0] & SLSI_MIB_LENGTH_MASK;
+
+	if (!(buffer[0] & SLSI_MIB_MORE_MASK)) {
+		*value = buffer[0] & 0x7F;
+		return 1;
+	}
+
+	for (i = 0; i < length; i++) {
+		v = (v << 8);
+		v |= buffer[1 + i];
+	}
+
+	*value = v;
+
+	return 1 + length;
+}
+
 size_t slsi_mib_decodeInt32(u8 *buffer, s32 *value)
 {
 	size_t i;
@@ -169,6 +190,31 @@ size_t slsi_mib_decodeInt32(u8 *buffer, s32 *value)
 	}
 
 	*value = (s32)v;
+
+	return 1 + length;
+}
+
+size_t slsi_mib_decodeInt64(u8 *buffer, s64 *value)
+{
+	size_t i;
+	u64    v = 0xFFFFFFFFFFFFFFFFULL;
+	size_t length = buffer[0] & SLSI_MIB_LENGTH_MASK;
+
+	if (!(buffer[0] & SLSI_MIB_SIGN_MASK))
+		/* just use the Unsigned Decoder */
+		return slsi_mib_decodeUint64(buffer, (u64 *)value);
+
+	if (!(buffer[0] & SLSI_MIB_MORE_MASK)) {
+		*value = (s64)(0xFFFFFFFFFFFFFF80ULL | buffer[0]);
+		return 1;
+	}
+
+	for (i = 0; i < length; i++) {
+		v = (v << 8);
+		v |= buffer[1 + i];
+	}
+
+	*value = (s64)v;
 
 	return 1 + length;
 }
@@ -470,6 +516,8 @@ struct slsi_mib_value *slsi_mib_decode_get_list(struct slsi_mib_data *buffer, u1
 {
 	struct slsi_mib_value *results = kmalloc_array((size_t)psids_length, sizeof(struct slsi_mib_value), GFP_KERNEL);
 	size_t                i;
+	int len = 0;
+	char psids_not_found[150] = "";
 
 	if (!results) {
 		SLSI_ERR_NODEV("kmalloc(%d) failed\n", (int)(sizeof(struct slsi_mib_value) * psids_length));
@@ -489,10 +537,13 @@ struct slsi_mib_value *slsi_mib_decode_get_list(struct slsi_mib_data *buffer, u1
 
 			results[i] = value.value;
 		} else {
-			SLSI_ERR_NODEV("Could not find psid:%d\n", psids[i].psid);
+			len += snprintf(&psids_not_found[0] + len, 150 - len, "%d ", psids[i].psid);
 			results[i].type = SLSI_MIB_TYPE_NONE;
 		}
 	}
+
+	if (len)
+		SLSI_ERR_NODEV("Could not find psid's: %s\n", psids_not_found);
 
 	return results;
 }

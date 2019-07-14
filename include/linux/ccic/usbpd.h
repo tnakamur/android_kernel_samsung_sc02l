@@ -209,6 +209,7 @@ typedef enum usbpd_manager_command {
 	MANAGER_REQ_NEW_POWER_SRC		= 1 << 15,
 	MANAGER_REQ_UVDM_SEND_MESSAGE		= 1 << 16,
 	MANAGER_REQ_UVDM_RECEIVE_MESSAGE		= 1 << 17,
+	MANAGER_REQ_GET_SRC_CAP		= 1 << 18,
 } usbpd_manager_command_type;
 
 typedef enum usbpd_manager_event {
@@ -231,6 +232,10 @@ typedef enum usbpd_manager_event {
 	MANAGER_UVDM_SEND_MESSAGE		= 16,
 	MANAGER_UVDM_RECEIVE_MESSAGE		= 17,
 	MANAGER_START_DISCOVER_IDENTITY	= 18,
+	MANAGER_SEND_PR_SWAP	= 19,
+	MANAGER_SEND_DR_SWAP	= 20,
+	MANAGER_GET_SRC_CAP			= 21,
+
 } usbpd_manager_event_type;
 
 enum usbpd_msg_status {
@@ -307,11 +312,19 @@ enum usbpd_policy_informed {
 	PLUG_DETACHED		= 5,
 };
 
+typedef enum {
+	PLUG_CTRL_RP0 = 0,
+	PLUG_CTRL_RP80 = 1,
+	PLUG_CTRL_RP180 = 2,
+	PLUG_CTRL_RP330 = 3
+} CCIC_RP_SCR_SEL;
+
 typedef struct usbpd_phy_ops {
 	/*    1st param should be 'usbpd_data *'    */
 	int    (*tx_msg)(void *, msg_header_type *, data_obj_type *);
 	int    (*rx_msg)(void *, msg_header_type *, data_obj_type *);
 	int    (*hard_reset)(void *);
+	void   (*soft_reset)(void *);
 	int    (*set_power_role)(void *, int);
 	int    (*get_power_role)(void *, int *);
 	int    (*set_data_role)(void *, int);
@@ -325,6 +338,9 @@ typedef struct usbpd_phy_ops {
 	int    (*set_otg_control)(void *, int);
 	void    (*get_vbus_short_check)(void *, bool *);
 	int    (*set_cc_control)(void *, int);
+	int    (*set_rp_control)(void *, int);
+	void    (*pr_swap)(void *, int);
+	void	(*set_pwr_opmode)(void *, int);
 } usbpd_phy_ops_type;
 
 struct policy_data {
@@ -399,6 +415,10 @@ struct usbpd_manager_data {
 	bool vconn_source_swap;
 	bool vbus_short;
 
+	bool flash_mode;
+	int prev_available_pdo;
+	bool ps_rdy;
+
 	bool is_samsung_accessory_enter_mode;
 	bool uvdm_first_req;
 	bool uvdm_dir;
@@ -414,6 +434,7 @@ struct usbpd_manager_data {
 	uint16_t Standard_Vendor_ID;
 
 	struct mutex vdm_mutex;
+	struct mutex pdo_mutex;
 
 	struct usbpd_data *pd_data;
 	struct delayed_work	acc_detach_handler;
@@ -441,6 +462,9 @@ struct usbpd_data {
 	struct work_struct	worker;
 	struct completion	msg_arrived;
 	unsigned                wait_for_msg_arrived;
+
+	struct mutex		accept_mutex;
+	int					pd_support;
 };
 
 static inline struct usbpd_data *protocol_rx_to_usbpd(struct protocol_data *rx)
@@ -491,6 +515,8 @@ extern data_obj_type usbpd_manager_select_capability(struct usbpd_data *);
 extern bool usbpd_manager_vdm_request_enabled(struct usbpd_data *);
 extern void usbpd_manager_acc_handler_cancel(struct device *);
 extern void usbpd_manager_acc_detach_handler(struct work_struct *);
+extern void usbpd_manager_send_pr_swap(struct device *);
+extern void usbpd_manager_send_dr_swap(struct device *);
 extern void usbpd_policy_work(struct work_struct *);
 extern void usbpd_protocol_tx(struct usbpd_data *);
 extern void usbpd_protocol_rx(struct usbpd_data *);
@@ -509,4 +535,5 @@ extern unsigned usbpd_wait_msg(struct usbpd_data *pd_data, unsigned msg_status,
 		unsigned ms);
 extern void usbpd_reinit(struct device *);
 extern void usbpd_init_protocol(struct usbpd_data *);
+extern void usbpd_init_counters(struct usbpd_data *);
 #endif

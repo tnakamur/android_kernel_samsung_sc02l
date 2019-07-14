@@ -150,6 +150,12 @@ static void __init exynos_chipid_get_chipid_info(void)
 	val = __raw_readl(exynos_soc_info.reg + data->rev_reg);
 	exynos_soc_info.main_rev = (val >> data->main_rev_bit) & EXYNOS_REV_MASK;
 	exynos_soc_info.sub_rev = (val >> data->sub_rev_bit) & EXYNOS_REV_MASK;
+
+	if (exynos_soc_info.product_id == EXYNOS7885_SOC_ID) {
+		if ((exynos_soc_info.sub_rev == 1) && (val & 0x04000000))
+			exynos_soc_info.sub_rev = 2;
+	}
+
 	exynos_soc_info.revision = (exynos_soc_info.main_rev << 4) | exynos_soc_info.sub_rev;
 
 	val = __raw_readl(exynos_soc_info.reg + data->unique_id_reg);
@@ -352,19 +358,19 @@ void sysfs_create_svc_ap(void)
 		/* try to create svc kobject */
 		data = kobject_create_and_add("svc", &devices_kset->kobj);
 		if (IS_ERR_OR_NULL(data))
-			pr_info("Existing path sys/devices/svc : 0x%p\n", data);
+			pr_info("Existing path sys/devices/svc : 0x%pK\n", data);
 		else
-			pr_info("Created sys/devices/svc svc : 0x%p\n", data);
+			pr_info("Created sys/devices/svc svc : 0x%pK\n", data);
 	} else {
 		data = (struct kobject *)svc_sd->priv;
-		pr_info("Found svc_sd : 0x%p svc : 0x%p\n", svc_sd, data);
+		pr_info("Found svc_sd : 0x%pK svc : 0x%pK\n", svc_sd, data);
 	}
 
 	ap = kobject_create_and_add("AP", data);
 	if (IS_ERR_OR_NULL(ap))
-		pr_info("Failed to create sys/devices/svc/AP : 0x%p\n", ap);
+		pr_info("Failed to create sys/devices/svc/AP : 0x%pK\n", ap);
 	else
-		pr_info("Success to create sys/devices/svc/AP : 0x%p\n", ap);
+		pr_info("Success to create sys/devices/svc/AP : 0x%pK\n", ap);
 
 	if (sysfs_create_file(ap, &svc_ap_attr.attr) < 0) {
 		pr_err("failed to create sys/devices/svc/AP/SVC_AP, %s\n",

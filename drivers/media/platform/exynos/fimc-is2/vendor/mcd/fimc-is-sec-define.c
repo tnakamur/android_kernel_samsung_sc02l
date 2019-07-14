@@ -1558,7 +1558,7 @@ out:
 		crc32_header_check_rear2 = crc32_header_temp;
 		info("crc32_header_check_rear2=%d, crc32_check_rear2=%d\n", crc32_header_check_rear2, crc32_check_rear2);
 		return crc32_check_rear2;
-	} 
+	}
 }
 #endif
 
@@ -1713,6 +1713,52 @@ ssize_t write_data_to_file(char *name, char *buf, size_t count, loff_t *pos)
 		fd = sys_open(name, O_WRONLY | O_CREAT | O_TRUNC | O_SYNC, 0666);
 	} else {
 		fd = sys_open(name, O_WRONLY | O_CREAT | O_TRUNC | O_SYNC, 0664);
+	}
+	if (fd < 0) {
+		err("open file error: %s", name);
+		sys_umask(old_mask);
+		set_fs(old_fs);
+		return -EINVAL;
+	}
+
+	fp = fget(fd);
+	if (fp) {
+		tx = vfs_write(fp, buf, count, pos);
+		if (tx != count) {
+			err("fail to write %s. ret %zd", name, tx);
+			tx = -ENOENT;
+		}
+
+		vfs_fsync(fp, 0);
+		fput(fp);
+	} else {
+		err("fail to get file *: %s", name);
+	}
+
+	sys_close(fd);
+	sys_umask(old_mask);
+	set_fs(old_fs);
+
+	return tx;
+}
+
+ssize_t write_data_to_file_append(char *name, char *buf, size_t count, loff_t *pos)
+{
+	struct file *fp;
+	mm_segment_t old_fs;
+	ssize_t tx = -ENOENT;
+	int fd, old_mask;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	old_mask = sys_umask(0);
+
+	if (force_caldata_dump) {
+		sys_rmdir(name);
+		fd = sys_open(name, O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+	} else {
+		fd = sys_open(name, O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0664);
 	}
 	if (fd < 0) {
 		err("open file error: %s", name);
@@ -2177,11 +2223,11 @@ int fimc_is_sec_rom_power_on(struct fimc_is_core *core, int position)
 	if(position == SENSOR_POSITION_FRONT)
 		sensor_id = specific->front_sensor_id;
 	else if (position == SENSOR_POSITION_FRONT2)
-		sensor_id = specific->front_second_sensor_id;
+		sensor_id = specific->front2_sensor_id;
 	else if (position == SENSOR_POSITION_REAR2)
-		sensor_id = specific->rear_second_sensor_id;
+		sensor_id = specific->rear2_sensor_id;
 	else if (position == SENSOR_POSITION_REAR3)
-		sensor_id = specific->rear_3rd_sensor_id;
+		sensor_id = specific->rear3_sensor_id;
 	else
 		sensor_id = specific->rear_sensor_id;
 
@@ -2232,11 +2278,11 @@ int fimc_is_sec_rom_power_off(struct fimc_is_core *core, int position)
 	if(position == SENSOR_POSITION_FRONT)
 		sensor_id = specific->front_sensor_id;
 	else if(position == SENSOR_POSITION_FRONT2)
-		sensor_id = specific->front_second_sensor_id;
+		sensor_id = specific->front2_sensor_id;
 	else if(position == SENSOR_POSITION_REAR2)
-		sensor_id = specific->rear_second_sensor_id;
+		sensor_id = specific->rear2_sensor_id;
 	else if(position == SENSOR_POSITION_REAR3)
-		sensor_id = specific->rear_3rd_sensor_id;
+		sensor_id = specific->rear3_sensor_id;
 	else
 		sensor_id = specific->rear_sensor_id;
 
@@ -3574,6 +3620,7 @@ int fimc_is_sec_readcal_otprom_5e9(struct device *dev, int position)
 	struct file *dump_fp = NULL;
 	mm_segment_t old_fs;
 	loff_t pos = 0;
+	char temp_cal_buf[0x10] = {0};
 #ifdef OTP_BANK
 	u8 otp_bank = 0;
 #endif
@@ -3653,7 +3700,7 @@ int fimc_is_sec_readcal_otprom_5e9(struct device *dev, int position)
 		ret = -EINVAL;
 		goto exit;
 	}
-	
+
 	ret = fimc_is_sec_set_registers(client, OTP_Init_reg, OTP_Init_size);
 	if (unlikely(ret)) {
 		err("failed to fimc_is_sec_set_registers (%d)\n", ret);
@@ -3663,7 +3710,7 @@ int fimc_is_sec_readcal_otprom_5e9(struct device *dev, int position)
 
 crc_retry:
 
-	/* read cal data 
+	/* read cal data
 	 * 5E9 use page per 64byte */
 	pr_info("Camera: I2C read cal data\n\n");
 	fimc_is_i2c_read_otp_5e9(client, buf, start_addr, OTP_USED_CAL_SIZE);
@@ -3806,7 +3853,16 @@ crc_retry:
 
 	if(finfo->cal_map_ver[0] != 'V') {
 		pr_info("Camera: Cal Map version read fail or there's no available data.\n");
-		crc32_check_factory_front = false;
+		/* it for case of CRC fail at re-work module  */
+		if(retry == FIMC_IS_CAL_RETRY_CNT && otp_bank != 0x1) {
+			start_addr -= 0xf;
+			pr_info("%s : change start address(%x)\n",__func__,start_addr);
+			retry--;
+			goto crc_retry;
+		}
+		if (position == SENSOR_POSITION_FRONT) {
+			crc32_check_factory_front = false;
+		}
 		goto exit;
 	}
 
@@ -3889,10 +3945,12 @@ crc_retry:
 #if defined(CAMERA_MODULE_ES_VERSION_REAR)
 		if (position == SENSOR_POSITION_REAR && sysfs_finfo.header_ver[10] >= CAMERA_MODULE_ES_VERSION_REAR) {
 			is_latest_cam_module = true;
+#if defined(CAMERA_MODULE_ES_VERSION_REAR2)
 		} else if (position == SENSOR_POSITION_REAR2 && sysfs_finfo.header_ver[10] >= CAMERA_MODULE_ES_VERSION_REAR2) { //It need to check about rear2
 			is_latest_cam_module_rear2 = true;
+#endif
 		} else
-#endif 
+#endif
 		{
 			is_latest_cam_module = false;
 		}
@@ -3945,8 +4003,14 @@ crc_retry:
 			goto key_err;
 		} else {
 			pr_info("dump folder exist, Dump OTPROM cal data.\n");
-			if (write_data_to_file("/data/media/0/dump/otprom_cal.bin", buf,
-									OTP_USED_CAL_SIZE, &pos) < 0) {
+			fimc_is_i2c_read_otp_5e9(client, temp_cal_buf, OTP_PAGE_START_ADDR, 0xf);
+			if (write_data_to_file("/data/media/0/dump/otprom_cal.bin",
+						temp_cal_buf, 0xf, &pos) < 0) {
+				pr_info("Failed to dump cal data.\n");
+				goto dump_err;
+			}
+			if (write_data_to_file_append("/data/media/0/dump/otprom_cal.bin",
+						buf, OTP_USED_CAL_SIZE, &pos) < 0) {
 				pr_info("Failed to dump cal data.\n");
 				goto dump_err;
 			}
@@ -4379,7 +4443,7 @@ crc_retry:
 		if (sysfs_finfo.header_ver[10] >= CAMERA_MODULE_ES_VERSION_REAR) {
 			is_latest_cam_module = true;
 		} else
-#endif 
+#endif
 		{
 			is_latest_cam_module = false;
 		}
@@ -4452,7 +4516,7 @@ int fimc_is_sec_readcal_otprom(struct device *dev, int position)
 	int ret = 0;
 #if defined(SENSOR_OTP_5E9)
 	ret = fimc_is_sec_readcal_otprom_5e9(dev, position);
-#else 
+#else
 	ret = fimc_is_sec_readcal_otprom_legacy(dev, position);
 #endif
 	return ret;
@@ -6558,7 +6622,7 @@ int fimc_is_sec_fw_find(struct fimc_is_core *core, int position)
 
 	fimc_is_sec_get_sysfs_finfo_by_position(position, &finfo);
 	if (position == SENSOR_POSITION_REAR3)
-		sensor_id = &specific->rear_3rd_sensor_id;
+		sensor_id = &specific->rear3_sensor_id;
 	else
 		sensor_id = &specific->rear_sensor_id;
 
@@ -6614,6 +6678,8 @@ int fimc_is_sec_fw_find(struct fimc_is_core *core, int position)
 			snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_SR556_SETF), "%s", FIMC_IS_SR556_SETF);
 		} else if (*sensor_id == SENSOR_NAME_IMX576){
 			snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_IMX576_SETF), "%s", FIMC_IS_IMX576_SETF);
+		} else if (*sensor_id == SENSOR_NAME_S5K3L6){
+			snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_3L6_SETF), "%s", FIMC_IS_3L6_SETF);
 		} else {
 			snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_IMX260_SETF), "%s", FIMC_IS_IMX260_SETF);
 		}
@@ -6675,6 +6741,8 @@ int fimc_is_sec_fw_find_front(struct fimc_is_core *core)
 			snprintf(finfo->load_front_setfile_name, sizeof(FIMC_IS_4H5YC_SETF), "%s", FIMC_IS_4H5YC_SETF);
 		} else if (specific->front_sensor_id == SENSOR_NAME_IMX576) {
 			snprintf(finfo->load_front_setfile_name, sizeof(FIMC_IS_IMX576_FRONT_SETF), "%s", FIMC_IS_IMX576_FRONT_SETF);
+		} else if (specific->front_sensor_id == SENSOR_NAME_S5K4HA) {
+			snprintf(finfo->load_front_setfile_name, sizeof(FIMC_IS_4HA_SETF), "%s", FIMC_IS_4HA_SETF);
 		} else {
 			snprintf(finfo->load_front_setfile_name, sizeof(FIMC_IS_IMX320_SETF), "%s", FIMC_IS_IMX320_SETF);
 		}
@@ -6696,7 +6764,7 @@ int fimc_is_sec_run_fw_sel(struct device *dev, int position)
 	rom_position = position;
 	if (fimc_is_sec_get_sysfs_finfo_by_position(position, &finfo)) {
 		err("failed get finfo. plz check position %d", position);
-		return -ENXIO;	
+		return -ENXIO;
 	}
 	fimc_is_sec_get_sysfs_finfo_by_position(SENSOR_POSITION_REAR, &default_finfo);
 
@@ -6965,7 +7033,7 @@ exit:
 #if defined(CAMERA_MODULE_ES_VERSION_REAR2)
 		if (id == SENSOR_POSITION_REAR2) {
                         fimc_is_sec_rom_power_off(core, SENSOR_POSITION_REAR2);
-		} else	
+		} else
 #endif
 		{
 			fimc_is_sec_rom_power_off(core, SENSOR_POSITION_REAR);

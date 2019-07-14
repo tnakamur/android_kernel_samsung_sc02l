@@ -588,8 +588,6 @@ static struct snd_soc_dai_link exynos7885_dai[] = {
 		.stream_name = "UAIF0",
 		.cpu_dai_name = "UAIF0",
 		.platform_name = "snd-soc-dummy",
-		.codec_name = "cod3035x.5-0003",
-		.codec_dai_name = "cod3035x-aif",
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBS_CFS,
 		.no_pcm = 1,
 		.ignore_suspend = 1,
@@ -636,7 +634,7 @@ static struct snd_soc_dai_link exynos7885_dai[] = {
 		.stream_name = "UAIF3",
 		.cpu_dai_name = "UAIF3",
 		.platform_name = "snd-soc-dummy",
-#if !defined(CONFIG_SND_SOC_TFA9872) && !defined(CONFIG_SND_SOC_TFA9896)
+#if !defined(CONFIG_SND_SOC_TFA9872) && !defined(CONFIG_SND_SOC_TFA9896) && !defined(CONFIG_SND_SOC_SMA1301)
 		.codec_name = "snd-soc-dummy",
 		.codec_dai_name = "snd-soc-dummy-dai",
 #endif
@@ -719,7 +717,11 @@ static struct snd_soc_codec_conf codec_conf[] = {
 		.name_prefix = "VTS",
 	},
 #endif
-#ifdef CONFIG_SND_SOC_TFA9896
+#if defined(CONFIG_SND_SOC_TFA9896_DUAL) || defined(CONFIG_SND_SOC_SMA1301_DUAL)
+	{ .name_prefix = "SPKR", },
+	{ .name_prefix = "SPKL", },
+#endif
+#ifdef CONFIG_SND_SOC_TFA9896_QUAD
 	{ .name_prefix = "SPKR1", },
 	{ .name_prefix = "SPKR2", },
 	{ .name_prefix = "SPKL1", },
@@ -965,11 +967,12 @@ static int exynos7885_audio_probe(struct platform_device *pdev)
 	if (ret)
 	{
 		dev_err(card->dev, "snd_soc_register_card() failed:%d\n", ret);
+	} else {
+		universal7885_mic_bias_parse_dt(pdev);
+		universal7885_dmic_path_parse_dt(pdev);
+		universal7885_init_soundcard(card);
 	}
 
-	universal7885_mic_bias_parse_dt(pdev);
-	universal7885_dmic_path_parse_dt(pdev);
-	universal7885_init_soundcard(card);
 	return ret;
 }
 

@@ -81,6 +81,12 @@ ifeq ($(CONFIG_CB710_DEBUG),y)
 	CFLAGS-cb710-mmc	+= -DDEBUG
 endif
 
+ifeq ($(CONFIG_TZDEV)$(CONFIG_TEEGRIS_VERSION),y3)
+subdir-ccflags-y += -I$(srctree)/drivers/misc/tzdev/$(CONFIG_TEEGRIS_VERSION).0
+obj-$(CONFIG_MMC_SRPMB)		+= dw_mmc-srpmb-teegris.o
+else
 obj-$(CONFIG_MMC_SRPMB)		+= dw_mmc-srpmb.o
+endif
+
 obj-$(CONFIG_MMC_DW_EXYNOS_FMP) += dw_mmc-exynos-fmp.o
 obj-$(CONFIG_MMC_DW_EXYNOS_SMU) += dw_mmc-exynos-smu.o

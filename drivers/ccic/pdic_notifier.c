@@ -11,9 +11,9 @@
 #define DESTROY_PDIC_NOTIFIER_BLOCK(nb)			\
 		SET_PDIC_NOTIFIER_BLOCK(nb, NULL, -1)
 
-static struct s2mu004_pdic_notifier_struct pdic_notifier;
+static struct s2m_pdic_notifier_struct pdic_notifier;
 
-int s2mu004_pdic_notifier_register(struct notifier_block *nb, notifier_fn_t notifier,
+int s2m_pdic_notifier_register(struct notifier_block *nb, notifier_fn_t notifier,
 			muic_notifier_device_t listener)
 {
 	int ret = 0;
@@ -33,7 +33,7 @@ int s2mu004_pdic_notifier_register(struct notifier_block *nb, notifier_fn_t noti
 	return ret;
 }
 
-int s2mu004_pdic_notifier_unregister(struct notifier_block *nb)
+int s2m_pdic_notifier_unregister(struct notifier_block *nb)
 {
 	int ret = 0;
 
@@ -48,7 +48,7 @@ int s2mu004_pdic_notifier_unregister(struct notifier_block *nb)
 	return ret;
 }
 
-static int s2mu004_pdic_notifier_notify(void)
+static int s2m_pdic_notifier_notify(void)
 {
 	int ret = 0;
 
@@ -75,7 +75,7 @@ static int s2mu004_pdic_notifier_notify(void)
 	return ret;
 }
 
-void s2mu004_pdic_notifier_attach_attached_jig_dev(muic_attached_dev_t new_dev)
+void s2m_pdic_notifier_attach_attached_jig_dev(muic_attached_dev_t new_dev)
 {
 	pr_info("%s: (%d)\n", __func__, new_dev);
 
@@ -83,10 +83,10 @@ void s2mu004_pdic_notifier_attach_attached_jig_dev(muic_attached_dev_t new_dev)
 	pdic_notifier.attached_dev = new_dev;
 
 	/* pdic's attached_device attach broadcast */
-	s2mu004_pdic_notifier_notify();
+	s2m_pdic_notifier_notify();
 }
 #if 0
-void s2mu004_pdic_notifier_detach_attached_jig_dev(muic_attached_dev_t cur_dev)
+void s2m_pdic_notifier_detach_attached_jig_dev(muic_attached_dev_t cur_dev)
 {
 	pr_info("%s: (%d)\n", __func__, cur_dev);
 
@@ -98,13 +98,13 @@ void s2mu004_pdic_notifier_detach_attached_jig_dev(muic_attached_dev_t cur_dev)
 
 	if (pdic_notifier.attached_dev != ATTACHED_DEV_NONE_MUIC) {
 		/* pdic's attached_device detach broadcast */
-		s2mu004_pdic_notifier_notify();
+		s2m_pdic_notifier_notify();
 	}
 
 	pdic_notifier.attached_dev = ATTACHED_DEV_NONE_MUIC;
 }
 #endif
-void s2mu004_pdic_notifier_attach_attached_dev(muic_attached_dev_t new_dev)
+void s2m_pdic_notifier_attach_attached_dev(muic_attached_dev_t new_dev)
 {
 	pr_info("%s: (%d)\n", __func__, new_dev);
 
@@ -112,10 +112,10 @@ void s2mu004_pdic_notifier_attach_attached_dev(muic_attached_dev_t new_dev)
 	pdic_notifier.attached_dev = new_dev;
 
 	/* pdic's attached_device attach broadcast */
-	s2mu004_pdic_notifier_notify();
+	s2m_pdic_notifier_notify();
 }
 
-void s2mu004_pdic_notifier_detach_attached_dev(muic_attached_dev_t cur_dev)
+void s2m_pdic_notifier_detach_attached_dev(muic_attached_dev_t cur_dev)
 {
 	pr_info("%s: (%d)\n", __func__, cur_dev);
 
@@ -127,13 +127,13 @@ void s2mu004_pdic_notifier_detach_attached_dev(muic_attached_dev_t cur_dev)
 
 	if (pdic_notifier.attached_dev != ATTACHED_DEV_NONE_MUIC) {
 		/* pdic's attached_device detach broadcast */
-		s2mu004_pdic_notifier_notify();
+		s2m_pdic_notifier_notify();
 	}
 
 	pdic_notifier.attached_dev = ATTACHED_DEV_NONE_MUIC;
 }
 
-void s2mu004_pdic_notifier_logically_attach_attached_dev(muic_attached_dev_t new_dev)
+void s2m_pdic_notifier_logically_attach_attached_dev(muic_attached_dev_t new_dev)
 {
 	pr_info("%s: (%d)\n", __func__, new_dev);
 
@@ -141,10 +141,10 @@ void s2mu004_pdic_notifier_logically_attach_attached_dev(muic_attached_dev_t new
 	pdic_notifier.attached_dev = new_dev;
 
 	/* pdic's attached_device attach broadcast */
-	s2mu004_pdic_notifier_notify();
+	s2m_pdic_notifier_notify();
 }
 
-void s2mu004_pdic_notifier_logically_detach_attached_dev(muic_attached_dev_t cur_dev)
+void s2m_pdic_notifier_logically_detach_attached_dev(muic_attached_dev_t cur_dev)
 {
 	pr_info("%s: (%d)\n", __func__, cur_dev);
 
@@ -152,12 +152,12 @@ void s2mu004_pdic_notifier_logically_detach_attached_dev(muic_attached_dev_t cur
 	pdic_notifier.attached_dev = cur_dev;
 
 	/* pdic's attached_device detach broadcast */
-	s2mu004_pdic_notifier_notify();
+	s2m_pdic_notifier_notify();
 
 	pdic_notifier.attached_dev = ATTACHED_DEV_NONE_MUIC;
 }
 
-static int __init s2mu004_pdic_notifier_init(void)
+static int __init s2m_pdic_notifier_init(void)
 {
 	int ret = 0;
 
@@ -169,5 +169,5 @@ static int __init s2mu004_pdic_notifier_init(void)
 
 	return ret;
 }
-subsys_initcall(s2mu004_pdic_notifier_init);
+subsys_initcall(s2m_pdic_notifier_init);
 

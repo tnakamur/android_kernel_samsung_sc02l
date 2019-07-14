@@ -584,7 +584,10 @@ int sensor_4e6_cis_stream_on(struct v4l2_subdev *subdev)
 	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
 	I2C_MUTEX_LOCK(cis->i2c_lock);
-	sensor_4e6_cis_group_param_hold_func(subdev, 0x00);
+	ret = sensor_4e6_cis_group_param_hold_func(subdev, 0x00);
+	if (ret < 0)
+		err("group_param_hold_func failed at stream on");
+
 	usleep_range(8000, 8000);
 	/* Sensor stream on */
 	fimc_is_sensor_write16(client, 0x6028, 0x4000);
@@ -639,7 +642,9 @@ int sensor_4e6_cis_stream_off(struct v4l2_subdev *subdev)
 	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
 	I2C_MUTEX_LOCK(cis->i2c_lock);
-	sensor_4e6_cis_group_param_hold_func(subdev, 0x00);
+	ret = sensor_4e6_cis_group_param_hold_func(subdev, 0x00);
+	if (ret < 0)
+		err("group_param_hold_func failed at stream off");
 
 	/* Sensor stream off */
 	fimc_is_sensor_write16(client, 0x6028, 0x4000);

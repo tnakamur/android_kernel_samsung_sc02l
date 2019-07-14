@@ -42,11 +42,21 @@
 #define S2MU005_FLASH_TORCH_OFF 0x00
 #define S2MU005_FLASH_BOOST_EN_MASK 0x40
 
+#define S2MU005_FLASH_LIGHT_MAX 5
+
 enum s2mu005_led_id {
 	S2MU005_OFF,
 	S2MU005_FLASH_LED = 0,
 	S2MU005_TORCH_LED,
 	S2MU005_LED_MAX,
+};
+
+enum torch_step_current {
+	STEP0_CURRENT = 25,
+	STEP1_CURRENT = 50,
+	STEP2_CURRENT = 75,
+	STEP3_CURRENT = 100,
+	STEP4_CURRENT = 150,
 };
 
 enum s2mu005_flash_current {
@@ -179,6 +189,7 @@ struct s2mu005_fled_platform_data {
 #if defined(CONFIG_LEDS_SUPPORT_FRONT_FLASH)
 	unsigned int front_brightness;
 #endif
+	unsigned int flashlight_current[S2MU005_FLASH_LIGHT_MAX];
 };
 int s2mu005_led_dump_reg(void);
 #ifdef CONFIG_LEDS_SUPPORT_FRONT_FLASH

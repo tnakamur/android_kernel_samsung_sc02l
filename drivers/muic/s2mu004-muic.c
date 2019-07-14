@@ -58,7 +58,9 @@
 #include <soc/samsung/exynos-modem-ctrl.h>
 #endif
 
+#if IS_ENABLED(CONFIG_MUIC_SUPPORT_CCIC)
 #include <linux/fb.h>
+#endif
 
 #define ENUM_STR(x) {case(x): return #x; }
 static const char *mode_to_str(enum s2mu004_muic_mode n)
@@ -247,6 +249,7 @@ void s2mu004_print_reg_dump(struct s2mu004_muic_data *muic_data)
 }
 #endif
 
+#if IS_ENABLED(CONFIG_MUIC_MANAGER)
 /* interface functions */
 static int s2mu004_if_com_to_open_with_vbus(void *mdata)
 {
@@ -365,7 +368,9 @@ static void s2mu004_if_set_jig_state(void *mdata, bool val)
 	pr_info("%s jig_state : (%d)\n", __func__, muic_data->jig_state);
 	mutex_unlock(&muic_data->muic_mutex);
 }
+#endif
 
+#if defined(CONFIG_CCIC_S2MU004)
 static void s2mu004_if_set_water_det(void *mdata, bool val)
 {
 	struct s2mu004_muic_data *muic_data =
@@ -432,7 +437,9 @@ static void s2mu004_if_set_water_det_from_boot(void *mdata, bool val)
 	}
 }
 #endif
+#endif
 
+#if IS_ENABLED(CONFIG_MUIC_MANAGER)
 static void s2mu004_if_set_cable_state(void *mdata, muic_attached_dev_t new_dev)
 {
 	struct s2mu004_muic_data *muic_data =
@@ -546,6 +553,7 @@ static int s2mu004_if_control_rid_adc(void *mdata, bool enable)
 
 	return s2mu004_muic_control_rid_adc(muic_data, enable);
 }
+#endif
 
 #if defined(CONFIG_HV_MUIC_S2MU004_AFC)
 static int s2mu004_if_set_afc_reset(void *mdata)
@@ -683,6 +691,7 @@ exit_chk:
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_MUIC_MANAGER)
 static int s2mu004_if_jig_on(void *mdata)
 {
 	struct s2mu004_muic_data *muic_data =
@@ -698,6 +707,7 @@ static int s2mu004_if_set_gpio_uart_sel(void *mdata, int uart_path)
 
 	return s2mu004_set_gpio_uart_sel(muic_data, uart_path);
 }
+#endif
 
 int s2mu004_i2c_read_byte(struct i2c_client *client, u8 command)
 {
@@ -897,7 +907,9 @@ int s2mu004_muic_check_afc_ready(struct s2mu004_muic_data *muic_data)
 {
 #if !IS_ENABLED(CONFIG_SEC_FACTORY)
 	struct muic_platform_data *muic_pdata = muic_data->pdata;
+#if IS_ENABLED(CONFIG_CCIC_S2MU004)
 	struct muic_interface_t *muic_if = (struct muic_interface_t *)muic_data->if_data;
+#endif
 
 	pr_info("%s\n", __func__);
 
@@ -905,9 +917,11 @@ int s2mu004_muic_check_afc_ready(struct s2mu004_muic_data *muic_data)
 	if (muic_pdata->afc_disable)
 		pr_info("%s AFC Disable(%d) by USER!\n",
 				__func__, muic_pdata->afc_disable);
+#if IS_ENABLED(CONFIG_CCIC_S2MU004)
 	else if (muic_if->is_afc_pdic_ready == false)
 		pr_info("%s AFC Disable(%d) by PDIC\n",
 				__func__, muic_if->is_afc_pdic_ready);
+#endif
 	else {
 		pr_info("%s ready:%d  afc_check:%d\n", __func__,
 				muic_data->is_afc_muic_ready, muic_data->afc_check);
@@ -926,7 +940,6 @@ int s2mu004_muic_check_afc_ready(struct s2mu004_muic_data *muic_data)
 }
 #endif
 
-#ifdef CONFIG_MUIC_SUPPORT_CCIC
 void s2mu004_muic_control_vbus_det(struct s2mu004_muic_data *muic_data, bool enable)
 {
 	int data = 0;
@@ -1159,7 +1172,7 @@ static int s2mu004_muic_init_otg_reg(struct s2mu004_muic_data *muic_data)
 
 	return ret;
 }
-#endif
+#endif /* CONFIG_SEC_FACTORY */
 
 /* TODO: There is no needs to use JIGB pin by MUIC if CCIC is supported */
 int s2mu004_muic_jig_on(struct s2mu004_muic_data *muic_data)
@@ -1180,14 +1193,8 @@ int s2mu004_muic_jig_on(struct s2mu004_muic_data *muic_data)
 
 	ret = s2mu004_i2c_write_byte(muic_data->i2c,
 			S2MU004_REG_MUIC_SW_CTRL, (u8)reg);
-	if (en) {
-		reg = s2mu004_i2c_read_byte(muic_data->i2c, S2MU004_REG_MUIC_CTRL1);
-		reg |= CTRL_MANUAL_SW_MASK;
 
-		return s2mu004_i2c_guaranteed_wbyte(muic_data->i2c,
-				S2MU004_REG_MUIC_CTRL1, (u8)reg);
-	} else
-		return ret;
+	return ret;
 
 }
 
@@ -1253,8 +1260,10 @@ static int s2mu004_muic_set_com_sw(struct s2mu004_muic_data *muic_data,
 	if (temp < 0)
 		pr_err("%s err read MANSW(0x%x)\n", __func__, temp);
 
+#if defined(CONFIG_CCIC_S2MU004) && defined(CONFIG_HICCUP_CHARGER)
 	if (muic_data->is_hiccup_mode && IS_WATER_STATUS(muic_data->water_status))
 		reg_val = MANSW_HICCUP;
+#endif
 
 	if ((reg_val & MANUAL_SW_DM_DP_MASK) != (temp & MANUAL_SW_DM_DP_MASK)) {
 		pr_info("%s 0x%x != 0x%x, update\n", __func__,
@@ -1309,7 +1318,6 @@ int s2mu004_muic_com_to_open(struct s2mu004_muic_data *muic_data)
 
 	return ret;
 }
-#endif
 
 int s2mu004_muic_com_to_usb(struct s2mu004_muic_data *muic_data)
 {
@@ -1380,6 +1388,7 @@ int s2mu004_muic_com_to_audio(struct s2mu004_muic_data *muic_data)
 	return ret;
 }
 
+#if defined(CONFIG_HICCUP_CHARGER)
 int s2mu004_muic_com_to_gnd(struct s2mu004_muic_data *muic_data)
 {
 	u8 reg_val;
@@ -1392,6 +1401,7 @@ int s2mu004_muic_com_to_gnd(struct s2mu004_muic_data *muic_data)
 
 	return ret;
 }
+#endif
 
 static int s2mu004_muic_set_rid_adc_en(struct s2mu004_muic_data *muic_data, bool en)
 {
@@ -1412,6 +1422,7 @@ static int s2mu004_muic_set_rid_adc_en(struct s2mu004_muic_data *muic_data, bool
 	return ret;
 }
 
+#if defined(CONFIG_CCIC_S2MU004)
 static void s2mu004_muic_set_rid_int_mask_en(struct s2mu004_muic_data *muic_data, bool en)
 {
 	struct i2c_client *i2c = muic_data->i2c;
@@ -1443,6 +1454,7 @@ static void s2mu004_muic_set_rid_int_mask_en(struct s2mu004_muic_data *muic_data
 				0, 0);
 	}
 }
+#endif
 
 int s2mu004_muic_recheck_adc(struct s2mu004_muic_data *muic_data)
 {
@@ -1509,13 +1521,14 @@ int s2mu004_muic_get_vbus_state(struct s2mu004_muic_data *muic_data)
 	pr_info("%s vbus : (%d)\n", __func__, vbus);
 	return vbus;
 }
-
 static int s2mu004_muic_reg_init(struct s2mu004_muic_data *muic_data)
 {
 	struct i2c_client *i2c = muic_data->i2c;
 	int ret = 0, adc = 0;
 	int read_val[READ_VAL_MAX_NUM] = {0, };
+#if defined(CONFIG_CCIC_S2MU004)
 	u8 reg_data = 0;
+#endif
 #if !IS_ENABLED(CONFIG_MUIC_S2MU004_NON_USB_C_TYPE)
 #if !IS_ENABLED(CONFIG_CCIC_S2MU004)
 	int data = 0;
@@ -1594,7 +1607,6 @@ static int s2mu004_muic_reg_init(struct s2mu004_muic_data *muic_data)
 
 	return ret;
 }
-
 #if !IS_ENABLED(CONFIG_SEC_FACTORY)
 int s2mu004_muic_get_otg_state(void)
 {
@@ -1775,7 +1787,7 @@ static int s2mu004_muic_detect_with_ccic(struct s2mu004_muic_data *muic_data,
 
 		/*
 		* opmode usage :
-		* When it's an array status, 
+		* When it's an array status,
 		* the attach mode should maintain the none cable type.
 		* Since the vbvolt can be set in case of the array,
 		* this first attach should be running only when it's not the array status.
@@ -1963,6 +1975,7 @@ static int s2mu004_muic_detect_by_dpdm(struct s2mu004_muic_data *muic_data,
 	return S2MU004_DETECT_DONE;
 }
 
+#if defined(CONFIG_MUIC_MANAGER)
 static int s2mu004_muic_detect_jig_dev_type(struct s2mu004_muic_data *muic_data,
 	int *read_val, int vbvolt, int *intr, muic_attached_dev_t *new_dev)
 {
@@ -1993,6 +2006,10 @@ static int s2mu004_muic_detect_jig_dev_type(struct s2mu004_muic_data *muic_data,
 	case DEV_TYPE2_JIG_UART_ON:
 		if (*new_dev != ATTACHED_DEV_JIG_UART_ON_MUIC) {
 			*intr = MUIC_INTR_ATTACH;
+#if defined(CONFIG_MUIC_SUPPORT_TYPEB)
+			*new_dev = ATTACHED_DEV_JIG_UART_ON_MUIC;
+			pr_info("ADC JIG_UART_ON DETECTED\n");
+#else
 			if (!vbvolt) {
 				*new_dev = ATTACHED_DEV_JIG_UART_ON_MUIC;
 				pr_info("ADC JIG_UART_ON DETECTED\n");
@@ -2000,13 +2017,27 @@ static int s2mu004_muic_detect_jig_dev_type(struct s2mu004_muic_data *muic_data,
 				*new_dev = ATTACHED_DEV_JIG_UART_ON_VB_MUIC;
 				pr_info("ADC JIG_UART_ON_VB DETECTED\n");
 			}
+#endif
 		}
+		break;
+	default:
+		break;
+	}
+
+    switch (read_val[READ_VAL_DEVICE_TYPE3]) {
+    case DEV_TYPE3_VBUS_R255:
+	    if (!vbvolt)
+            break;
+        *intr = MUIC_INTR_ATTACH;
+        *new_dev = ATTACHED_DEV_JIG_USB_OFF_MUIC;
+        pr_info("JIG_USB_OFF DETECTED\n");
 		break;
 	default:
 		break;
 	}
 	return S2MU004_DETECT_DONE;
 }
+#endif
 
 #ifdef CONFIG_MUIC_S2MU004_NON_USB_C_TYPE
 static void s2mu004_muic_detect_jig_by_adc(struct s2mu004_muic_data *muic_data,
@@ -2045,23 +2076,18 @@ static void s2mu004_muic_detect_jig_by_adc(struct s2mu004_muic_data *muic_data,
 				break;
 			if (*new_dev != ATTACHED_DEV_JIG_USB_ON_MUIC) {
 				*intr = MUIC_INTR_ATTACH;
-				if (!vbvolt) {
-					*new_dev = ATTACHED_DEV_JIG_UART_ON_MUIC;
-					pr_info("ADC JIG_UART_ON DETECTED\n");
-				} else {
-					*new_dev = ATTACHED_DEV_JIG_UART_ON_VB_MUIC;
-					pr_info("ADC JIG_UART_ON_VB DETECTED\n");
-				}
+				*new_dev = ATTACHED_DEV_JIG_USB_ON_MUIC;
+				pr_info("ADC JIG_USB_ON DETECTED\n");
 			}
 			break;
 		case ADC_JIG_UART_OFF:
 			*intr = MUIC_INTR_ATTACH;
-			if (muic_data->is_otg_test) {
+			if (muic_data->pdata->is_otg_test) {
 				mdelay(100);
-				read_val[READ_VAL_SC_STATUS2] = s2mu004_i2c_read_byte(i2c, S2MU004_REG_SC_STATUS2);
+				read_val[READ_VAL_SC_STATUS2] = s2mu004_i2c_read_byte(muic_data->i2c, S2MU004_REG_SC_STATUS2);
 				*vmid = read_val[READ_VAL_SC_STATUS2] & 0x7;
 				if (*vmid == 0x4) {
-					pr_info("OTG_TEST DETECTED, vmid = %d\n", vmid);
+					pr_info("OTG_TEST DETECTED, vmid = %d\n", *vmid);
 					vbvolt = 1;
 					*new_dev = ATTACHED_DEV_JIG_UART_OFF_VB_OTG_MUIC;
 				} else
@@ -2076,8 +2102,18 @@ static void s2mu004_muic_detect_jig_by_adc(struct s2mu004_muic_data *muic_data,
 		case ADC_JIG_UART_ON:
 			if (*new_dev != ATTACHED_DEV_JIG_UART_ON_MUIC) {
 				*intr = MUIC_INTR_ATTACH;
+#if defined(CONFIG_MUIC_SUPPORT_TYPEB)
 				*new_dev = ATTACHED_DEV_JIG_UART_ON_MUIC;
 				pr_info("ADC JIG_UART_ON DETECTED\n");
+#else
+				if (!vbvolt) {
+					*new_dev = ATTACHED_DEV_JIG_UART_ON_MUIC;
+					pr_info("ADC JIG_UART_ON DETECTED\n");
+				} else {
+					*new_dev = ATTACHED_DEV_JIG_UART_ON_VB_MUIC;
+					pr_info("ADC JIG_UART_ON_VB DETECTED\n");
+				}
+#endif
 			}
 			break;
 		case ADC_SMARTDOCK: /* 0x10000 40.2K ohm */
@@ -2224,6 +2260,10 @@ static void s2mu004_muic_detect_dev(struct s2mu004_muic_data *muic_data)
 	}
 #endif
 
+#ifdef CONFIG_MUIC_S2MU004_NON_USB_C_TYPE
+	s2mu004_muic_detect_jig_by_adc(muic_data, read_val, adc, vbvolt, &vmid, &intr, &new_dev);
+#endif
+
 	s2mu004_muic_detect_extra_cable(muic_data, read_val, vbvolt, &intr, &new_dev);
 
 #if defined(CONFIG_CCIC_S2MU004)
@@ -2248,6 +2288,13 @@ jig:
 				pr_info("[muic] %s, skipped handle detach!\n", __func__);
 				return;
 			}
+		}
+#endif
+#if IS_ENABLED(CONFIG_HV_MUIC_S2MU004_AFC)
+		ret = s2mu004_i2c_read_byte(muic_data->i2c, S2MU004_REG_AFC_CTRL1);
+		if (ret) {
+			pr_info("%s, need to AFC detach\n", __func__);
+			s2mu004_hv_muic_reset_hvcontrol_reg(muic_data);
 		}
 #endif
 		muic_core_handle_detach(muic_data->pdata);
@@ -2281,11 +2328,13 @@ static int s2mu004_muic_check_irq_exeptions(struct s2mu004_muic_data *muic_data,
 		adc = s2mu004_muic_water_judge(muic_data);
 	}
 
+#if defined(CONFIG_HICCUP_CHARGER)
 	if (!lpcharge && vbvolt &&
 		IS_WATER_STATUS(muic_data->water_status)) {
 		muic_data->is_hiccup_mode = true;
 		s2mu004_muic_com_to_gnd(muic_data);
 	}
+#endif
 
 	pr_info("%s adc 0x%x, vbvolt : %d, irq_num : %d\n",
 		__func__, adc, vbvolt, irq_num);
@@ -2609,7 +2658,9 @@ static void s2mu004_muic_water_dry_handler(struct work_struct *work)
 		muic_data->water_status = S2MU004_WATER_MUIC_IDLE;
 		muic_data->water_dry_status = S2MU004_WATER_DRY_MUIC_IDLE;
 		muic_data->re_detect = 0;
+#if defined(CONFIG_HICCUP_CHARGER)
 		muic_data->is_hiccup_mode = false;
+#endif
 		muic_data->dry_duration_sec = WATER_DRY_RETRY_INTERVAL_SEC;
 		muic_data->dry_cnt = 0;
 	}
@@ -2860,13 +2911,16 @@ static void s2mu004_muic_init_drvdata(struct s2mu004_muic_data *muic_data,
 	muic_data->afc_check = false;
 	muic_data->otg_state = false;
 	muic_data->is_dcd_recheck = false;
+#if defined(CONFIG_CCIC_S2MU004)
 	muic_data->water_status = S2MU004_WATER_MUIC_IDLE;
 	muic_data->water_dry_status = S2MU004_WATER_DRY_MUIC_IDLE;
 	muic_data->dry_chk_time = 0;
 	muic_data->dry_cnt = 0;
 	muic_data->dry_duration_sec = WATER_DRY_RETRY_INTERVAL_SEC;
+#endif
 }
 
+#if IS_ENABLED(CONFIG_MUIC_MANAGER)
 static void s2mu004_muic_init_interface(struct s2mu004_muic_data *muic_data,
 	struct muic_interface_t *muic_if)
 {
@@ -2901,14 +2955,20 @@ static void s2mu004_muic_init_interface(struct s2mu004_muic_data *muic_data,
 	muic_if->set_afc_ready = s2mu004_if_set_afc_ready;
 #endif
 	muic_if->check_usb_killer = s2mu004_if_check_usb_killer;
+#if defined(CONFIG_CCIC_S2MU004)
 	muic_if->set_water_detect = s2mu004_if_set_water_det;
+#endif
 #ifndef CONFIG_SEC_FACTORY
+#if defined(CONFIG_CCIC_S2MU004)
 	muic_if->set_water_detect_from_boot = s2mu004_if_set_water_det_from_boot;
+#endif
 #endif
 	muic_data->if_data = muic_if;
 	muic_pdata->muic_if = muic_if;
 }
+#endif
 
+#if IS_ENABLED(CONFIG_MUIC_SUPPORT_CCIC)
 static int muic_fb_notifier_event(struct notifier_block *this,
         unsigned long val, void *v)
 {
@@ -2937,6 +2997,7 @@ static int muic_fb_notifier_event(struct notifier_block *this,
 
 	return NOTIFY_DONE;
 }
+#endif
 
 static int s2mu004_muic_probe(struct platform_device *pdev)
 {
@@ -2984,9 +3045,11 @@ static int s2mu004_muic_probe(struct platform_device *pdev)
 
 	s2mu004_muic_init_drvdata(muic_data, s2mu004, pdev, mfd_pdata);
 
+#if IS_ENABLED(CONFIG_MUIC_SUPPORT_CCIC)
 	muic_data->fb_notifier.priority = -1;
        muic_data->fb_notifier.notifier_call = muic_fb_notifier_event;
        fb_register_client(&muic_data->fb_notifier);
+#endif
 
 #if defined(CONFIG_OF)
 	ret = of_s2mu004_muic_dt(&pdev->dev, muic_data);
@@ -3041,6 +3104,9 @@ static int s2mu004_muic_probe(struct platform_device *pdev)
 	s2mu004_hv_muic_initialize(muic_data);
 #endif /* CONFIG_HV_MUIC_S2MU004_AFC */
 
+#if !defined(CONFIG_SEC_FACTORY) && defined(CONFIG_MUIC_SUPPORT_TYPEB)
+	muic_pdata->is_rustproof = muic_pdata->rustproof_on;
+#endif
 	if (muic_pdata->is_rustproof) {
 		pr_err("%s rustproof is enabled\n", __func__);
 		s2mu004_muic_com_to_open_with_vbus(muic_data);
@@ -3164,9 +3230,11 @@ static int s2mu004_muic_suspend(struct device *dev)
 
 	muic_pdata->suspended = true;
 
+#if defined(CONFIG_CCIC_S2MU004)
 	if (muic_data->water_status == S2MU004_WATER_MUIC_CCIC_STABLE) {
 		cancel_delayed_work(&muic_data->sleep_dry_checker);
 	}
+#endif
 
 	return 0;
 }
@@ -3186,11 +3254,13 @@ static int s2mu004_muic_resume(struct device *dev)
 		muic_pdata->need_to_noti = false;
 	}
 
+#if defined(CONFIG_CCIC_S2MU004)
 	if (muic_data->water_status == S2MU004_WATER_MUIC_CCIC_STABLE) {
 		cancel_delayed_work(&muic_data->sleep_dry_checker);
 		schedule_delayed_work(&muic_data->sleep_dry_checker,
 			msecs_to_jiffies(WATER_WAKEUP_WAIT_DURATION_MS));
 	}
+#endif
 
 	return 0;
 }

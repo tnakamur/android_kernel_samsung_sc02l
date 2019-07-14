@@ -418,7 +418,9 @@ do {									\
 #else
 #define MANSW_UART_CP				(MANUAL_SW_UART2 | MANUAL_SW_CHARGER)
 #endif
+#if IS_ENABLED(CONFIG_HICCUP_CHARGER)
 #define MANSW_HICCUP				(MANUAL_SW_UART2 | MANUAL_SW_CHARGER)
+#endif
 #define MANSW_OPEN_RUSTPROOF	(MANUAL_SW_OPEN | MANUAL_SW_CHARGER)
 
 enum s2mu004_muic_mode {
@@ -521,6 +523,10 @@ struct s2mu004_muic_data {
 	int irq_mpnack;
 	int irq_vbadc;
 	int irq_vdnmon;
+	int irq_mrxtrf;
+	bool is_afcblock_ready;
+	bool is_handling_afc;
+	bool is_mrxtrf_in;
 #endif
 	int retry_cnt;
 	int retry_qc_cnt;
@@ -567,7 +573,9 @@ struct s2mu004_muic_data {
 	bool is_dcd_recheck;
 	bool is_otg_vboost;
 	bool is_otg_reboost;
+#if IS_ENABLED(CONFIG_HICCUP_CHARGER)
 	bool is_hiccup_mode;
+#endif
 	bool jig_disable;
 
 	int rev_id;

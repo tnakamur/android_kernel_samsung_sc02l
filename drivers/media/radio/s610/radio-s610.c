@@ -41,6 +41,12 @@
 #include "fm_low_struc.h"
 #include "radio-s610.h"
 
+#ifdef USE_AUDIO_PM
+#include "../../../../sound/soc/samsung/abox/abox.h"
+#define ABOX_CPU_GEAR_STP		(3)
+#define ABOX_CPU_GEAR_MIN		(12)
+#endif /* USE_AUDIO_PM */
+
 static int radio_region;
 module_param(radio_region, int, 0);
 MODULE_PARM_DESC(radio_region, "Region: 0=Europe/US, 1=Japan");
@@ -1471,6 +1477,9 @@ void  fm_prepare(struct s610_radio *radio)
 #ifdef USE_FM_LNA_ENABLE
 static int set_eLNA_gpio(struct s610_radio *radio, int stat)
 {
+	if (radio->without_elna)
+		return -EPERM;
+
 	if (!gpio_is_valid(radio->elna_gpio)) {
 		return -EINVAL;
 	} else {
@@ -1491,20 +1500,31 @@ static int s610_radio_fops_open(struct file *file)
 
 	shared_fm_open_cnt++;
 
-#ifdef USE_FM_LNA_ENABLE
-	if (radio->elna_gpio != -EINVAL) {
-		ret = set_eLNA_gpio(radio, GPIO_HIGH);
-		if (ret)
-			dev_info(radio->v4l2dev.dev,
-					"Failed to set gpio for eLNA\n");
-	}
-#endif /* USE_FM_LNA_ENABLE */
-
 	ret = v4l2_fh_open(file);
 	if (ret)
 		return ret;
 
 	if (v4l2_fh_is_singular_file(file)) {
+#ifdef USE_FM_LNA_ENABLE
+		if (radio->elna_gpio != -EINVAL) {
+			dev_info(radio->v4l2dev.dev,
+				"(%s):FM eLNA gpio: %d\n",
+				__func__, radio->elna_gpio);
+			if (gpio_request_one(radio->elna_gpio,
+					     GPIOF_OUT_INIT_LOW,
+					     "LNA_GPIO_EN")) {
+				dev_info(radio->v4l2dev.dev,
+					"Failed to request gpio for FM eLNA\n");
+			}
+			if (set_eLNA_gpio(radio, GPIO_HIGH)) {
+				dev_info(radio->v4l2dev.dev,
+					"Failed to set gpio HIGH for FM eLNA\n");
+			} else
+				dev_info(radio->v4l2dev.dev,
+					"Set gpio HIGH for FM eLNA\n");
+		}
+#endif /* USE_FM_LNA_ENABLE */
+
 		s610_core_lock(radio->core);
 		atomic_set(&radio->is_doing, 0);
 		atomic_set(&radio->is_rds_doing, 0);
@@ -1520,9 +1540,13 @@ static int s610_radio_fops_open(struct file *file)
 #ifdef USE_AUDIO_PM
 		if (radio->a_dev) {
 			ret = pm_runtime_get_sync(radio->a_dev);
-			if (ret) {
+			if (ret < 0) {
 				dev_err(radio->v4l2dev.dev,
-				"audio get_sync not work: not suspend%d\n", ret);
+					"audio get_sync not work: not suspend %d\n", ret);
+			} else {
+				abox_request_cpu_gear_sync(radio->a_dev,
+					dev_get_drvdata(radio->a_dev), (unsigned long int)radio->dev, ABOX_CPU_GEAR_STP);
+				dev_info(radio->v4l2dev.dev, "(%s)audio get_sync\n", __func__);
 			}
 		}
 #endif /* USE_AUDIO_PM */
@@ -1629,11 +1653,28 @@ static int s610_radio_fops_release(struct file *file)
 
 		pm_runtime_put_sync(radio->dev);
 #ifdef USE_AUDIO_PM
-		if (radio->a_dev)
+		if (radio->a_dev) {
+			abox_request_cpu_gear_sync(radio->a_dev,
+				dev_get_drvdata(radio->a_dev), (unsigned long int)radio->dev, ABOX_CPU_GEAR_MIN);
+
 			pm_runtime_put_sync(radio->a_dev);
+			dev_info(radio->v4l2dev.dev, "(%s)audio put_sync\n", __func__);
+		}
 #endif /* USE_AUDIO_PM */
 		exynos_pmu_shared_reg_disable();
 		s610_core_unlock(radio->core);
+
+#ifdef USE_FM_LNA_ENABLE
+		if (radio->elna_gpio != -EINVAL) {
+			if (set_eLNA_gpio(radio, GPIO_LOW))
+				dev_info(radio->v4l2dev.dev,
+					"Failed to set gpio LOW for FM eLNA\n");
+			else
+				dev_info(radio->v4l2dev.dev,
+					"Set gpio LOW for FM eLNA\n");
+			gpio_free(radio->elna_gpio);
+		}
+#endif /* USE_FM_LNA_ENABLE */
 	}
 
 	if (wake_lock_active(&radio->wakelock))
@@ -1644,14 +1685,6 @@ static int s610_radio_fops_release(struct file *file)
 
 	ret = v4l2_fh_release(file);
 
-#ifdef USE_FM_LNA_ENABLE
-	if (radio->elna_gpio != -EINVAL) {
-		ret = set_eLNA_gpio(radio, GPIO_LOW);
-		if (ret)
-			dev_info(radio->v4l2dev.dev,
-					"Failed to set gpio for eLNA\n");
-	}
-#endif /* USE_FM_LNA_ENABLE */
 	shared_fm_open_cnt--;
 
 	return ret;
@@ -1861,9 +1894,9 @@ static struct device_node *exynos_audio_parse_dt(struct s610_radio *radio)
 	struct platform_device *pdev = NULL;
 	struct device_node *np = NULL;
 
-	np = of_find_compatible_node(NULL, NULL, "samsung,s1403x");
+	np = of_find_compatible_node(NULL, NULL, "samsung,abox");
 	if (!np) {
-		dev_err(radio->dev, "s1403x device is not available\n");
+		dev_err(radio->dev, "abox device is not available\n");
 		return NULL;
 	}
 
@@ -1873,6 +1906,7 @@ static struct device_node *exynos_audio_parse_dt(struct s610_radio *radio)
 		return NULL;
 	}
 	radio->a_dev = &pdev->dev;
+	dev_info(radio->v4l2dev.dev, "(%s)audio get dev\n", __func__);
 
 	return np;
 }
@@ -1897,9 +1931,6 @@ static int s610_radio_probe(struct platform_device *pdev)
 	static atomic_t instance = ATOMIC_INIT(0);
 	struct clk *clk, *pll_clk;
 	struct device_node *dnode;
-#ifdef USE_FM_LNA_ENABLE
-	int elna_gpio = 0;
-#endif /*USE_FM_LNA_ENABLE*/
 
 	dnode = dev->of_node;
 
@@ -2036,25 +2067,24 @@ static int s610_radio_probe(struct platform_device *pdev)
 	gradio = radio;
 
 #ifdef USE_FM_LNA_ENABLE
-	elna_gpio = of_get_named_gpio(dnode, "elna_gpio", 0);
-	if (!gpio_is_valid(elna_gpio)) {
-		dev_err(dev, "Disable elna_gpio control\n");
-		elna_gpio = -EINVAL;
+	radio->elna_gpio = of_get_named_gpio(dnode, "elna_gpio", 0);
+	if (!gpio_is_valid(radio->elna_gpio)) {
+		dev_err(dev, "(%s) elna_gpio invalid. Disable elna_gpio control\n",
+			__func__);
+		radio->elna_gpio = -EINVAL;
 	} else {
-		ret = gpio_request_one(elna_gpio, GPIOF_OUT_INIT_LOW, "LNA_GPIO_EN");
-		if (ret) {
-			dev_err(dev, "Disable elna_gpio control\n");
-			elna_gpio = -EINVAL;
-		} else
-			dev_info(dev, "Enable elna_gpio control\n");
+		ret = gpio_request_one(radio->elna_gpio, GPIOF_OUT_INIT_LOW,
+					"LNA_GPIO_EN");
+		if (ret)
+			gpio_set_value(radio->elna_gpio, GPIO_LOW);
+		dev_info(dev, "(%s) Enable elna_gpio control :%d\n",
+			__func__, gpio_get_value(radio->elna_gpio));
 	}
-	radio->elna_gpio = elna_gpio;
 #endif /* USE_FM_LNA_ENABLE */
 
 #ifdef USE_AUDIO_PM
 	if (!exynos_audio_parse_dt(radio)) {
-		ret = -EINVAL;
-		goto alloc_err4;
+		dev_err(dev, "audio dt not used\n");
 	}
 #endif /* USE_AUDIO_PM */
 
@@ -2248,6 +2278,11 @@ skip_tc_off:
 		goto skip_trf_off;
 	}
 	dev_info(radio->dev, "number TRF On Freq: %d\n", radio->trf_on);
+
+	ret = of_property_read_u32(dnode, "spur-trfon-freq", &radio->trf_spur);
+	if (ret)
+		radio->trf_spur = 0;
+
 skip_trf_off:
 
 	ret = of_property_read_u32(dnode, "num-dual-clkon-freq", &radio->dual_clk_on);
@@ -2323,6 +2358,11 @@ skip_vol_sel:
 		radio->rssi_adjust= 0;
 	dev_info(radio->dev, "rssi adjust: %d\n", radio->rssi_adjust);
 
+	ret = of_property_read_u32(dnode, "agc_thresh", &radio->agc_thresh);
+	if (ret)
+		radio->agc_thresh = 0xFF64;
+	dev_info(radio->dev, "agc thresh: %d\n", radio->agc_thresh);
+
 	pm_runtime_put_sync(dev);
 	exynos_pmu_shared_reg_disable();
 
@@ -2336,11 +2376,6 @@ exit:
 	v4l2_ctrl_handler_free(radio->videodev.ctrl_handler);
 
 alloc_err4:
-#ifdef USE_FM_LNA_ENABLE
-	if (radio->elna_gpio != -EINVAL)
-		gpio_free(radio->elna_gpio);
-#endif /*USE_FM_LNA_ENABLE*/
-
 	v4l2_device_unregister(&radio->v4l2dev);
 
 alloc_err3:
@@ -2376,10 +2411,6 @@ static int s610_radio_remove(struct platform_device *pdev)
 		v4l2_ctrl_handler_free(radio->videodev.ctrl_handler);
 		video_unregister_device(&radio->videodev);
 		v4l2_device_unregister(&radio->v4l2dev);
-#ifdef USE_FM_LNA_ENABLE
-	if (radio->elna_gpio != -EINVAL)
-		gpio_free(radio->elna_gpio);
-#endif /*USE_FM_LNA_ENABLE*/
 		wake_lock_destroy(&radio->wakelock);
 		wake_lock_destroy(&radio->rdswakelock);
 
