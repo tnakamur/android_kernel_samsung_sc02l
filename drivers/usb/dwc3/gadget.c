@@ -1750,6 +1750,9 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		dwc3_event_buffers_cleanup(dwc);
 		__dwc3_gadget_ep_disable(dwc->eps[1]);
 		__dwc3_gadget_ep_disable(dwc->eps[0]);
+		
+		/* we need to clear ep0 delayed status flag */
+		dwc->delayed_status = 0;
 
 		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 		reg &= ~DWC3_DCTL_RUN_STOP;
@@ -2738,7 +2741,7 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	/* after reset -> Default State */
 	usb_gadget_set_state(&dwc->gadget, USB_STATE_DEFAULT);
 
-	dwc->vbus_curernt= USB_CURRENT_UNCONFIGURED;
+	dwc->vbus_current= USB_CURRENT_UNCONFIGURED;
 	schedule_work(&dwc->set_vbus_current_work);	
 
 	dwc3_reset_gadget(dwc);
@@ -2832,6 +2835,8 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 		dwc->gadget.speed = USB_SPEED_LOW;
 		break;
 	}
+
+	dwc->eps[1]->endpoint.maxpacket = dwc->gadget.ep0->maxpacket;
 
 	/* Enable USB2 LPM Capability */
 
@@ -3016,9 +3021,13 @@ static void dwc3_gadget_linksts_change_interrupt(struct dwc3 *dwc,
 		break;
 	case DWC3_LINK_STATE_U3:
 		if (dwc->gadget.state == USB_STATE_CONFIGURED) {
-			dwc->vbus_curernt = USB_CURRENT_UNCONFIGURED;
+#ifdef CONFIG_ENABLE_USB_SUSPEND_STATE
+			dwc->vbus_current = USB_CURRENT_SUSPENDED;
+#else
+			dwc->vbus_current = USB_CURRENT_UNCONFIGURED;
+#endif
 			schedule_work(&dwc->set_vbus_current_work);
-		}	
+		}
 	case DWC3_LINK_STATE_U2:
 		dwc3_suspend_gadget(dwc);
 		break;

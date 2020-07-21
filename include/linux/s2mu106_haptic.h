@@ -69,7 +69,7 @@
 #define LRA_MODE_EN			0x20
 #define ERM_HDPWM_MODE_EN		0x41
 #define ERM_MODE_ON			0x01
-#define ERM_MODE_OFF			0x00
+#define HAPTIC_MODE_OFF			0x00
 
 enum s2mu106_haptic_operation_type {
 	S2MU106_HAPTIC_ERM_I2C,

@@ -71,6 +71,7 @@ struct cod3035x_jack_det {
 	int prev_jack_det_status;
 	bool ant_det;
 	bool ant_irq;
+	int ignore_ext_ant;
 #endif
 	bool surge_det;
 	unsigned int button_code;
@@ -99,6 +100,8 @@ struct cod3035x_priv {
 	int num_inputs;
 	int int_gpio;
 
+	int dtv_check_gpio;
+	bool dtv_detect;
 #ifdef CONFIG_SND_SOC_COD30XX_EXT_ANT
 	int ant_det_gpio;
 	int ant_adc_range;

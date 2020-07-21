@@ -2837,7 +2837,7 @@ static ssize_t camera_rear3_mtf_exif_show(struct device *dev,
 static ssize_t camera_rear3_tilt_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return camera_tilt_show(buf, SENSOR_POSITION_REAR3);
+	return camera_tilt_show(buf, SENSOR_POSITION_REAR);
 }
 #endif
 

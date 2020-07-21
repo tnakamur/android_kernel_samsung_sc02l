@@ -2338,6 +2338,15 @@ static void fw_update(void *dev_data)
 		container_of(sec, struct himax_ts_data, sec);
 
 	sec_cmd_set_default_result(sec);
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == 1) {
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		snprintf(buf, sizeof(buf), "%s", "OK");
+		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+		input_info(true, &data->client->dev, "%s: user_ship, success\n", __func__);
+		return;
+	}
+#endif
 
 	input_info(true, &data->client->dev, "%s %s(), %d\n", HIMAX_LOG_TAG,
 			__func__, sec->cmd_param[0]);
@@ -2714,7 +2723,9 @@ static void get_fw_ver_ic(void *dev_data)
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING) {
 		sec_cmd_set_cmd_result_all(sec, buf, strnlen(buf, sizeof(buf)), "FW_VER_IC");
-		sec_cmd_set_cmd_result_all(sec, model, strnlen(model, sizeof(model)), "FW_MODEL");
+
+		if (data->pdata->item_version > 1)
+			sec_cmd_set_cmd_result_all(sec, model, strnlen(model, sizeof(model)), "FW_MODEL");
 	}
 	sec->cmd_state = SEC_CMD_STATUS_OK;
 
@@ -3145,9 +3156,9 @@ static void run_rawcap_read_all(void *dev_data)
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
 
-	sec_cmd_set_default_result(sec);
-
 	get_rawcap(sec);
+
+	sec_cmd_set_default_result(sec);
 
 	if (g_sec_raw_buff->f_ready_rawdata != HX_RAWDATA_READY) {
 		input_err(true, &data->client->dev,
@@ -3263,9 +3274,9 @@ static void run_open_read_all(void *dev_data)
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
 
-	sec_cmd_set_default_result(sec);
-
 	get_open(sec);
+
+	sec_cmd_set_default_result(sec);
 
 	if (g_sec_raw_buff->f_ready_open != HX_RAWDATA_READY) {
 		input_err(true, &data->client->dev,
@@ -3382,9 +3393,9 @@ static void run_short_read_all(void *dev_data)
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
 
-	sec_cmd_set_default_result(sec);
-
 	get_short(sec);
+
+	sec_cmd_set_default_result(sec);
 
 	if (g_sec_raw_buff->f_ready_short != HX_RAWDATA_READY) {
 		input_err(true, &data->client->dev,
@@ -3502,9 +3513,9 @@ static void run_mic_open_read_all(void *dev_data)
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
 
-	sec_cmd_set_default_result(sec);
-
 	get_mic_open(sec);
+
+	sec_cmd_set_default_result(sec);
 
 	if (g_sec_raw_buff->f_ready_mopen!= HX_RAWDATA_READY) {
 		input_err(true, &data->client->dev,
@@ -3622,9 +3633,9 @@ static void run_noise_read_all(void *dev_data)
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
 
-	sec_cmd_set_default_result(sec);
-
 	get_noise(sec);
+
+	sec_cmd_set_default_result(sec);
 
 	if (g_sec_raw_buff->f_ready_noise!= HX_RAWDATA_READY) {
 		input_err(true, &data->client->dev,
@@ -3929,9 +3940,9 @@ static void run_raw_gap_y_read_all(void *dev_data)
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
 
-	sec_cmd_set_default_result(sec);
-
 	get_gap_data_y(sec);
+
+	sec_cmd_set_default_result(sec);
 
 	if (g_sec_raw_buff->f_ready_gap_hor!= HX_RAWDATA_READY) {
 		input_err(true, &data->client->dev,
@@ -4095,9 +4106,9 @@ static void run_raw_gap_x_read_all(void *dev_data)
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
 
-	sec_cmd_set_default_result(sec);
-
 	get_gap_data_x(sec);
+
+	sec_cmd_set_default_result(sec);
 
 	if (g_sec_raw_buff->f_ready_gap_ver!= HX_RAWDATA_READY) {
 		input_err(true, &data->client->dev,
@@ -4213,7 +4224,10 @@ static void factory_cmd_result_all(void *dev_data)
 	get_rawcap(sec);
 	get_gap_data_x(sec);
 	get_gap_data_y(sec);
-	get_open(sec);
+
+	if (data->pdata->item_version > 1)
+		get_open(sec);
+
 	get_mic_open(sec);
 	get_short(sec);
 	get_noise(sec);

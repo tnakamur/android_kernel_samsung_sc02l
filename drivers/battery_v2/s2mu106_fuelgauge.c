@@ -209,11 +209,15 @@ static void s2mu106_reset_fg(struct s2mu106_fuelgauge_data *fuelgauge)
 		fuelgauge->age_data_info[fuelgauge->fg_age_step].batcap[3]);
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x13,
 		fuelgauge->age_data_info[fuelgauge->fg_age_step].volt_mode_tunning);
+	fuelgauge->batcap_0x0E = fuelgauge->age_data_info[fuelgauge->fg_age_step].batcap[0];
+	fuelgauge->batcap_0x0F = fuelgauge->age_data_info[fuelgauge->fg_age_step].batcap[1];
 #else
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x0E, fuelgauge->info.batcap[0]);
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x0F, fuelgauge->info.batcap[1]);
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x10, fuelgauge->info.batcap[2]);
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x11, fuelgauge->info.batcap[3]);
+	fuelgauge->batcap_0x0E = fuelgauge->info.batcap[0];
+	fuelgauge->batcap_0x0F = fuelgauge->info.batcap[1];
 #endif
 	/* After battery capacity update, set BATCAP_OCV_EN(0x0C[6]=1) */
 	s2mu106_read_reg_byte(fuelgauge->i2c, 0x0C, &temp);
@@ -262,7 +266,7 @@ static void s2mu106_reset_fg(struct s2mu106_fuelgauge_data *fuelgauge)
 
 	/* Dumpdone. Re-calculate SOC */
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x1E, 0x0F);
-	mdelay(300);
+	msleep(300);
 
 	/* If it was voltage mode, recover it */
 	if (fuelgauge->mode == HIGH_SOC_VOLTAGE_MODE) {
@@ -368,6 +372,14 @@ static void s2mu106_init_regs(struct s2mu106_fuelgauge_data *fuelgauge)
 	s2mu106_read_reg_byte(fuelgauge->i2c, S2MU106_REG_VM, &temp);
 	temp = temp & 0xFB;
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, S2MU106_REG_VM, temp);
+
+#if defined(CONFIG_BATTERY_AGE_FORECAST)
+	fuelgauge->batcap_0x0E = fuelgauge->age_data_info[fuelgauge->fg_age_step].batcap[0];
+	fuelgauge->batcap_0x0F = fuelgauge->age_data_info[fuelgauge->fg_age_step].batcap[1];
+#else
+	fuelgauge->batcap_0x0E = fuelgauge->info.batcap[0];
+	fuelgauge->batcap_0x0F = fuelgauge->info.batcap[1];
+#endif
 }
 
 static void s2mu106_alert_init(struct s2mu106_fuelgauge_data *fuelgauge)
@@ -632,7 +644,7 @@ static int s2mu106_get_cycle(struct s2mu106_fuelgauge_data *fuelgauge)
 
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, S2MU106_REG_MONOUT_SEL, 0x27);
 
-	mdelay(50);
+	msleep(50);
 
 	if (s2mu106_read_reg(fuelgauge->i2c, S2MU106_REG_MONOUT, data) < 0)
 		goto err;
@@ -713,9 +725,10 @@ static int s2mu106_get_soh(struct s2mu106_fuelgauge_data *fuelgauge)
 	int original = 0, ret = -1;
 	int batcap_ocv = s2mu106_get_batcap_ocv(fuelgauge);
 
-	s2mu106_read_reg_byte(fuelgauge->i2c, S2MU106_REG_BATCAP + 1, &data1);
-	s2mu106_read_reg_byte(fuelgauge->i2c, S2MU106_REG_BATCAP, &data0);
+	data0 = fuelgauge->batcap_0x0E;
+	data1 = fuelgauge->batcap_0x0F;
 	original = (data1 << 8) | data0;
+	original = original >> 2;
 
 	if (original != 0) {
 		ret = (batcap_ocv * 100) / original;
@@ -1101,7 +1114,7 @@ batcap_learn_init:
 
 			/* Dumpdone. Re-calculate SOC */
 			s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x1E, 0x0F);
-			mdelay(300);
+			msleep(300);
 
 			s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x24, 0x00);
 
@@ -1308,7 +1321,7 @@ static int s2mu106_get_avgvbat(struct s2mu106_fuelgauge_data *fuelgauge)
 
 	s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, S2MU106_REG_MONOUT_SEL, 0x16);
 
-	mdelay(50);
+	msleep(50);
 
 	if (s2mu106_read_reg(fuelgauge->i2c, S2MU106_REG_MONOUT, data) < 0)
 		goto err;
@@ -1771,7 +1784,7 @@ static int s2mu106_fg_set_property(struct power_supply *psy,
 					temp &= 0xCF;
 					temp |= 0x10;
 					s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x25, temp);
-					mdelay(1000);
+					msleep(1000);
 					if (val->intval == SEC_BAT_INBAT_FGSRC_SWITCHING_ON)
 						s2mu106_restart_gauging(fuelgauge);
 					s2mu106_fg_reset_capacity_by_jig_connection(fuelgauge);
@@ -1784,7 +1797,7 @@ static int s2mu106_fg_set_property(struct power_supply *psy,
 					temp &= 0xCF;
 					temp |= 0x30;
 					s2mu106_write_and_verify_reg_byte(fuelgauge->i2c, 0x25, temp);
-					mdelay(1000);
+					msleep(1000);
 					if (val->intval == SEC_BAT_INBAT_FGSRC_SWITCHING_OFF)
 						s2mu106_restart_gauging(fuelgauge);
 					s2mu106_fg_reset_capacity_by_jig_connection(fuelgauge);

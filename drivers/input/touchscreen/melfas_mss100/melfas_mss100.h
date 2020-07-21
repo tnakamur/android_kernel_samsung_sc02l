@@ -248,6 +248,8 @@ struct mms_ts_coordinate {
 	u16 mcount;
 	int palm_count;
 	u8 left_event;
+	u8 type;
+	u8 pre_type;
 };
 
 
@@ -314,6 +316,7 @@ struct mms_ts_info {
 	u8 glove_mode;
 	u8 charger_mode;
 	u8 cover_mode;
+	u8 fod_lp_mode;
 
 	u8 esd_cnt;
 	bool disable_esd;
@@ -348,6 +351,12 @@ struct mms_ts_info {
 	struct mutex modechange;
 	struct delayed_work work_read_info;
 	bool info_work_done;
+
+	struct delayed_work work_print_info;
+	int noise_mode;
+	int wet_mode;
+	int print_info_cnt_open;
+	int print_info_cnt_release;
 
 	bool lowpower_mode;
 	unsigned char lowpower_flag;

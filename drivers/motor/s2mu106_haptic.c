@@ -117,6 +117,7 @@ static void s2mu106_haptic_onoff(struct s2mu106_haptic_data *haptic, bool en)
 
 		switch (haptic->hap_mode) {
 		case S2MU106_HAPTIC_LRA:
+			s2mu106_write_reg(haptic->i2c, S2MU106_REG_HAPTIC_MODE, LRA_MODE_EN);
 			pwm_config(haptic->pwm, haptic->pdata->duty,
 					haptic->pdata->period);
 			pwm_enable(haptic->pwm);
@@ -140,13 +141,14 @@ static void s2mu106_haptic_onoff(struct s2mu106_haptic_data *haptic, bool en)
 		switch (haptic->hap_mode) {
 		case S2MU106_HAPTIC_LRA:
 			pwm_disable(haptic->pwm);
+			s2mu106_write_reg(haptic->i2c, S2MU106_REG_HAPTIC_MODE, HAPTIC_MODE_OFF);
 			break;
 		case S2MU106_HAPTIC_ERM_GPIO:
 			if (gpio_is_valid(haptic->motor_en))
 				gpio_direction_output(haptic->motor_en, 0);
 			break;
 		case S2MU106_HAPTIC_ERM_I2C:
-			s2mu106_write_reg(haptic->i2c, S2MU106_REG_HAPTIC_MODE, ERM_MODE_OFF);
+			s2mu106_write_reg(haptic->i2c, S2MU106_REG_HAPTIC_MODE, HAPTIC_MODE_OFF);
 			break;
 		default:
 			break;
@@ -465,7 +467,7 @@ static void s2mu106_haptic_initial(struct s2mu106_haptic_data *haptic)
 	/* mode setting */
 	switch (haptic->hap_mode) {
 	case S2MU106_HAPTIC_LRA:
-		data = LRA_MODE_EN;
+		data = HAPTIC_MODE_OFF;
 		pwm_config(haptic->pwm, haptic->pdata->duty,
 				haptic->pdata->period);
 		s2mu106_update_reg(haptic->i2c, S2MU106_REG_OV_BK_OPTION,
@@ -486,7 +488,7 @@ static void s2mu106_haptic_initial(struct s2mu106_haptic_data *haptic)
 		}
 		break;
 	case S2MU106_HAPTIC_ERM_I2C:
-		data = ERM_MODE_OFF;
+		data = HAPTIC_MODE_OFF;
 		break;
 	default:
 		data = ERM_HDPWM_MODE_EN;

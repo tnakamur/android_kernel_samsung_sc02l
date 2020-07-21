@@ -1161,11 +1161,14 @@ static void s3c24xx_serial_set_termios(struct uart_port *port,
 	wr_regl(port, S3C2410_ULCON, ulcon);
 	wr_regl(port, S3C2410_UBRDIV, quot);
 
+	port->status &= ~UPSTAT_AUTOCTS;
+
 	umcon = rd_regl(port, S3C2410_UMCON);
 	if (termios->c_cflag & CRTSCTS) {
 		umcon |= S3C2410_UMCOM_AFC;
 		/* Disable RTS when RX FIFO contains 63 bytes */
 		umcon &= ~S3C2412_UMCON_AFC_8;
+		port->status = UPSTAT_AUTOCTS;
 	} else {
 		umcon &= ~S3C2410_UMCOM_AFC;
 	}
@@ -1832,6 +1835,11 @@ static int s3c24xx_serial_probe(struct platform_device *pdev)
 
 	dbg("s3c24xx_serial_probe(%p) %d\n", pdev, index);
 
+	if (index >= ARRAY_SIZE(s3c24xx_serial_ports)) {
+		dev_err(&pdev->dev, "serial%d out of range\n", index);
+		return -EINVAL;
+	}
+	
 	if (pdev->dev.of_node) {
 		ret = of_alias_get_id(pdev->dev.of_node, "uart");
 		if (ret < 0) {
@@ -1841,10 +1849,12 @@ static int s3c24xx_serial_probe(struct platform_device *pdev)
 			port_index = ret;
 		}
 	}
+	
 	ourport = &s3c24xx_serial_ports[port_index];
 
 	if (ourport->port.line != port_index)
 		ourport = exynos_serial_default_port(port_index);
+
 
 	if (ourport->port.line >= CONFIG_SERIAL_SAMSUNG_UARTS) {
 		dev_err(&pdev->dev,

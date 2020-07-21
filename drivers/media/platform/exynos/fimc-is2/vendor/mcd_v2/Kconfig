@@ -52,6 +52,12 @@ config CAMERA_ATS_V03
         default n
         help
           This camera is ats_v03 project.
+config CAMERA_ATS_V04
+        bool "This camera is ats_v04 project"
+        depends on VENDER_MCD_V2
+        default n
+        help
+          This camera is ats_v04 project.
 config CAMERA_AAS_V30
         bool "This camera is aas_v30 project"
         depends on VENDER_MCD_V2
@@ -76,6 +82,12 @@ config CAMERA_AAS_V30C
         default n
         help
           This camera is aas_v30c project.
+config CAMERA_AAS_V30S
+        bool "This camera is aas_v30s project"
+        depends on VENDER_MCD_V2
+        default n
+        help
+          This camera is aas_v30s project.
 config CAMERA_AAS_V30J
         bool "This camera is aas_v30j project"
         depends on VENDER_MCD_V2
@@ -100,6 +112,12 @@ config CAMERA_AAS_V10E
         default n
         help
           This camera is aas_v10e project.
+config CAMERA_AAS_V10EKX
+        bool "This camera is aas_v10ekx project"
+        depends on VENDER_MCD_V2
+        default n
+        help
+          This camera is aas_v10ekx project.
 config CAMERA_XXS_V04S
         bool "This camera is xxs_v04s project"
         depends on VENDER_MCD_V2
@@ -118,6 +136,12 @@ config CAMERA_MMS_V20
         default n
         help
           This camera is mms_v20 project.
+config CAMERA_MMS_V10S
+        bool "This camera is mms_v10s project"
+        depends on VENDER_MCD_V2
+        default n
+        help
+          This camera is mms_v10s project.
 config CAMERA_USE_OTP_DPC_DATA
         bool "Use otp dpc data"
         depends on VENDER_MCD_V2

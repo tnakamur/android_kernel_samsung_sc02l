@@ -115,6 +115,10 @@ void f_setown(struct file *filp, unsigned long arg, int force)
 	int who = arg;
 	type = PIDTYPE_PID;
 	if (who < 0) {
+		/* avoid overflow below */
+		if (who == INT_MIN)
+			return;
+
 		type = PIDTYPE_PGID;
 		who = -who;
 	}
@@ -354,6 +358,11 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 	case F_FIVE_CLOSE:
 		err = five_fcntl_close(filp);
 		break;
+#ifdef CONFIG_FIVE_DEBUG
+	case F_FIVE_DEBUG:
+		err = five_fcntl_debug(filp, (void __user *)arg);
+		break;
+#endif
 #endif
 	case F_ADD_SEALS:
 	case F_GET_SEALS:

@@ -21,6 +21,8 @@
 #include "fimc-is-vendor-config_wxs_v00.h"
 #elif defined(CONFIG_CAMERA_ATS_V03)
 #include "fimc-is-vendor-config_ats_v03.h"
+#elif defined(CONFIG_CAMERA_ATS_V04)
+#include "fimc-is-vendor-config_ats_v04.h"
 #elif defined(CONFIG_CAMERA_AAS_V30)
 #include "fimc-is-vendor-config_aas_v30.h"
 #elif defined(CONFIG_CAMERA_AAS_V40)
@@ -29,6 +31,8 @@
 #include "fimc-is-vendor-config_aas_v20.h"
 #elif defined(CONFIG_CAMERA_AAS_V30C)
 #include "fimc-is-vendor-config_aas_v30c.h"
+#elif defined(CONFIG_CAMERA_AAS_V30S)
+#include "fimc-is-vendor-config_aas_v30s.h"
 #elif defined(CONFIG_CAMERA_AAS_V10)
 #include "fimc-is-vendor-config_aas_v10.h"
 #elif defined(CONFIG_CAMERA_AAS_V30J)
@@ -37,12 +41,16 @@
 #include "fimc-is-vendor-config_aas_v20e.h"
 #elif defined(CONFIG_CAMERA_AAS_V10E)
 #include "fimc-is-vendor-config_aas_v10e.h"
+#elif defined(CONFIG_CAMERA_AAS_V10EKX)
+#include "fimc-is-vendor-config_aas_v10ekx.h"
 #elif defined(CONFIG_CAMERA_XXS_V04S)
 #include "fimc-is-vendor-config_xxs_v04s.h"
 #elif defined(CONFIG_CAMERA_AAS_V07J)
 #include "fimc-is-vendor-config_aas_v07j.h"
 #elif defined(CONFIG_CAMERA_MMS_V20)
 #include "fimc-is-vendor-config_mms_v20.h"
+#elif defined(CONFIG_CAMERA_MMS_V10S)
+#include "fimc-is-vendor-config_mms_v10s.h"
 #else
 #include "fimc-is-vendor-config_common.h"
 #endif

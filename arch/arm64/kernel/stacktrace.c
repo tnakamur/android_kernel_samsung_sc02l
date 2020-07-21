@@ -74,14 +74,10 @@ int notrace unwind_frame(struct task_struct *tsk, struct stackframe *frame)
 	frame->fp = *(unsigned long *)(fp);
 	frame->pc = *(unsigned long *)(fp + 8);
 
-#ifdef CONFIG_SEC_DEBUG_INFINITY_BACKTRACE
-	if (fp == frame->fp) {
-		s3c2410wdt_set_emergency_reset(3);
-		exynos_ss_spin_func();
-	}
-#else
-	if (fp == frame->fp)
+#ifdef CONFIG_SEC_DEBUG_LIMIT_BACKTRACE
+	if (fp == frame->fp && frame->sp != irq_stack_ptr) {
 		return -EINVAL;
+	}
 #endif
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER

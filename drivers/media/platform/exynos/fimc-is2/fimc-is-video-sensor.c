@@ -258,7 +258,18 @@ const struct v4l2_file_operations fimc_is_ssx_video_fops = {
 static int fimc_is_ssx_video_querycap(struct file *file, void *fh,
 					struct v4l2_capability *cap)
 {
-	/* Todo : add to query capability code */
+	struct fimc_is_video *video = video_drvdata(file);
+
+	FIMC_BUG(!cap);
+	FIMC_BUG(!video);
+
+	snprintf(cap->driver, sizeof(cap->driver), "%s", video->vd.name);
+	snprintf(cap->card, sizeof(cap->card), "%s", video->vd.name);
+	cap->capabilities |= V4L2_CAP_STREAMING
+			| V4L2_CAP_VIDEO_OUTPUT
+			| V4L2_CAP_VIDEO_OUTPUT_MPLANE;
+	cap->device_caps |= cap->capabilities;
+
 	return 0;
 }
 
@@ -673,6 +684,7 @@ static int fimc_is_ssx_video_s_ctrl(struct file *file, void *priv,
 	case V4L2_CID_HFLIP:
 	case V4L2_CID_VFLIP:
 	case V4L2_CID_IS_INTENT:
+	case V4L2_CID_IS_FORCE_FLASH_MODE:
 	case V4L2_CID_IS_OPENING_HINT:
 	case V4L2_CID_IS_CLOSING_HINT:
 		ret = fimc_is_video_s_ctrl(file, vctx, ctrl);

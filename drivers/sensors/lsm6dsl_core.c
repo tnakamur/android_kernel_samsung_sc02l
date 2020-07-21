@@ -2031,15 +2031,21 @@ static ssize_t lsm6dsl_smart_alert_store(struct device *dev,
 					   threshold, true);
 
 
-		if (cdata->enabled & (1 << LSM6DSL_ACCEL))
+		if (cdata->enabled & (1 << LSM6DSL_ACCEL)) {
 			odr = cdata->acc_odr;
-		else if (cdata->enabled & LSM6DSL_EXTRA_DEPENDENCY)
+			hrtimer_cancel(&cdata->acc_timer);
+			cancel_work_sync(&cdata->acc_work);
+		} else if (cdata->enabled & LSM6DSL_EXTRA_DEPENDENCY)
 			odr = LSM6DSL_ODR_26HZ_VAL;
 
 		lsm6dsl_write_data_with_mask(cdata,
 					   LSM6DSL_ACCEL_ODR_ADDR,
 					   LSM6DSL_ACCEL_ODR_MASK,
 					   odr, true);
+		mdelay(50);
+		if (cdata->enabled & (1 << LSM6DSL_ACCEL))
+			hrtimer_start(&cdata->acc_timer, cdata->acc_delay,
+							HRTIMER_MODE_REL);
 
 		SENSOR_INFO("smart alert is off! irq = %d, odr 0x%x\n",
 						cdata->sa_irq_state, odr);
@@ -2367,7 +2373,7 @@ static int lsm6dsl_gyro_fifo_test(struct lsm6dsl_data *cdata,
 		return err;
 
 	err = lsm6dsl_write_data_with_mask(cdata,
-			LSM6DSL_CTRL2_ADDR, 0xf0, LSM6DSL_ODR_208HZ_VAL, true);
+			LSM6DSL_CTRL2_ADDR, 0xf0, LSM6DSL_ODR_104HZ_VAL, true);
 	if (err < 0)
 		return err;
 
@@ -2963,7 +2969,7 @@ static ssize_t lsm6dsl_write_register_store(struct device *dev,
 
 static void lsm6dsl_read_register(struct lsm6dsl_data *cdata)
 {
-	u8 reg;
+	u8 reg, offset;
 	u8 reg_value[16] = {0x00,};
 	u8 i, unit = 16;
 	s8 ret;
@@ -2975,8 +2981,9 @@ static void lsm6dsl_read_register(struct lsm6dsl_data *cdata)
 			SENSOR_ERR("[0x%02x-0x%02x]: fail %d\n", reg, reg+unit-1, ret);
 		}
 		else {
+			offset = 0;
 			for (i = 0; i < unit; i++)
-				snprintf(buf+5*i, 84, "0x%02x ", reg_value[i]);
+				offset += snprintf(buf + offset, sizeof(buf) - offset, "0x%02x ", reg_value[i]);
 			SENSOR_INFO("[0x%02x-0x%02x]:%s\n", reg, reg+unit-1, buf);
 		}
 	}
@@ -3630,7 +3637,7 @@ int lsm6dsl_common_probe(struct lsm6dsl_data *cdata, int irq, u16 bustype)
 		else
 			break;
 
-		msleep(20);
+		usleep_range(20000, 20000);
 	}
 
 	if (retry < 0)

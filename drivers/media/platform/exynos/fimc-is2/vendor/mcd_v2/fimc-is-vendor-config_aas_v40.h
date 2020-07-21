@@ -48,6 +48,8 @@
 #define MAX_MCSC_DNR_HEIGHT		(3456)
 #endif
 
+#define HEAP_SIZE_VENDOR_DEFINE	(0x02300000)      /* Define FIMC_IS_HEAP_SIZE in Vendor: 35MB */
+
 #define USE_I2C_LOCK                              /* I2C LOCK ENABLE DEFINE */
 
 

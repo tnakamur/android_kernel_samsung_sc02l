@@ -57,7 +57,7 @@ static const char *handler[] = {
 	"Error"
 };
 
-int show_unhandled_signals = 1;
+int show_unhandled_signals = 0;
 
 /*
  * Dump out the contents of some memory nicely...
@@ -213,14 +213,11 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		unsigned long stack;
 		int ret;
 
-#ifdef CONFIG_SEC_DEBUG_INFINITY_BACKTRACE
+#ifdef CONFIG_SEC_DEBUG_LIMIT_BACKTRACE
 		if (MAX_UNWINDING_LOOP < cnt) {
-			s3c2410wdt_set_emergency_reset(3);
-			exynos_ss_spin_func();
-		}
-#else
-		if (MAX_UNWINDING_LOOP < cnt)
+			pr_info("%s: Forcely break dump_backtrace to avoid infinity backtrace\n", __func__);
 			break;
+		}
 #endif
 
 		/* skip until specified stack frame */
@@ -310,14 +307,11 @@ static void dump_backtrace_auto_summary(struct pt_regs *regs, struct task_struct
 		unsigned long stack;
 		int ret;
 
-#ifdef CONFIG_SEC_DEBUG_INFINITY_BACKTRACE
+#ifdef CONFIG_SEC_DEBUG_LIMIT_BACKTRACE
 		if (MAX_UNWINDING_LOOP < cnt) {
-			s3c2410wdt_set_emergency_reset(3);
-			exynos_ss_spin_func();
-		}
-#else
-		if (MAX_UNWINDING_LOOP < cnt)
+			pr_info("%s: Forcely break dump_backtrace to avoid infinity backtrace\n", __func__);
 			break;
+		}
 #endif
 
 		/* skip until specified stack frame */
@@ -620,7 +614,7 @@ asmlinkage long do_ni_syscall(struct pt_regs *regs)
 
 	if (show_unhandled_signals_ratelimited()) {
 		pr_info("%s[%d]: syscall %d\n", current->comm,
-			task_pid_nr(current), (int)regs->syscallno);
+			task_pid_nr(current), regs->syscallno);
 		dump_instr("", regs);
 		if (user_mode(regs))
 			__show_regs(regs);

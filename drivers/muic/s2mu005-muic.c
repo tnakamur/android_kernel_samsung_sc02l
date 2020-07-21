@@ -1599,13 +1599,12 @@ static void s2mu005_muic_detect_dev(struct s2mu005_muic_data *muic_data)
 	switch (devt3) {
 	case DEV_TYPE3_MHL:
 		pr_info("%s: MHL DETECTED\n", __func__);
-#if defined(CONFIG_TYPEB_WATERPROOF_MODEL)
-		if (vbvolt) {
-			new_dev = ATTACHED_DEV_UNDEFINED_RANGE_MUIC;
-		}
-#else
 		if (muic_data->pdata->is_factory_uart)
 			new_dev = ATTACHED_DEV_FACTORY_UART_MUIC;
+#if defined(CONFIG_TYPEB_WATERPROOF_MODEL)
+		else if (vbvolt) {
+			new_dev = ATTACHED_DEV_UNDEFINED_RANGE_MUIC;
+		}
 #endif
 		break;
 	default:

@@ -1,20 +1,47 @@
-/* decon_notify.c
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
+
 #include <linux/fb.h>
 #include <linux/export.h>
 #include <linux/module.h>
+#include <linux/blkdev.h>
 
 #include "decon_notify.h"
+
+#define dbg_none(fmt, ...)		pr_debug(pr_fmt("decon: "fmt), ##__VA_ARGS__)
+#define dbg_info(fmt, ...)		pr_info(pr_fmt("decon: "fmt), ##__VA_ARGS__)
+#define NSEC_TO_MSEC(ns)		(div_u64(ns, NSEC_PER_MSEC))
+
+#define __XX(a)	#a,
+const char *EVENT_NAME[] = { EVENT_LIST };
+const char *STATE_NAME[] = { STATE_LIST };
+#undef __XX
+
+enum {
+	CHAIN_START,
+	CHAIN_END,
+	CHAIN_MAX,
+};
+
+u32 EVENT_NAME_LEN;
+u32 STATE_NAME_LEN;
+u64 STAMP_TIME[STAMP_MAX][CHAIN_MAX];
+
+static u32 EVENT_TO_STAMP[EVENT_MAX] = {
+	[FB_EVENT_BLANK] =		DECON_STAMP_AFTER,
+	[FB_EARLY_EVENT_BLANK] =	DECON_STAMP_EARLY,
+	[DECON_EVENT_DOZE] =		DECON_STAMP_AFTER,
+	[DECON_EARLY_EVENT_DOZE] =	DECON_STAMP_EARLY,
+	[DECON_EVENT_FRAME] =		DECON_STAMP_FRAME,
+	[DECON_EVENT_FRAME_SEND] =	DECON_STAMP_FRAME_SEND,
+	[DECON_EVENT_FRAME_DONE] =	DECON_STAMP_FRAME_DONE,
+};
 
 static BLOCKING_NOTIFIER_HEAD(decon_notifier_list);
 
@@ -32,56 +59,91 @@ EXPORT_SYMBOL(decon_unregister_notifier);
 
 int decon_notifier_call_chain(unsigned long val, void *v)
 {
-	return blocking_notifier_call_chain(&decon_notifier_list, val, v);
+	int state = 0, ret = 0;
+	struct fb_event *evdata = NULL;
+	u64 blank_delta = 0, extra_delta = 0, total_delta = 0, frame_delta = 0;
+	u64 current_clock = 0;
+	u32 current_index = 0, current_first = 0;
+
+	evdata = v;
+
+	if (!evdata || !evdata->info || !evdata->data)
+		return NOTIFY_DONE;
+
+	if (evdata->info->node)
+		return NOTIFY_DONE;
+
+	state = *(int *)evdata->data;
+
+	current_index = EVENT_TO_STAMP[val];
+
+	WARN_ON(!current_index);
+
+	STAMP_TIME[current_index][CHAIN_START] = current_clock = local_clock();
+	STAMP_TIME[DECON_STAMP_BLANK][CHAIN_END] = (val == DECON_EVENT_DOZE) ? current_clock : STAMP_TIME[DECON_STAMP_BLANK][CHAIN_END];
+
+	if (IS_EARLY(val)) {
+		dbg_info("decon_notifier: blank_mode: %d, %02lx, + %-*s, %-*s\n",
+			state, val, STATE_NAME_LEN, STATE_NAME[state], EVENT_NAME_LEN, EVENT_NAME[val]);
+	}
+
+	ret = blocking_notifier_call_chain(&decon_notifier_list, val, v);
+
+	current_first = (STAMP_TIME[DECON_STAMP_AFTER][CHAIN_END] > STAMP_TIME[current_index][CHAIN_END]) ? 1 : 0;
+
+	STAMP_TIME[current_index][CHAIN_END] = current_clock = local_clock();
+	STAMP_TIME[DECON_STAMP_BLANK][CHAIN_START] = (val == DECON_EARLY_EVENT_DOZE) ? current_clock : STAMP_TIME[DECON_STAMP_BLANK][CHAIN_START];
+
+	blank_delta += STAMP_TIME[DECON_STAMP_EARLY][CHAIN_END] - STAMP_TIME[DECON_STAMP_EARLY][CHAIN_START];
+	blank_delta += STAMP_TIME[DECON_STAMP_BLANK][CHAIN_END] - STAMP_TIME[DECON_STAMP_BLANK][CHAIN_START];
+	blank_delta += STAMP_TIME[DECON_STAMP_AFTER][CHAIN_END] - STAMP_TIME[DECON_STAMP_AFTER][CHAIN_START];
+
+	extra_delta = current_clock - STAMP_TIME[DECON_STAMP_BLANK][CHAIN_END];
+	frame_delta = current_clock - STAMP_TIME[current_index - 1][CHAIN_END];
+
+	total_delta = blank_delta + extra_delta;
+
+	if (IS_AFTER(val)) {
+		dbg_info("decon_notifier: blank_mode: %d, %02lx, - %-*s, %-*s, %lld\n",
+			state, val, STATE_NAME_LEN, STATE_NAME[state], EVENT_NAME_LEN, EVENT_NAME[val], NSEC_TO_MSEC(blank_delta));
+	} else if (current_first && IS_FRAME(val)) {
+		dbg_info("decon_notifier: blank_mode: %d, %02lx, * %-*s, %-*s, %lld(%lld)\n",
+			state, val, STATE_NAME_LEN, STATE_NAME[state], EVENT_NAME_LEN, EVENT_NAME[val], NSEC_TO_MSEC(frame_delta), NSEC_TO_MSEC(total_delta));
+	}
+
+	return ret;
 }
 EXPORT_SYMBOL(decon_notifier_call_chain);
 
-#define EVENT_LIST	\
-_X(EVENT_NONE)	\
-_X(EVENT_MODE_CHANGE)	\
-_X(EVENT_SUSPEND)	\
-_X(EVENT_RESUME)	\
-_X(EVENT_MODE_DELETE)	\
-_X(EVENT_FB_REGISTERED)	\
-_X(EVENT_FB_UNREGISTERED)	\
-_X(EVENT_GET_CONSOLE_MAP)	\
-_X(EVENT_SET_CONSOLE_MAP)	\
-_X(EVENT_BLANK)	\
-_X(EVENT_NEW_MODELIST)	\
-_X(EVENT_MODE_CHANGE_ALL)	\
-_X(EVENT_CONBLANK)	\
-_X(EVENT_GET_REQ)	\
-_X(EVENT_FB_UNBIND)	\
-_X(EVENT_REMAP_ALL_CONSOLE)	\
-_X(EARLY_EVENT_BLANK)	\
-_X(R_EARLY_EVENT_BLANK)	\
+int decon_simple_notifier_call_chain(unsigned long val, int blank)
+{
+	struct fb_info *fbinfo = registered_fb[0];
+	struct fb_event v = {0, };
+	int fb_blank = blank;
 
-#define STATE_LIST	\
-_X(BLANK_UNBLANK)	\
-_X(BLANK_NORMAL)	\
-_X(BLANK_VSYNC_SUSPEND)	\
-_X(BLANK_HSYNC_SUSPEND)	\
-_X(BLANK_POWERDOWN)	\
+	v.info = fbinfo;
+	v.data = &fb_blank;
 
-#define _X(a)	DECON_##a,
-enum {	EVENT_LIST	EVENT_MAX	};
-enum {	STATE_LIST	STATE_MAX	};
-#undef _X
+	return decon_notifier_call_chain(val, &v);
+}
+EXPORT_SYMBOL(decon_simple_notifier_call_chain);
 
-#define _X(a)	#a,
-char *EVENT_NAME[] = { EVENT_LIST };
-char *STATE_NAME[] = { STATE_LIST };
-#undef _X
+struct notifier_block decon_nb_priority_max = {
+	.priority = INT_MAX,
+};
 
-static ktime_t decon_ktime;
+struct notifier_block decon_nb_priority_min = {
+	.priority = INT_MIN,
+};
 
-static int decon_notifier_event_time(struct notifier_block *this,
+static int decon_fb_notifier_event(struct notifier_block *this,
 	unsigned long val, void *v)
 {
 	struct fb_event *evdata = NULL;
-	int blank = 0;
+	int state = 0;
 
 	switch (val) {
+	case FB_EARLY_EVENT_BLANK:
 	case FB_EVENT_BLANK:
 		break;
 	default:
@@ -90,26 +152,35 @@ static int decon_notifier_event_time(struct notifier_block *this,
 
 	evdata = v;
 
-	blank = *(int *)evdata->data;
+	if (!evdata || !evdata->info || !evdata->data)
+		return NOTIFY_DONE;
 
-	pr_info("decon: decon_notifier_event: blank_mode: %d, %02lx, - %s, %s, %lld\n", blank, val, STATE_NAME[blank], EVENT_NAME[val], ktime_ms_delta(ktime_get(), decon_ktime));
+	if (evdata->info->node)
+		return NOTIFY_DONE;
+
+	state = *(int *)evdata->data;
+
+	if (val >= EVENT_MAX || state >= STATE_MAX) {
+		dbg_info("invalid notifier info: %d, %02lx\n", state, val);
+		return NOTIFY_DONE;
+	}
+
+	decon_notifier_call_chain(val, v);
 
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block decon_time_notifier = {
-	.notifier_call = decon_notifier_event_time,
-	.priority = -1,
+static struct notifier_block decon_fb_notifier = {
+	.notifier_call = decon_fb_notifier_event,
 };
 
-static int decon_notifier_event(struct notifier_block *this,
+static int decon_fb_notifier_blank_early(struct notifier_block *this,
 	unsigned long val, void *v)
 {
 	struct fb_event *evdata = NULL;
-	int blank = 0;
+	int state = 0;
 
 	switch (val) {
-	case FB_EVENT_BLANK:
 	case FB_EARLY_EVENT_BLANK:
 		break;
 	default:
@@ -118,49 +189,78 @@ static int decon_notifier_event(struct notifier_block *this,
 
 	evdata = v;
 
-	if (evdata && evdata->info && evdata->info->node)
+	if (!evdata || !evdata->info || !evdata->data)
 		return NOTIFY_DONE;
 
-	if (val == FB_EARLY_EVENT_BLANK)
-		decon_ktime = ktime_get();
+	if (evdata->info->node)
+		return NOTIFY_DONE;
 
-	blank = *(int *)evdata->data;
+	state = *(int *)evdata->data;
 
-	if (blank >= STATE_MAX || val >= EVENT_MAX) {
-		pr_info("decon: invalid notifier info: %d, %02lx\n", blank, val);
+	if (val >= EVENT_MAX || state >= STATE_MAX) {
+		dbg_info("invalid notifier info: %d, %02lx\n", state, val);
 		return NOTIFY_DONE;
 	}
 
-	if (val == FB_EARLY_EVENT_BLANK)
-		pr_info("decon: decon_notifier_event: blank_mode: %d, %02lx, + %s, %s\n", blank, val, STATE_NAME[blank], EVENT_NAME[val]);
-	else if (val == FB_EVENT_BLANK)
-		pr_info("decon: decon_notifier_event: blank_mode: %d, %02lx, ~ %s, %s\n", blank, val, STATE_NAME[blank], EVENT_NAME[val]);
-
-	decon_notifier_call_chain(val, v);
+	STAMP_TIME[DECON_STAMP_BLANK][CHAIN_START] = local_clock();
 
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block decon_fb_notifier = {
-	.notifier_call = decon_notifier_event,
+static int decon_fb_notifier_blank_after(struct notifier_block *this,
+	unsigned long val, void *v)
+{
+	struct fb_event *evdata = NULL;
+	int state = 0;
+
+	switch (val) {
+	case FB_EVENT_BLANK:
+		break;
+	default:
+		return NOTIFY_DONE;
+	}
+
+	evdata = v;
+
+	if (!evdata || !evdata->info || !evdata->data)
+		return NOTIFY_DONE;
+
+	if (evdata->info->node)
+		return NOTIFY_DONE;
+
+	state = *(int *)evdata->data;
+
+	if (val >= EVENT_MAX || state >= STATE_MAX) {
+		dbg_info("invalid notifier info: %d, %02lx\n", state, val);
+		return NOTIFY_DONE;
+	}
+
+	STAMP_TIME[DECON_STAMP_BLANK][CHAIN_END] = local_clock();
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block decon_fb_notifier_blank_min = {
+	.notifier_call = decon_fb_notifier_blank_early,
+	.priority = INT_MIN,
 };
 
-static void __exit decon_notifier_exit(void)
-{
-	decon_unregister_notifier(&decon_time_notifier);
-
-	fb_unregister_client(&decon_fb_notifier);
-}
+static struct notifier_block decon_fb_notifier_blank_max = {
+	.notifier_call = decon_fb_notifier_blank_after,
+	.priority = INT_MAX,
+};
 
 static int __init decon_notifier_init(void)
 {
-	fb_register_client(&decon_fb_notifier);
+	EVENT_NAME_LEN = EVENT_NAME[FB_EARLY_EVENT_BLANK] ? min_t(size_t, MAX_INPUT, strlen(EVENT_NAME[FB_EARLY_EVENT_BLANK])) : EVENT_NAME_LEN;
+	STATE_NAME_LEN = STATE_NAME[FB_BLANK_POWERDOWN] ? min_t(size_t, MAX_INPUT, strlen(STATE_NAME[FB_BLANK_POWERDOWN])) : STATE_NAME_LEN;
 
-	decon_register_notifier(&decon_time_notifier);
+	fb_register_client(&decon_fb_notifier_blank_min);
+	fb_register_client(&decon_fb_notifier);
+	fb_register_client(&decon_fb_notifier_blank_max);
 
 	return 0;
 }
 
-late_initcall(decon_notifier_init);
-module_exit(decon_notifier_exit);
+core_initcall(decon_notifier_init);
 

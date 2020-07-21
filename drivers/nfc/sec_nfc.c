@@ -178,6 +178,7 @@ static int nfc_state_print(struct sec_nfc_info *info)
 {
 	int en = gpio_get_value(info->pdata->ven);
 	int firm = gpio_get_value(info->pdata->firm);
+	int irq = gpio_get_value(info->pdata->irq);
 	int pvdd = 0;
 
 #ifdef CONFIG_SEC_NFC_LDO_CONTROL
@@ -194,7 +195,7 @@ static int nfc_state_print(struct sec_nfc_info *info)
 	pvdd = gpio_get_value(info->pdata->pvdd_en);
 #endif
 
-	NFC_LOG_INFO("%s en: %d, firm: %d power: %d\n", __func__, en, firm, pvdd);
+	NFC_LOG_INFO("%s en: %d, firm: %d power: %d irq: %d\n", __func__, en, firm, pvdd, irq);
 	NFC_LOG_INFO("%s mode %d\n",__func__ , info->mode);
 
 	return 0;
@@ -1015,6 +1016,15 @@ static ssize_t sec_nfc_test_store(struct class *dev,
 static CLASS_ATTR(test, 0664, sec_nfc_test_show, sec_nfc_test_store);
 #endif
 
+static ssize_t sec_nfc_support_show(struct class *class,
+					struct class_attribute *attr,
+					char *buf)
+{
+	NFC_LOG_INFO("\n");
+	return 0;
+}
+static CLASS_ATTR(nfc_support, 0444, sec_nfc_support_show, NULL);
+
 static int __sec_nfc_probe(struct device *dev)
 {
 	struct sec_nfc_info *info;
@@ -1121,13 +1131,21 @@ static int __sec_nfc_probe(struct device *dev)
 	g_nfc_info = info;
 	nfc_class = class_create(THIS_MODULE, "nfc_test");
 	if (IS_ERR(&nfc_class))
-		NFC_LOG_ERR("NFC: failed to create nfc class\n");
+		NFC_LOG_ERR("NFC: failed to create nfc_test class\n");
 	else {
 		ret = class_create_file(nfc_class, &class_attr_test);
 		if (ret)
 			NFC_LOG_ERR("NFC: failed to create attr_test\n");
 	}
 #endif
+	nfc_class = class_create(THIS_MODULE, "nfc");
+	if (IS_ERR(&nfc_class))
+		NFC_LOG_ERR("NFC: failed to create nfc class\n");
+	else {
+		ret = class_create_file(nfc_class, &class_attr_nfc_support);
+		if (ret)
+			NFC_LOG_ERR("NFC: failed to create attr_nfc_support\n");
+	}
 	NFC_LOG_INFO("probe() success\n");
 
 	return 0;

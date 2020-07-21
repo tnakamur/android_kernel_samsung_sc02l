@@ -275,6 +275,7 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 	int gpio_cam_core_en = 0;
 	int gpio_camio_1p8_en = 0;
 	int gpio_none = 0;
+	char *cam_dvdd_1p2 = NULL;
 	bool exist_actuator = false;
 	bool disable_core_ldo = false;
 	bool disable_control_of_af_2p8 = false;
@@ -319,7 +320,7 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 
 	gpio_cam_a2p8_en = of_get_named_gpio(dnode, "gpio_cam_a2p8_en", 0);
 	if (!gpio_is_valid(gpio_cam_a2p8_en)) {
-		dev_err(dev, "failed to get gpio_cam_a2p8_en\n");
+		dev_warn(dev, "failed to get gpio_cam_a2p8_en\n");
 	} else {
 		gpio_request_one(gpio_cam_a2p8_en, GPIOF_OUT_INIT_LOW, "CAM_GPIO_OUTPUT_LOW");
 		gpio_free(gpio_cam_a2p8_en);
@@ -328,7 +329,7 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 	if (exist_actuator == true) {
 		gpio_camaf_2p8_en = of_get_named_gpio(dnode, "gpio_camaf_2p8_en", 0);
 		if (!gpio_is_valid(gpio_camaf_2p8_en)) {
-			dev_err(dev, "failed to get gpio_camaf_2p8_en\n");
+			dev_warn(dev, "failed to get gpio_camaf_2p8_en\n");
 		} else {
 			gpio_request_one(gpio_camaf_2p8_en, GPIOF_OUT_INIT_LOW, "CAM_GPIO_OUTPUT_LOW");
 			gpio_free(gpio_camaf_2p8_en);
@@ -337,7 +338,7 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 
 	gpio_camio_1p8_en = of_get_named_gpio(dnode, "gpio_camio_1p8_en", 0);
 	if (!gpio_is_valid(gpio_camio_1p8_en)) {
-		dev_err(dev, "failed to get gpio_camio_1p8_en\n");
+		dev_warn(dev, "failed to get gpio_camio_1p8_en\n");
 	} else {
 		gpio_request_one(gpio_camio_1p8_en, GPIOF_OUT_INIT_LOW, "CAM_GPIO_OUTPUT_LOW");
 		gpio_free(gpio_camio_1p8_en);
@@ -345,7 +346,7 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 
 	gpio_cam_core_en = of_get_named_gpio(dnode, "gpio_cam_core_en", 0);
 	if (!gpio_is_valid(gpio_cam_core_en)) {
-		dev_err(dev, "failed to get gpio_cam_core_en\n");
+		dev_warn(dev, "failed to get gpio_cam_core_en\n");
 	} else {
 		gpio_request_one(gpio_cam_core_en, GPIOF_OUT_INIT_LOW, "CAM_GPIO_OUTPUT_LOW");
 		gpio_free(gpio_cam_core_en);
@@ -359,6 +360,10 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 	disable_control_of_af_2p8 = of_property_read_bool(dnode, "disable_control_of_af_2p8");
 	if(disable_control_of_af_2p8) {
 		dev_info(dev, "[%s] Disable control of AF 2.8V\n", __func__);
+	}
+
+	if (of_property_read_string(dnode, "cam_dvdd_1p2", (const char **) &cam_dvdd_1p2)) {
+		dev_info(dev, "Failed to get regulator_dvdd name property\n");
 	}
 
 	shared_camio_1p8 = of_property_read_bool(dnode, "shared_camio_1p8");
@@ -381,8 +386,12 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 	if (gpio_is_valid(gpio_cam_core_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_cam_core_en, "cam_core_en", PIN_OUTPUT, 1, 0);
 	} else {
-		if(!disable_core_ldo) {
-			SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "FCAM_DVDD_1P2", PIN_REGULATOR, 1, 0);
+		if (cam_dvdd_1p2) {
+			SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, cam_dvdd_1p2, PIN_REGULATOR, 1, 0);
+		} else { 
+			if(!disable_core_ldo) {
+				SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "FCAM_DVDD_1P2", PIN_REGULATOR, 1, 0);
+			}
 		}
 	}
 	if (gpio_is_valid(gpio_camio_1p8_en)) {
@@ -433,8 +442,12 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 	if (gpio_is_valid(gpio_cam_core_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_cam_core_en, "cam_core_en", PIN_OUTPUT, 0, 0);
 	} else {
-		if(!disable_core_ldo) {
-			SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, "FCAM_DVDD_1P2", PIN_REGULATOR, 0, 0);
+		if (cam_dvdd_1p2) {
+			SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, cam_dvdd_1p2, PIN_REGULATOR, 0, 0);
+		} else { 
+			if(!disable_core_ldo) {
+				SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, "FCAM_DVDD_1P2", PIN_REGULATOR, 0, 0);
+			}
 		}
 	}
 	if (gpio_is_valid(gpio_cam_a2p8_en)) {
@@ -463,24 +476,8 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 	} else {
 		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 1, 2000);
 	}
-	if (gpio_is_valid(gpio_cam_core_en)) {
-		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_cam_core_en, "cam_core_en", PIN_OUTPUT, 1, 0);
-	} else {
-		if(!disable_core_ldo) {
-			SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_none, "FCAM_DVDD_1P2", PIN_REGULATOR, 1, 0);
-		}
-	}
-	SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_reset, "sen_rst high", PIN_OUTPUT, 1, 3000);
 
 	/* SENSOR_SCENARIO_READ_ROM off */
-	SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_reset, "sen_rst low", PIN_OUTPUT, 0, 1500);
-	if (gpio_is_valid(gpio_cam_core_en)) {
-		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_cam_core_en, "cam_core_en", PIN_OUTPUT, 0, 0);
-	} else {
-		if(!disable_core_ldo) {
-			SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_none, "FCAM_DVDD_1P2", PIN_REGULATOR, 0, 0);
-		}
-	}
 	if (gpio_is_valid(gpio_camio_1p8_en)) {
 		SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_camio_1p8_en, "camio_1p8_en", PIN_OUTPUT, 0, 0);
 		if(shared_camio_1p8) {
@@ -678,15 +675,6 @@ p_err:
 	return ret;
 }
 
-static int sensor_module_4ha_remove(struct platform_device *pdev)
-{
-        int ret = 0;
-
-        info("%s\n", __func__);
-
-        return ret;
-}
-
 static const struct of_device_id exynos_fimc_is_sensor_module_4ha_match[] = {
 	{
 		.compatible = "samsung,sensor-module-4ha",
@@ -696,8 +684,6 @@ static const struct of_device_id exynos_fimc_is_sensor_module_4ha_match[] = {
 MODULE_DEVICE_TABLE(of, exynos_fimc_is_sensor_module_4ha_match);
 
 static struct platform_driver sensor_module_4ha_driver = {
-	.probe  = sensor_module_4ha_probe,
-	.remove = sensor_module_4ha_remove,
 	.driver = {
 		.name   = "FIMC-IS-SENSOR-MODULE-4HA",
 		.owner  = THIS_MODULE,
@@ -705,4 +691,18 @@ static struct platform_driver sensor_module_4ha_driver = {
 	}
 };
 
-module_platform_driver(sensor_module_4ha_driver);
+
+static int __init fimc_is_sensor_module_4ha_init(void)
+{
+	int ret;
+
+	ret = platform_driver_probe(&sensor_module_4ha_driver,
+				sensor_module_4ha_probe);
+	if (ret)
+		err("failed to probe %s driver: %d\n",
+			sensor_module_4ha_driver.driver.name, ret);
+
+	return ret;
+}
+late_initcall(fimc_is_sensor_module_4ha_init);
+

@@ -1,11 +1,6 @@
 subdir-ccflags-y += -I$(srctree)/drivers/misc/tzdev/3.0/include
 subdir-ccflags-y += -I$(srctree)/drivers/misc/tzdev/3.0
 ccflags-$(CONFIG_TZDEV_DEPLOY_TZAR) += -D"_STR(s)=\#s" -D"KBUILD_SRC=_STR($(KBUILD_SRC))"
-ifeq ($(SEC_BUILD_OPTION_SIGN_CONTROL),n)
-	ccflags-$(CONFIG_TZDEV_DEPLOY_TZAR) += -D"TZAR_FILE_NAME=_STR(startup.tzar_ns)"
-else
-	ccflags-$(CONFIG_TZDEV_DEPLOY_TZAR) += -D"TZAR_FILE_NAME=_STR(startup.tzar)"
-endif
 
 obj-$(CONFIG_TZDEV)			+= lib/
 obj-$(CONFIG_TZDEV)			+= teec/

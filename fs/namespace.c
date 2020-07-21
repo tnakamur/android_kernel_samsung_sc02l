@@ -44,6 +44,9 @@
 
 #define KDP_MOUNT_VENDOR "/vendor"
 #define KDP_MOUNT_VENDOR_LEN strlen(KDP_MOUNT_VENDOR)
+
+#define KDP_MOUNT_ART "/com.android.runtime"
+#define KDP_MOUNT_ART_LEN strlen(KDP_MOUNT_ART)
 #endif /*CONFIG_RKP_NS_PROT */
 
 /* Maximum number of mounts in a mount namespace */
@@ -94,6 +97,7 @@ struct super_block *sys_sb __kdp_ro = NULL;
 struct super_block *odm_sb __kdp_ro = NULL;
 struct super_block *vendor_sb __kdp_ro = NULL;
 struct super_block *rootfs_sb __kdp_ro = NULL;
+struct super_block *art_sb __kdp_ro = NULL;
 static struct kmem_cache *vfsmnt_cache __read_mostly;
 /* Populate all superblocks required for NS Protection */
 
@@ -102,6 +106,7 @@ enum kdp_sb {
 	KDP_SB_ODM,
 	KDP_SB_SYS,
 	KDP_SB_VENDOR,
+	KDP_SB_ART,
 	KDP_SB_MAX
 };
 #endif /*CONFIG_RKP_NS_PROT */
@@ -139,11 +144,28 @@ enum {
 };
 
 static const char *umount_exit_str[UMOUNT_STATUS_MAX] = {
-	"ADDED_TASK", "REMAIN_NS", "REMAIN_CNT", "DELAY_TASK"};
+	"ADDED_TASK", "REMAIN_NS", "REMAIN_CNT", "DELAY_TASK"
+};
+
+static const char *exception_process[] = {
+	"main", "ch_zygote", "usap32", "usap64", NULL,
+};
 
 static inline void sys_umount_trace_set_status(unsigned int status)
 {
 	sys_umount_trace_status = status;
+}
+
+static inline int is_exception(char *comm)
+{
+	unsigned int idx = 0;
+
+	do {
+		if (!strcmp(comm, exception_process[idx]))
+			return 1;
+	} while (exception_process[++idx]);
+
+	return 0;
 }
 
 static inline void sys_umount_trace_print(struct mount *mnt, int flags)
@@ -158,7 +180,7 @@ static inline void sys_umount_trace_print(struct mount *mnt, int flags)
 	/* We don`t want to see what zygote`s umount */
 	if (((sb->s_magic == SDFAT_SUPER_MAGIC) ||
 		(sb->s_magic == MSDOS_SUPER_MAGIC)) &&
-		((current_uid().val == 0) && (strcmp(current->comm, "main")))) {
+		((current_uid().val == 0) && !is_exception(current->comm))) {
 		struct block_device *bdev = sb->s_bdev;
 		dev_t bd_dev = bdev ? bdev->bd_dev : 0;
 
@@ -243,6 +265,9 @@ static void rkp_populate_sb(char *mount_point, struct vfsmount *mnt)
 	} else if (!vendor_sb &&
 		!strncmp(mount_point, KDP_MOUNT_VENDOR, KDP_MOUNT_VENDOR_LEN)) {
 		uh_call(UH_APP_RKP, RKP_KDP_X56, (u64)&vendor_sb, (u64)mnt, KDP_SB_VENDOR, 0);
+	} else if (!art_sb &&
+		!strncmp(mount_point, KDP_MOUNT_ART, KDP_MOUNT_ART_LEN-1)) {
+		uh_call(UH_APP_RKP, RKP_KDP_X56, (u64)&art_sb, (u64)mnt, KDP_SB_ART, 0);
 	}
 }
 #endif
@@ -1335,7 +1360,8 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	}
 
 #ifdef CONFIG_RKP_NS_PROT
-	nsflags = old->mnt->mnt_flags & ~(MNT_WRITE_HOLD|MNT_MARKED);
+	nsflags = old->mnt->mnt_flags;
+	nsflags &= ~(MNT_WRITE_HOLD|MNT_MARKED|MNT_INTERNAL);
 	/* Don't allow unprivileged users to change mount flags */
 	if (flag & CL_UNPRIVILEGED) {
 		nsflags |= MNT_LOCK_ATIME;
@@ -1357,7 +1383,8 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 		nsflags |= MNT_LOCKED;
 	rkp_assign_mnt_flags(mnt->mnt,nsflags);
 #else
-	mnt->mnt.mnt_flags = old->mnt.mnt_flags & ~(MNT_WRITE_HOLD|MNT_MARKED);
+	mnt->mnt.mnt_flags = old->mnt.mnt_flags;
+	mnt->mnt.mnt_flags &= ~(MNT_WRITE_HOLD|MNT_MARKED|MNT_INTERNAL);
 	/* Don't allow unprivileged users to change mount flags */
 	if (flag & CL_UNPRIVILEGED) {
 		mnt->mnt.mnt_flags |= MNT_LOCK_ATIME;
@@ -1983,8 +2010,17 @@ static int do_umount(struct mount *mnt, int flags)
 
 	namespace_lock();
 	lock_mount_hash();
-	event++;
 
+	/* Recheck MNT_LOCKED with the locks held */
+	retval = -EINVAL;
+#ifdef CONFIG_RKP_NS_PROT
+	if (mnt->mnt->mnt_flags & MNT_LOCKED)
+#else
+	if (mnt->mnt.mnt_flags & MNT_LOCKED)
+#endif
+		goto out;
+
+	event++;
 	if (flags & MNT_DETACH) {
 		if (!list_empty(&mnt->mnt_list))
 			umount_tree(mnt, UMOUNT_PROPAGATE);
@@ -1998,6 +2034,7 @@ static int do_umount(struct mount *mnt, int flags)
 			retval = 0;
 		}
 	}
+out:
 	unlock_mount_hash();
 	namespace_unlock();
 	return retval;
@@ -2059,6 +2096,10 @@ static inline bool may_mount(void)
  * unixes. Our API is identical to OSF/1 to avoid making a mess of AMD
  */
 
+#ifdef CONFIG_PAGE_BOOST_RECORDING
+#include <linux/io_record.h>
+#endif
+
 SYSCALL_DEFINE2(umount, char __user *, name, int, flags)
 {
 	struct path path;
@@ -2071,6 +2112,10 @@ SYSCALL_DEFINE2(umount, char __user *, name, int, flags)
 
 	if (!may_mount())
 		return -EPERM;
+	
+#ifdef CONFIG_PAGE_BOOST_RECORDING
+	forced_init_record();
+#endif
 
 	if (!(flags & UMOUNT_NOFOLLOW))
 		lookup_flags |= LOOKUP_FOLLOW;
@@ -2169,8 +2214,18 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
 		for (s = r; s; s = next_mnt(s, r)) {
 			if (!(flag & CL_COPY_UNBINDABLE) &&
 			    IS_MNT_UNBINDABLE(s)) {
-				s = skip_mnt_tree(s);
-				continue;
+#ifdef CONFIG_RKP_NS_PROT
+				if (s->mnt->mnt_flags & MNT_LOCKED) {
+#else
+				if (s->mnt.mnt_flags & MNT_LOCKED) {
+#endif
+					/* Both unbindable and locked. */
+					q = ERR_PTR(-EPERM);
+					goto out;
+				} else {
+					s = skip_mnt_tree(s);
+					continue;
+				}
 			}
 			if (!(flag & CL_COPY_MNT_NS_FILE) &&
 #ifdef CONFIG_RKP_NS_PROT
@@ -2235,7 +2290,7 @@ void drop_collected_mounts(struct vfsmount *mnt)
 {
 	namespace_lock();
 	lock_mount_hash();
-	umount_tree(real_mount(mnt), UMOUNT_SYNC);
+	umount_tree(real_mount(mnt), 0);
 	unlock_mount_hash();
 	namespace_unlock();
 }
@@ -3036,7 +3091,7 @@ static int do_new_mount(struct path *path, const char *fstype, int flags,
 	}
 	dir_name = dentry_path_raw(path->dentry, buf, PATH_MAX);
 
-	if(!sys_sb || !odm_sb || !vendor_sb) 
+	if(!sys_sb || !odm_sb || !vendor_sb || !art_sb) 
 		rkp_populate_sb(dir_name, mnt);
 	kfree(buf);
 #endif

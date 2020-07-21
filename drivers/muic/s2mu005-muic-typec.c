@@ -60,10 +60,11 @@
 /* Prototypes of the Static symbols of s2mu005-muic */
 static void s2mu005_muic_detect_dev_ccic(struct s2mu005_muic_data *muic_data,
 		muic_attached_dev_t new_dev);
-int s2mu005_muic_bcd_rescan(struct s2mu005_muic_data *muic_data);
 static int s2mu005_muic_detect_dev_bc1p2(struct s2mu005_muic_data *muic_data);
 static void s2mu005_muic_handle_attached_dev(struct s2mu005_muic_data *muic_data);
 static irqreturn_t s2mu005_muic_attach_isr(int irq, void *data);
+static int _s2mu005_muic_sel_path(struct s2mu005_muic_data *muic_data,
+		t_path_data path_data);
 
 /*
  * Debuging functions
@@ -742,48 +743,6 @@ static void s2mu005_muic_dp_0p6v(struct work_struct *work)
 	s2mu005_muic_dp_0_6V(muic_data, false);
 }
 
-static void s2mu005_muic_bcd_rescan(struct s2mu005_muic_data *muic_data)
-{
-	struct i2c_client *i2c = muic_data->i2c;
-	int ret = 0;
-	u8 reg_val = 0;
-
-	pr_info("%s\n", __func__);
-
-	ret = set_com_sw(muic_data, MANSW_OPEN);
-	if (ret < 0)
-		pr_err("%s, fail to open mansw\n", __func__);
-
-	msleep(50);
-
-	reg_val = s2mu005_i2c_read_byte(i2c, S2MU005_REG_MUIC_BCD_RESCAN);
-	reg_val |= 0x1;
-	s2mu005_i2c_write_byte(i2c, S2MU005_REG_MUIC_BCD_RESCAN, reg_val);
-}
-
-static void s2mu005_muic_cable_recheck(struct work_struct *work)
-{
-	struct s2mu005_muic_data *muic_data =
-		container_of(work, struct s2mu005_muic_data, cable_recheck.work);
-	struct i2c_client *i2c = muic_data->i2c;
-	u8 dp = 0;
-
-	mutex_lock(&muic_data->recheck_mutex);
-
-	pr_info("%s\n", __func__);
-
-	dp = s2mu005_i2c_read_byte(i2c, 0x55);
-	if (dp)
-		s2mu005_muic_dp_0_6V(muic_data, false);
-
-	s2mu005_muic_bcd_rescan(muic_data);
-	msleep(190);
-
-	s2mu005_muic_detect_dev(muic_data);
-
-	mutex_unlock(&muic_data->recheck_mutex);
-}
-
 static void s2mu005_muic_handle_vbus_off(struct s2mu005_muic_data *muic_data)
 {
 	struct i2c_client *i2c = muic_data->i2c;
@@ -1061,20 +1020,10 @@ static int s2mu005_muic_detect_dev_bc1p2(struct s2mu005_muic_data *muic_data)
 		break;
 	case DEV_TYPE1_USB:
 		if (muic_data->vbvolt) {
-#if IS_ENABLED(CONFIG_S2MU005_SUPPORT_BC1P2_CERTI)
-			if (muic_data->usb_type_rechecked) {
-				muic_data->usb_type_rechecked = false;
-				muic_data->new_dev = ATTACHED_DEV_USB_MUIC;
-				pr_info("USB DETECTED\n");
-				msleep(100);
-			} else {
-				muic_data->usb_type_rechecked = true;
-				schedule_delayed_work(&muic_data->cable_recheck, 0);
-				return S2MU005_DETECT_SKIP;
-		   }
-#else
 			muic_data->new_dev = ATTACHED_DEV_USB_MUIC;
 			pr_info("USB DETECTED\n");
+#if IS_ENABLED(CONFIG_S2MU005_SUPPORT_BC1P2_CERTI)
+			msleep(100);
 #endif
 		}
 		break;
@@ -1738,6 +1687,18 @@ static irqreturn_t s2mu005_muic_adc_change_isr(int irq, void *data)
 		s2mu005_i2c_write_byte(i2c, 0x7E, reg_val);
 		pr_info("%s vbus_ldo(%#x->%#x)\n", __func__, muic_data->vbus_ldo, reg_val);
 	}
+
+	reg_val = s2mu005_i2c_read_byte(i2c, S2MU005_REG_MUIC_TIMER_SET3);
+	reg_val &= ~(MUIC_TIMER_SET3_DCDTMRSET_MASK);
+	reg_val |= (MUIC_TIMER_SET3_DCDTMRSET_600MS);
+	s2mu005_i2c_write_byte(i2c, S2MU005_REG_MUIC_TIMER_SET3, reg_val);
+	pr_info("%s MUIC_TIMER_SET3(%#x)\n", __func__, reg_val);
+
+	reg_val = s2mu005_i2c_read_byte(i2c, 0xB9);
+	reg_val &= ~(0xf);
+	reg_val |= (0x9);
+	s2mu005_i2c_write_byte(i2c, 0xB9, reg_val);
+	pr_info("%s 0xB9(%#x)\n", __func__, reg_val);
 #endif
 
 	return ret;
@@ -1777,7 +1738,6 @@ static void s2mu005_muic_init_drvdata(struct s2mu005_muic_data *muic_data,
 
 #if IS_ENABLED(CONFIG_S2MU005_SUPPORT_BC1P2_CERTI)
 	muic_data->is_dcp = false;
-	muic_data->usb_type_rechecked = false;
 #endif
 #if IS_ENABLED(CONFIG_HICCUP_CHARGER)
 	muic_data->is_hiccup_mode = false;
@@ -1966,9 +1926,6 @@ static int s2mu005_muic_probe(struct platform_device *pdev)
 
 	mutex_init(&muic_data->muic_mutex);
 	mutex_init(&muic_data->switch_mutex);
-#if IS_ENABLED(CONFIG_S2MU005_SUPPORT_BC1P2_CERTI)
-	mutex_init(&muic_data->recheck_mutex);
-#endif
 
 	platform_set_drvdata(pdev, muic_data);
 	if (muic_data->pdata->init_gpio_cb) {
@@ -2022,7 +1979,6 @@ static int s2mu005_muic_probe(struct platform_device *pdev)
 	init_otg_reg(muic_data);
 #endif
 #if IS_ENABLED(CONFIG_S2MU005_SUPPORT_BC1P2_CERTI)
-	INIT_DELAYED_WORK(&muic_data->cable_recheck, s2mu005_muic_cable_recheck);
 	INIT_DELAYED_WORK(&muic_data->dp_0p6v, s2mu005_muic_dp_0p6v);
 #endif
 
@@ -2072,9 +2028,6 @@ static int s2mu005_muic_remove(struct platform_device *pdev)
 	s2mu005_muic_free_irqs(muic_data);
 	mutex_destroy(&muic_data->muic_mutex);
 	mutex_destroy(&muic_data->switch_mutex);
-#if IS_ENABLED(CONFIG_S2MU005_SUPPORT_BC1P2_CERTI)
-	mutex_destroy(&muic_data->recheck_mutex);
-#endif
 	i2c_set_clientdata(muic_data->i2c, NULL);
 	return 0;
 }
@@ -2097,7 +2050,6 @@ static void s2mu005_muic_shutdown(struct platform_device *pdev)
 		s2mu005_muic_dp_0_6V(muic_data, false);
 		muic_data->is_dcp = false;
 	}
-	muic_data->usb_type_rechecked = false;
 
 	vldo_set = s2mu005_i2c_read_byte(i2c, 0x54);
 	if (vldo_set & 0x80) {

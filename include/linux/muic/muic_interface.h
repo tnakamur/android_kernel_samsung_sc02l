@@ -22,10 +22,8 @@
 #define __MUIC_INTERNAL_H__
 
 #include <linux/muic/muic.h>
-
-#if defined(CONFIG_MUIC_SUPPORT_POWERMETER)
 #include <linux/power_supply.h>
-#endif
+#include "../drivers/battery_v2/include/sec_charging_common.h"
 
 #define muic_err(fmt, ...)					\
 	do {							\
@@ -230,6 +228,8 @@ struct muic_interface_t {
 	bool 			is_dcp_charger;
 	bool			is_afc_reset;
 	bool			is_afc_pdic_ready;
+	bool			is_bypass;
+	bool			is_ccic_attached;
 
 	struct hv_data		*phv;
 
@@ -257,10 +257,8 @@ struct muic_interface_t {
 	muic_prswap_t prswap_status;
 #endif
 
-#if defined(CONFIG_MUIC_SUPPORT_POWERMETER)
 	struct power_supply *psy_muic;
 	struct power_supply_desc psy_muic_desc;
-#endif
 
 	/* function pointer should be registered from each specific driver file */
 	int (*set_com_to_open_with_vbus)(void *);
@@ -324,7 +322,9 @@ struct muic_interface_t {
 #endif
 #if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
 	void (*set_chg_det)(void *, bool en);
+	void (*prswap_work)(void *, int mode);
 #endif
+	void (*set_bypass)(void *);
 };
 
 extern struct device *switch_device;
@@ -335,8 +335,6 @@ int muic_manager_get_legacy_dev(struct muic_interface_t *muic_if);
 void muic_manager_set_legacy_dev(struct muic_interface_t *muic_if, int new_dev);
 void muic_manager_handle_ccic_detach(struct muic_interface_t *muic_if);
 int muic_manager_dcd_rescan(struct muic_interface_t *muic_if);
-#if defined(CONFIG_MUIC_SUPPORT_POWERMETER)
 int muic_manager_psy_init(struct muic_interface_t *muic_if, struct device *parent);
-#endif
 
 #endif /* __MUIC_INTERNAL_H__ */

@@ -315,15 +315,23 @@ int sensor_3l6_cis_log_status(struct v4l2_subdev *subdev)
 
 	ret = fimc_is_sensor_read8(client, 0x0002, &data8);
 	if (unlikely(!ret))
-		dbg_sensor(1, "[SEN:DUMP] revision_number(%x)\n", data8);
+		pr_err("[SEN:DUMP] revision_number(%x)\n", data8);
 
 	ret = fimc_is_sensor_read8(client, 0x0005, &data8);
 	if (unlikely(!ret))
-		dbg_sensor(1, "[SEN:DUMP] frame_count(%x)\n", data8);
+		pr_err("[SEN:DUMP] frame_count(%x)\n", data8);
 
 	ret = fimc_is_sensor_read8(client, 0x0100, &data8);
 	if (unlikely(!ret))
-		dbg_sensor(1, "[SEN:DUMP] mode_select(%x)\n", data8);
+		pr_err("[SEN:DUMP] mode_select(%x)\n", data8);
+
+	ret = fimc_is_sensor_read16(client, 0x0340, &data16);
+	if (unlikely(!ret))
+		pr_err("[SEN:DUMP] 0x0340 register(%x)\n", data16);
+
+	ret = fimc_is_sensor_read16(client, 0x0202, &data16);
+	if (unlikely(!ret))
+		pr_err("[SEN:DUMP] 0x0202 register(%x)\n", data16);
 
 	sensor_cis_dump_registers(subdev, sensor_3l6_setfiles[0], sensor_3l6_setfile_sizes[0]);
 
@@ -412,7 +420,7 @@ int sensor_3l6_cis_set_global_setting(struct v4l2_subdev *subdev)
 
 	I2C_MUTEX_LOCK(cis->i2c_lock);
 	/* 3ms delay to operate sensor FW */
-	usleep_range(3000, 3000);
+	usleep_range(8000, 8000);
 
 	/* setfile global setting is at camera entrance */
 	ret = sensor_cis_set_registers(subdev, sensor_3l6_global, sensor_3l6_global_size);
@@ -703,20 +711,25 @@ int sensor_3l6_cis_stream_on(struct v4l2_subdev *subdev)
 	if (ret < 0)
 		err("[%s] sensor_3l6_cis_group_param_hold_func fail\n", __func__);
 
-
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	/* Sensor stream on */
+	ret = fimc_is_sensor_write16(client, 0x3892, 0x3600);
 	ret = fimc_is_sensor_write16(client, 0x3C1E, 0x0100);
 	if (ret < 0)
 		err("i2c transfer fail addr(%x), val(%x), ret = %d\n", 0x3C1E, 0x0100, ret);
 
+	usleep_range(3000, 3000);
 	ret = fimc_is_sensor_write16(client, 0x0100, 0x0100);
 	if (ret < 0)
 		err("i2c transfer fail addr(%x), val(%x), ret = %d\n", 0x0100, 0x0100, ret);
 
+	usleep_range(3000, 3000);
 	ret = fimc_is_sensor_write16(client, 0x3C1E, 0x0000);
 	if (ret < 0)
 		err("i2c transfer fail addr(%x), val(%x), ret = %d\n", 0x3C1E, 0x0000, ret);
 
+	usleep_range(3000, 3000);
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	cis_data->stream_on = true;
 
 #ifdef DEBUG_SENSOR_TIME
@@ -1404,12 +1417,12 @@ int sensor_3l6_cis_get_min_analog_gain(struct v4l2_subdev *subdev, u32 *min_agai
 	}
 
 	cis_data = cis->cis_data;
-
+#if 0
 	ret = fimc_is_sensor_read16(client, 0x0084, &read_value);
 	if (ret < 0)
 		err("i2c transfer fail addr(%x), val(%x), ret = %d\n", 0x0084, read_value, ret);
-
-	cis_data->min_analog_gain[0] = read_value;
+#endif
+	cis_data->min_analog_gain[0] = 0x0020;//read_value;
 
 	cis_data->min_analog_gain[1] = sensor_cis_calc_again_permile(read_value);
 
@@ -1458,12 +1471,12 @@ int sensor_3l6_cis_get_max_analog_gain(struct v4l2_subdev *subdev, u32 *max_agai
 	}
 
 	cis_data = cis->cis_data;
-
+#if 0
 	ret = fimc_is_sensor_read16(client, 0x0086, &read_value);
 	if (ret < 0)
 		err("i2c transfer fail addr(%x), val(%x), ret = %d\n", 0x0086, read_value, ret);
-
-	cis_data->max_analog_gain[0] = read_value;
+#endif
+	cis_data->max_analog_gain[0] = 0x0200;//read_value;
 
 	cis_data->max_analog_gain[1] = sensor_cis_calc_again_permile(read_value);
 
@@ -1606,7 +1619,7 @@ int sensor_3l6_cis_get_digital_gain(struct v4l2_subdev *subdev, u32 *dgain)
 		ret = hold;
 		goto p_err;
 	}
-
+	I2C_MUTEX_LOCK(cis->i2c_lock);
 	ret = fimc_is_sensor_read16(client, 0x020E, &digital_gain);
 	if (ret < 0)
 		goto p_err;
@@ -1622,6 +1635,7 @@ int sensor_3l6_cis_get_digital_gain(struct v4l2_subdev *subdev, u32 *dgain)
 #endif
 
 p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
 	if (hold > 0) {
 		hold = sensor_3l6_cis_group_param_hold_func(subdev, 0x00);
 		if (hold < 0)
@@ -1776,10 +1790,13 @@ int sensor_3l6_cis_wait_streamoff(struct v4l2_subdev *subdev)
 		dbg_sensor(1, "[MOD:D:%d] %s, sensor_fcount(%d), (wait_limit(%d) < time_out(%d))\n",
 				cis->id, __func__, sensor_fcount, wait_cnt, time_out_cnt);
 	}
+	#if defined(CONFIG_CAMERA_AAS_V20E)
+		msleep(7);
+	#endif
 
 	do_gettimeofday (&t_end);
 
-        u_delay = (t_end.tv_sec * 1000000 + t_end.tv_usec) - (t_start.tv_sec * 1000000 + t_start.tv_usec);
+	u_delay = (t_end.tv_sec * 1000000 + t_end.tv_usec) - (t_start.tv_sec * 1000000 + t_start.tv_usec);
 	info("%s:%d timediff min_delay[%ld] u_delay[%ld][required_sleep[%ld]] sensor_fcount(%d)\n", __func__, __LINE__,
 			min_delay, u_delay,  min_delay - u_delay, sensor_fcount);
 

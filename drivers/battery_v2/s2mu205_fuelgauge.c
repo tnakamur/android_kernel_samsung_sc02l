@@ -289,7 +289,7 @@ static void s2mu205_reset_fg(struct s2mu205_fuelgauge_data *fuelgauge)
 
 	/* Dumpdone. Re-calculate SOC */
 	s2mu205_write_and_verify_reg_byte(fuelgauge->i2c, 0x1E, 0x0F);
-	mdelay(300);
+	msleep(300);
 
 	/* If it was voltage mode, recover it */
 	if (fuelgauge->mode == HIGH_SOC_VOLTAGE_MODE) {
@@ -561,7 +561,7 @@ static int s2mu205_get_cycle(struct s2mu205_fuelgauge_data *fuelgauge)
 	mutex_lock(&fuelgauge->fg_lock);
 
 	s2mu205_write_and_verify_reg_byte(fuelgauge->i2c, S2MU205_REG_MONOUT_SEL, 0x27);
-	mdelay(50);
+	msleep(50);
 
 	if (s2mu205_read_reg(fuelgauge->i2c, S2MU205_REG_MONOUT, data) < 0)
 		goto err;
@@ -728,7 +728,7 @@ err:
 
 static int s2mu205_get_rawsoc(struct s2mu205_fuelgauge_data *fuelgauge)
 {
-	u8 data[2];
+	u8 data[2], check_data[2];
 	u16 compliment;
 	u8 por_state = 0;
 	u8 reg_1E = 0;
@@ -746,6 +746,7 @@ static int s2mu205_get_rawsoc(struct s2mu205_fuelgauge_data *fuelgauge)
 #if (BATCAP_LEARN)
 	int BATCAP_L_VBAT;
 #endif
+	int i = 0;
 
 	s2mu205_read_reg_byte(fuelgauge->i2c, 0x1E, &reg_1E);
 	s2mu205_read_reg_byte(fuelgauge->i2c, 0x1F, &por_state);
@@ -853,8 +854,17 @@ static int s2mu205_get_rawsoc(struct s2mu205_fuelgauge_data *fuelgauge)
 
 	mutex_lock(&fuelgauge->fg_lock);
 
-	if (s2mu205_read_reg(fuelgauge->i2c, S2MU205_REG_RSOC, data) < 0)
-		goto err;
+	/* read SOC */
+	for (i = 0; i < 50; i++) {
+		if (s2mu205_read_reg(fuelgauge->i2c, S2MU205_REG_RSOC, data) < 0)
+			goto err;
+		if (s2mu205_read_reg(fuelgauge->i2c, S2MU205_REG_RSOC, check_data) < 0)
+			goto err;
+
+		dev_dbg(&fuelgauge->i2c->dev, "[DEBUG]%s: data0 (%d) data1 (%d)\n", __func__, data[0], data[1]);
+		if ((data[0] == check_data[0]) && (data[1] == check_data[1]))
+			break;
+	}
 
 	mutex_unlock(&fuelgauge->fg_lock);
 
@@ -1045,7 +1055,7 @@ batcap_learn_init:
 			s2mu205_write_and_verify_reg_byte(fuelgauge->i2c, 0x24, 0x01);
 			/* Dumpdone. Re-calculate SOC */
 			s2mu205_write_and_verify_reg_byte(fuelgauge->i2c, 0x1E, 0x0F);
-			mdelay(300);
+			msleep(300);
 			s2mu205_write_and_verify_reg_byte(fuelgauge->i2c, 0x24, 0x00);
 
 			/* Make report SOC 0% */
@@ -1566,64 +1576,69 @@ static int s2mu205_fg_get_property(struct power_supply *psy,
 			val->intval = s2mu205_maintain_avgcurrent(fuelgauge);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
-		val->intval = s2mu205_get_rawsoc(fuelgauge) / 10;
+		if (val->intval == SEC_FUELGAUGE_CAPACITY_TYPE_RAW) {
+			val->intval = s2mu205_get_rawsoc(fuelgauge);
+		} 
+		else {
+			val->intval = s2mu205_get_rawsoc(fuelgauge) / 10;
 
-		if (fuelgauge->pdata->capacity_calculation_type &
-			(SEC_FUELGAUGE_CAPACITY_TYPE_SCALE |
-				SEC_FUELGAUGE_CAPACITY_TYPE_DYNAMIC_SCALE))
-			s2mu205_fg_get_scaled_capacity(fuelgauge, val);
+			if (fuelgauge->pdata->capacity_calculation_type &
+				(SEC_FUELGAUGE_CAPACITY_TYPE_SCALE |
+					SEC_FUELGAUGE_CAPACITY_TYPE_DYNAMIC_SCALE))
+				s2mu205_fg_get_scaled_capacity(fuelgauge, val);
 
-		/* capacity should be between 0% and 100%
-		 * (0.1% degree)
-		 */
-		if (val->intval > 1000)
-			val->intval = 1000;
-		if (val->intval < 0)
-			val->intval = 0;
-		fuelgauge->raw_capacity = val->intval;
-		
-		/* get only integer part */
-		val->intval /= 10;
+			/* capacity should be between 0% and 100%
+			 * (0.1% degree)
+			 */
+			if (val->intval > 1000)
+				val->intval = 1000;
+			if (val->intval < 0)
+				val->intval = 0;
+			fuelgauge->raw_capacity = val->intval;
+			
+			/* get only integer part */
+			val->intval /= 10;
 
-		/* check whether doing the wake_unlock */
-		if ((val->intval > fuelgauge->pdata->fuel_alert_soc) &&
-				fuelgauge->is_fuel_alerted) {
-			wake_unlock(&fuelgauge->fuel_alert_wake_lock);
-			s2mu205_fuelalert_init(fuelgauge);
-		}
+			/* check whether doing the wake_unlock */
+			if ((val->intval > fuelgauge->pdata->fuel_alert_soc) &&
+					fuelgauge->is_fuel_alerted) {
+				wake_unlock(&fuelgauge->fuel_alert_wake_lock);
+				s2mu205_fuelalert_init(fuelgauge);
+			}
 
-		/* (Only for atomic capacity)
-		 * In initial time, capacity_old is 0.
-		 * and in resume from sleep,
-		 * capacity_old is too different from actual soc.
-		 * should update capacity_old
-		 * by val->intval in booting or resume.
-		 */
-		if (fuelgauge->initial_update_of_soc) {
-			/* updated old capacity */
-			fuelgauge->capacity_old = val->intval;
-			fuelgauge->initial_update_of_soc = false;
-			break;
-		}
-
-		if (fuelgauge->sleep_initial_update_of_soc) {
-			/* updated old capacity in case of resume */
-			if (fuelgauge->is_charging) {
+			/* (Only for atomic capacity)
+			 * In initial time, capacity_old is 0.
+			 * and in resume from sleep,
+			 * capacity_old is too different from actual soc.
+			 * should update capacity_old
+			 * by val->intval in booting or resume.
+			 */
+			if (fuelgauge->initial_update_of_soc) {
+				/* updated old capacity */
 				fuelgauge->capacity_old = val->intval;
-				fuelgauge->sleep_initial_update_of_soc = false;
-				break;
-			} else if ((!fuelgauge->is_charging) &&
-					(fuelgauge->capacity_old >= val->intval)) {
-				fuelgauge->capacity_old = val->intval;
-				fuelgauge->sleep_initial_update_of_soc = false;
+				fuelgauge->initial_update_of_soc = false;
 				break;
 			}
-		}
 
-		if (fuelgauge->pdata->capacity_calculation_type &
-				(SEC_FUELGAUGE_CAPACITY_TYPE_ATOMIC |
-				 SEC_FUELGAUGE_CAPACITY_TYPE_SKIP_ABNORMAL))
-			s2mu205_fg_get_atomic_capacity(fuelgauge, val);
+			if (fuelgauge->sleep_initial_update_of_soc) {
+				/* updated old capacity in case of resume */
+				if (fuelgauge->is_charging) {
+					fuelgauge->capacity_old = val->intval;
+					fuelgauge->sleep_initial_update_of_soc = false;
+					break;
+				} else if ((!fuelgauge->is_charging) &&
+						(fuelgauge->capacity_old >= val->intval)) {
+					fuelgauge->capacity_old = val->intval;
+					fuelgauge->sleep_initial_update_of_soc = false;
+					break;
+				}
+			}
+
+			if (fuelgauge->pdata->capacity_calculation_type &
+					(SEC_FUELGAUGE_CAPACITY_TYPE_ATOMIC |
+					 SEC_FUELGAUGE_CAPACITY_TYPE_SKIP_ABNORMAL))
+				s2mu205_fg_get_atomic_capacity(fuelgauge, val);
+		}
 		break;
 	/* Battery Temperature */
 	case POWER_SUPPLY_PROP_TEMP:
@@ -1727,7 +1742,7 @@ static int s2mu205_fg_set_property(struct power_supply *psy,
 						(val->intval == SEC_BAT_FGSRC_SWITCHING_ON)) {
 					/* Get Battery voltage (by I2C control) */
 					s2mu205_update_reg_byte(fuelgauge->i2c, 0x25, 0x10, 0x30);
-					mdelay(1000);
+					msleep(1000);
 					s2mu205_read_reg_byte(fuelgauge->i2c, 0x25, &temp);
 					pr_info("%s: SW Vbat: fgsrc_switching_on: REG25:0x%02x, 0x25[5:4]=0x%x\n", __func__, temp, (temp & 0x30) >> 4);
 					if (val->intval == SEC_BAT_INBAT_FGSRC_SWITCHING_ON)
@@ -1737,7 +1752,7 @@ static int s2mu205_fg_set_property(struct power_supply *psy,
 				}  else if ((val->intval == SEC_BAT_INBAT_FGSRC_SWITCHING_OFF) ||
 						(val->intval == SEC_BAT_FGSRC_SWITCHING_OFF)) {
 					s2mu205_update_reg_byte(fuelgauge->i2c, 0x25, 0x30, 0x30);
-					mdelay(1000);
+					msleep(1000);
 					s2mu205_read_reg_byte(fuelgauge->i2c, 0x25, &temp);
 					pr_info("%s: SW Vsys: fgsrc_switching_off: REG25:0x%02x, 0x25[5:4]=0x%x\n", __func__, temp, (temp & 0x30) >> 4);
 					if (val->intval == SEC_BAT_INBAT_FGSRC_SWITCHING_OFF)

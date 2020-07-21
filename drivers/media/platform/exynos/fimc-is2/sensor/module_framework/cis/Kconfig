@@ -315,8 +315,16 @@ config CAMERA_CIS_IMX471_OBJ
 	depends on CAMERA_CIS_SELECT
 		default n
 		help
-		  Use to build IMX471 camera sensor.		  
-		  
+		  Use to build IMX471 camera sensor.
+
+config CAMERA_CIS_HI1631_OBJ
+		bool "Use HI1631 camera cis"
+	depends on USE_DIRECT_IS_CONTROL
+	depends on CAMERA_CIS_SELECT
+		default n
+		help
+		  Use to build HI1631 camera sensor.
+
 config CAMERA_CIS_GC5035_OBJ
 		bool "Use GC5035 camera cis"
 	depends on USE_DIRECT_IS_CONTROL

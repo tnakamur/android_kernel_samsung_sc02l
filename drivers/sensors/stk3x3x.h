@@ -321,6 +321,7 @@ typedef struct stk3x3x_data
     bool                    pocket_running; 
     uint16_t                prox_thd_h;
     uint16_t                prox_thd_l;
+    uint16_t                thd_h_offset;
     uint16_t                sunlight_thd_h;
     uint16_t                sunlight_thd_l;
     uint16_t                first_cal_adc_limit;
@@ -338,6 +339,7 @@ typedef struct stk3x3x_data
     struct work_struct      work_cal_prox;
     struct work_struct      work_pocket;
     char                    cal_status;
+    bool                    factory_cal;
     int                     check_far_state;
     int                     pocket_prox;
     uint8_t                 intel_prst;

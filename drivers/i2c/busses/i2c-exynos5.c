@@ -851,6 +851,7 @@ static irqreturn_t exynos5_i2c_irq(int irqno, void *dev_id)
 	unsigned long reg_val;
 	unsigned long trans_status;
 	unsigned char byte;
+	unsigned int stop = 0;
 
 	if (i2c->msg->flags & I2C_M_RD) {
 		while ((readl(i2c->regs + HSI2C_FIFO_STATUS) &
@@ -859,12 +860,8 @@ static irqreturn_t exynos5_i2c_irq(int irqno, void *dev_id)
 			i2c->msg->buf[i2c->msg_ptr++] = byte;
 		}
 
-		if (i2c->msg_ptr >= i2c->msg->len) {
-			reg_val = readl(i2c->regs + HSI2C_INT_ENABLE);
-			reg_val &= ~(HSI2C_INT_RX_ALMOSTFULL_EN);
-			writel(reg_val, i2c->regs + HSI2C_INT_ENABLE);
-			exynos5_i2c_stop(i2c);
-		}
+		if (i2c->msg_ptr >= i2c->msg->len)
+			stop = 1;
 	} else {
 		while ((readl(i2c->regs + HSI2C_FIFO_STATUS) &
 			0x80) == 0) {
@@ -880,6 +877,19 @@ static irqreturn_t exynos5_i2c_irq(int irqno, void *dev_id)
 	}
 
 	reg_val = readl(i2c->regs + HSI2C_INT_STATUS);
+	if ((reg_val & HSI2C_INT_TRANSFER_DONE) &&
+			!(i2c->msg_ptr >= i2c->msg->len) &&
+			(i2c->msg->flags & I2C_M_RD)) {
+		udelay(100);
+		while ((readl(i2c->regs + HSI2C_FIFO_STATUS) &
+					0x1000000) == 0) {
+			byte = (unsigned char)readl(i2c->regs + HSI2C_RX_DATA);
+			i2c->msg->buf[i2c->msg_ptr++] = byte;
+		}
+
+		if (i2c->msg_ptr >= i2c->msg->len)
+			stop = 1;
+	}
 
 	/*
 	 * Checking Error State in INT_STATUS register
@@ -890,17 +900,20 @@ static irqreturn_t exynos5_i2c_irq(int irqno, void *dev_id)
 				"occurred(IS:0x%08x, TR:0x%08x)\n",
 				(unsigned int)reg_val, (unsigned int)trans_status);
 		i2c->trans_done = -ENXIO;
-		exynos5_i2c_stop(i2c);
+		stop = 1;
 		goto out;
 	}
 	/* Checking INT_TRANSFER_DONE */
 	if ((reg_val & HSI2C_INT_TRANSFER_DONE) &&
 		(i2c->msg_ptr >= i2c->msg->len) &&
 		!(i2c->msg->flags & I2C_M_RD))
-		exynos5_i2c_stop(i2c);
+		stop = 1;
 
 out:
 	writel(reg_val, i2c->regs +  HSI2C_INT_STATUS);
+
+	if (stop)
+		exynos5_i2c_stop(i2c);
 
 	return IRQ_HANDLED;
 }

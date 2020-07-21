@@ -33,7 +33,6 @@
 #include <linux/ratelimit.h>
 #include <crypto/hash.h>
 #include <linux/falloc.h>
-#include <linux/android_aid.h>
 #ifdef __KERNEL__
 #include <linux/compat.h>
 #endif
@@ -2368,6 +2367,14 @@ void ext4_free_encryption_info(struct inode *inode, struct ext4_crypt_info *ci);
 int ext4_has_encryption_key(struct inode *inode);
 
 int ext4_get_encryption_info(struct inode *inode);
+
+#ifdef CONFIG_EXT4CRYPT_SDP
+int ext4_get_encryption_key(struct inode *inode,
+						struct ext4_encryption_key *key);
+int fscrypt_get_encryption_kek(struct inode *inode,
+						struct ext4_crypt_info *crypt_info,
+						struct ext4_encryption_key *kek);
+#endif
 
 static inline struct ext4_crypt_info *ext4_encryption_info(struct inode *inode)
 {

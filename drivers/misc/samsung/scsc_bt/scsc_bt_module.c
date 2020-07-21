@@ -466,6 +466,12 @@ static int slsi_sm_ant_service_cleanup(bool allow_service_stop)
 
 	atomic_set(&ant_service.error_count, 0);
 
+	/* Release write wake lock if held */
+	if (wake_lock_active(&bt_service.write_wake_lock)) {
+		bt_service.write_wake_unlock_count++;
+		wake_unlock(&bt_service.write_wake_lock);
+	}
+
 	SCSC_TAG_DEBUG(BT_COMMON, "complete\n");
 	return 0;
 

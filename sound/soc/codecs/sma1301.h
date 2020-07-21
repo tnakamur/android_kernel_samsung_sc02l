@@ -1,7 +1,7 @@
 /*
  * sma1301.h -- sma1301 ALSA SoC Audio driver
  *
- * r008_TEST, 2019.01.11
+ * r011, 2019.05.29
  *
  * Copyright 2018 Silicon Mitus Corporation / Iron Device Corporation
  *
@@ -466,6 +466,10 @@
 #define THERMAL_160_120 (1<<5)
 #define THERMAL_140_100 (2<<5)
 
+#define FAST_OFF_DRIVE_SPK_MASK (1<<0)
+#define FAST_OFF_DRIVE_SPK_DISABLE (0<<0)
+#define FAST_OFF_DRIVE_SPK_ENABLE (1<<0)
+
 /* PLL_LDO_CTRL,PLL_POST_N : 0x8B */
 #define PLL_EN_MASK (1<<5)
 #define PLL_EN_DISABLE (0<<5)
@@ -591,6 +595,9 @@
 /* STATUS1 : 0xFA */
 #define OT1_OK_STATUS (1<<7)
 #define OT2_OK_STATUS (1<<6)
+#define REV_NUM_STATUS (7<<3)
+#define REV_NUM_ES0 (4<<3)
+#define REV_NUM_ES1 (5<<3)
 
 /* STATUS2 : 0xFB */
 #define OCP_SPK_STATUS (1<<5)

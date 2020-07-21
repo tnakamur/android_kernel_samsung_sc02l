@@ -165,6 +165,13 @@ config SENSORS_TCS3701
 	help
 	   This option enables light sensor using TCS3701 driver.
 
+config SENSORS_TCS3701_A40
+	depends on I2C
+	tristate "TCS3701 driver"
+	default n
+	help
+	   This option to apply parameters only to A40 model.
+
 config SENSORS_TMD3725
 	depends on I2C
 	tristate "TMD3725 driver"
@@ -190,6 +197,17 @@ config SENSORS_A96T3X6
 
 	  Say N here if you do not use A96T3X6 for grip.
 
+config SENSORS_A96T3X6_2CH
+	depends on I2C
+	tristate "SENSORS_A96T3X6_2CH driver for grip"
+	default n
+	help
+	  Say Y here if you use SENSORS_A96T3X6_2CH for grip.
+	  This option enables grip sensors using
+	  Above SENSORS_A96T3X6_2CH device driver for grip.
+
+	  Say N here if you do not use SENSORS_A96T3X6_2CH for grip.
+
 config SENSORS_A96T3X6_A40
 	depends on I2C
 	tristate "A96T3X6 touchkey"
@@ -202,6 +220,17 @@ config SENSORS_A96T3X6_A40
 	  Say N here if you do not use A96T3X6 for grip.
 
 config SENSORS_A96T3X6_A30
+	depends on I2C
+	tristate "A96T3X6 touchkey"
+	default n
+	help
+	  Say Y here if you use A96T3X6 for grip.
+	  This option enables grip sensors using
+	  Above A96T3X6 device driver for grip.
+
+	  Say N here if you do not use A96T3X6 for grip.
+
+config SENSORS_A96T3X6_A30S
 	depends on I2C
 	tristate "A96T3X6 touchkey"
 	default n
@@ -353,6 +382,17 @@ config SENSORS_TC3XXK_A10
 	  Say N here if you do not use TC3XXK for grip Sensor.
 
 config SENSORS_TC3XXK_A10E
+	depends on I2C
+	tristate "TC3XXK driver for grip Sensor"
+	default n
+	help
+	  Say Y here if you use TC3XXK IC for grip Sensor.
+	  This option enables grip sensors using
+	  Coreriver TC3XXK device driver for grip Sensor.
+	  
+	  Say N here if you do not use TC3XXK for grip.
+
+config SENSORS_TC3XXK_A10E_KOR
 	depends on I2C
 	tristate "TC3XXK driver for grip Sensor"
 	default n

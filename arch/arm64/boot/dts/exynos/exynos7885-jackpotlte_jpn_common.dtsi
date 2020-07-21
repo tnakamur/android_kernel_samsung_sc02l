@@ -11,7 +11,7 @@
 
 #include "exynos7885-rmem.dtsi"
 #include "exynos7885.dtsi"
-#include "exynos7885-display-lcd.dtsi"
+#include "display-lcd_jackpot_jpn_common.dtsi"
 #include "modem-s327ap-sipc-pdata.dtsi"
 #include "battery_data_jackpotlte_common.dtsi"
 #include "exynos7885-jackpotlte_motor.dtsi"
@@ -185,6 +185,7 @@
 			vdd-supply = <&l36_reg>;
 			pinctrl-names = "default";
 			ant-det-gpio = <&gpa1 4 0xf>;
+			legacy-dtv-support;
 			mic-bias1-voltage = <3>;
 			mic-bias2-voltage = <1>;
 			mic-bias-ldo-voltage = <3>;
@@ -888,46 +889,6 @@
 			aicl,label="battery aicl";
 			aicl,threshold_count=<5>;
 			aicl,threshold_time=<300>;
-		};
-	};
-
-	dsim_0: dsim@0x14870000 {
-		lcd_info = <&s6e8aa5>;
-		decon_board = <&decon_board>;
-	};
-
-	decon_f: decon_f@0x14860000 {
-		psr_mode = <0>;	/* 0: video mode, 1: DP command mode, 2: MIPI command mode */
-		trig_mode = <1>;	/* 0: hw trigger, 1: sw trigger */
-		dsi_mode = <0>;	/* 0: single dsi, 1: dual dsi */
-
-		gpio_det = <&gpa0 1 0x1>;
-		gpio_pcd = <&gpa0 6 0x1>;
-	};
-
-	decon_board: decon_board {
-		gpio_lcd_pwr_en = <&gpg2 6 0x1>;
-		gpio_lcd_rst = <&gpg1 7 0x1>;
-
-		dsim_set_panel_power_enable {
-			type =
-			"gpio,high",	"gpio_lcd_pwr_en",
-			"delay,usleep",	"5000 6000";
-		};
-		dsim_set_panel_power_disable {
-			type =
-			"gpio,low",	"gpio_lcd_rst",
-			"delay,usleep",	"1000 1100",
-			"gpio,low",	"gpio_lcd_pwr_en";
-		};
-		dsim_reset_panel {
-			type =
-			"gpio,high",	"gpio_lcd_rst",
-			"delay,usleep",	"5000 6000",
-			"gpio,low",	"gpio_lcd_rst",
-			"delay,usleep",	"5000 6000",
-			"gpio,high",	"gpio_lcd_rst",
-			"delay,usleep",	"10000 11000";
 		};
 	};
 

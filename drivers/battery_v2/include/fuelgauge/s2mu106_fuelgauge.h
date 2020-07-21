@@ -210,6 +210,8 @@ struct s2mu106_fuelgauge_data {
 	int batcap_ocv_fin;
 	int cycle;
 	int soh;
+	u8 batcap_0x0E;
+	u8 batcap_0x0F;
 #endif
 };
 

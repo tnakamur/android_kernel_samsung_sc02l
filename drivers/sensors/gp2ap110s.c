@@ -135,6 +135,7 @@ static int gp2ap_write_settings(struct gp2ap_data *data)
 			led_reg_val = data->led_reg_val_2;
 			ps_high_th = data->ps_high_th_2;
 			ps_low_th = data->ps_low_th_2;
+			data->min_close_offset = MAX_OFFSET;
 	}
 	
 	data->led_reg_val = led_reg_val;
@@ -271,12 +272,12 @@ static void gp2ap_InitData(struct gp2ap_data *data)
 			if (offset >= OFFSET_TUNE_ADC &&
     				data->tune_adc_count < MAX_RETRY_TUNE_ADC_COUNT) {
     				adc = gp2ap_get_proximity_adc(data);
-    				wdata = (adc+ 1200)/255;
+    				wdata = (adc+ 1280)/256;
     				SENSOR_INFO("Tune ADC: adc %d, wdata 0x%x\n", adc, wdata);
     				if(wdata > 0x0D)
 					wdata = 0x0D;
-    				if(wdata >= 0x05)
-					data->handle_high_offset = true;
+    				data->handle_high_offset = true;
+    				data->high_offset = (u16)wdata * 16;
     				gp2ap_i2c_write(0x8D, wdata, data->client);
     				data->tune_adc_count++;
     				return;
@@ -390,16 +391,18 @@ static int gp2ap_ps_onoff(u8 onoff, struct gp2ap_data *data)
 			gp2ap_InitDataDynamicCalibration(data);
 			data->dynamic_calib_done = 0;
 
-			enable_irq_wake(data->ps_irq);
-			enable_irq(data->ps_irq);
-
 			gp2ap_StartMeasurement(data);
 
 			msleep(50);
 
 			SENSOR_INFO("dynamic calibration done\n");
 			data->dynamic_calib_done = 1;
+			if(data->zero_detect)
+				data->zero_detect = 0;
 			gp2ap_InitData(data);
+
+			enable_irq_wake(data->ps_irq);
+			enable_irq(data->ps_irq);
 		} else {
 			gp2ap_InitData(data);
 		}
@@ -443,6 +446,7 @@ static ssize_t gp2ap_ps_enable_store(struct device *dev,
 		data->ps_enabled = new_value;
 		data->tune_adc_count = 0;
 		data->handle_high_offset = false;
+		data->high_offset = 0;
 		mutex_lock(&data->mutex_ps_onoff);
 		gp2ap_ps_onoff(1, data);
 		mutex_unlock(&data->mutex_ps_onoff);
@@ -532,6 +536,22 @@ static int ps_input_init(struct gp2ap_data *data)
 	return err;
 }
 
+void gp2ap_update_min_close_offset(struct gp2ap_data *data)
+{
+	u8 offset;
+	u8 rdata_d0[2];
+	u16 ps_count;
+
+	gp2ap_i2c_read(REG_DYNAMIC_CAL_RESULT, &offset, sizeof(offset), data->client);
+	gp2ap_i2c_read(REG_D0_LSB, rdata_d0, sizeof(rdata_d0), data->client);
+	ps_count = (rdata_d0[1] << 8) | rdata_d0[0];
+
+	if (data->high_offset + offset + OFFSET_DELTA < data->min_close_offset)
+		data->min_close_offset = data->high_offset + offset + OFFSET_DELTA;
+
+	SENSOR_INFO(":%u %u %u %u\n", ps_count, offset, data->high_offset, data->min_close_offset);
+}
+
 irqreturn_t gp2ap_ps_irq_handler(int irq, void *id_data)
 {
 	struct gp2ap_data *data = id_data;
@@ -554,11 +574,15 @@ static void gp2ap_ps_work_int_func(struct work_struct *work)
 	u8 near_far = 1;
 	u8    rdata;
 	u8    rdata_d0[2];
+	u8    offset;
 
 	if (data == NULL)
 		return;
 
 	mutex_lock(&data->mutex_interrupt);
+
+	gp2ap_i2c_read(REG_DYNAMIC_CAL_RESULT, &offset, sizeof(offset), data->client);
+
 	// 0 : proximity, 1 : away 
 	gp2ap_i2c_read(0x81, &rdata, sizeof(rdata), data->client);
 	if ((rdata & 0x08) == 0x08)
@@ -572,9 +596,9 @@ static void gp2ap_ps_work_int_func(struct work_struct *work)
 	gp2ap_i2c_read(REG_D0_LSB, rdata_d0, sizeof(rdata_d0), data->client);
 	data->ps_count = (rdata_d0[1] << 8) | rdata_d0[0];
 
-	if (data->ps_count >= data->ps_high_th)
+	if (data->ps_count >= data->ps_high_th || (data->high_offset + offset >= data->min_close_offset && data->ps_count != 0))
 		near_far = 0;
-	else if (data->ps_count < data->ps_low_th)
+	else if (data->ps_count < data->ps_low_th && (data->high_offset + offset < data->min_close_offset && data->ps_count != 0))
 		near_far = 1;
 
 	SENSOR_INFO("ps_distance:%d, near_far:%d, ps_count:%d\n", data->ps_distance, near_far, data->ps_count);
@@ -592,10 +616,22 @@ static void gp2ap_ps_work_int_func(struct work_struct *work)
 		gp2ap_ps_onoff(0, data);
 		gp2ap_ps_onoff(1, data);
 		mutex_unlock(&data->mutex_ps_onoff);
+
+		if(!offset) {
+			gp2ap_i2c_write(0x8D, 0, data->client);
+			data->min_close_offset = MAX_OFFSET;
+			data->high_offset = 0;
+			SENSOR_INFO("offset = 0 , Restart sensor!");
+			mutex_lock(&data->mutex_ps_onoff);
+			gp2ap_ps_onoff(0, data);
+			gp2ap_ps_onoff(1, data);
+			mutex_unlock(&data->mutex_ps_onoff);
+		}
 	} else {
 		input_report_abs(data->ps_input_dev, ABS_DISTANCE, near_far);
 		input_sync(data->ps_input_dev);
 	}
+	gp2ap_update_min_close_offset(data);
 	mutex_unlock(&data->mutex_interrupt);
 }
 
@@ -969,7 +1005,8 @@ static void gp2ap_offset_work_func(struct work_struct *work)
 		struct gp2ap_data, offset_work);
 		
 	uint32_t ps_data;
-	
+	u8    offset;
+
 	ps_data = gp2ap_get_proximity_adc(data);
 	
 	SENSOR_INFO("ps_data_offset_work=%d\n", ps_data);
@@ -984,8 +1021,21 @@ static void gp2ap_offset_work_func(struct work_struct *work)
 		gp2ap_ps_onoff(0, data);
 		gp2ap_ps_onoff(1, data);
 		mutex_unlock(&data->mutex_ps_onoff);
-	}
 
+		gp2ap_i2c_read(REG_DYNAMIC_CAL_RESULT, &offset, sizeof(offset), data->client);
+
+		if(!offset) {
+			gp2ap_i2c_write(0x8D, 0, data->client);
+			data->min_close_offset = MAX_OFFSET;
+			data->high_offset = 0;
+			SENSOR_INFO("offset = 0 , Restart sensor!");
+			mutex_lock(&data->mutex_ps_onoff);
+			gp2ap_ps_onoff(0, data);
+			gp2ap_ps_onoff(1, data);
+			mutex_unlock(&data->mutex_ps_onoff);
+		}
+	}
+	gp2ap_update_min_close_offset(data);
 	schedule_delayed_work(&data->offset_work, msecs_to_jiffies(OFFSET_TUNE_DELAY));
 }
 
@@ -1056,7 +1106,7 @@ static ssize_t dynamic_calib_enabled_store(struct device *dev,
 static DEVICE_ATTR(name, 0444, name_read, NULL);
 static DEVICE_ATTR(vendor, 0444, vendor_read, NULL);
 static DEVICE_ATTR(raw_data, 0444, proximity_state_show, NULL);
-static DEVICE_ATTR(prox_register, 0444, proximity_register_read_show, proximity_register_write_store);
+static DEVICE_ATTR(prox_register, 0644, proximity_register_read_show, proximity_register_write_store);
 static DEVICE_ATTR(prox_trim, 0444, proximity_trim_show, NULL);
 static DEVICE_ATTR(prox_cal, 0444, proximity_cal_show, NULL);
 static DEVICE_ATTR(thresh_high, S_IRUGO | S_IWUSR | S_IWGRP,
@@ -1273,6 +1323,8 @@ static int gp2ap_i2c_probe(struct i2c_client *client,
 	gp2ap->bytes = 14; // 4 bytes each for led_reg_val, thresholds & 1 byte each for ","
 	gp2ap->pre_test = 0;
 	gp2ap->zero_detect = 0;
+	gp2ap->high_offset = 0;
+	gp2ap->min_close_offset = MAX_OFFSET;
 
 	value = 0x00;
 	gp2ap_i2c_write(0x8D, value, gp2ap->client);

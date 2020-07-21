@@ -245,6 +245,8 @@
 #define DWC3_GUSB3PIPECTL_TX_DEEPH(n)	((n) << 1)
 
 /* Global TX Fifo Size Register */
+#define DWC31_GTXFIFOSIZ_TXFRAMNUM	BIT(15)		/* DWC_usb31 only */
+#define DWC31_GTXFIFOSIZ_TXFDEF(n)	((n) & 0x7fff)	/* DWC_usb31 only */
 #define DWC3_GTXFIFOSIZ_TXFDEF(n)	((n) & 0xffff)
 #define DWC3_GTXFIFOSIZ_TXFSTADDR(n)	((n) & 0xffff0000)
 
@@ -973,7 +975,7 @@ struct dwc3 {
 	unsigned		start_config_issued:1;
 
 	struct work_struct      set_vbus_current_work;
-	int			vbus_curernt; /* 100mA,  500mA,  900mA */
+	int			vbus_current; /* 100mA,  500mA,  900mA */
 };
 
 /* -------------------------------------------------------------------------- */

@@ -47,6 +47,7 @@ typedef enum {
 /* Samsung Acc VID */
 #define SAMSUNG_VENDOR_ID		0x04E8
 #define SAMSUNG_MPA_VENDOR_ID		0x04B4
+#define TypeC_DP_SUPPORT	(0xFF01)
 /* Samsung Acc PID */
 #define GEARVR_PRODUCT_ID		0xA500
 #define GEARVR_PRODUCT_ID_1		0xA501

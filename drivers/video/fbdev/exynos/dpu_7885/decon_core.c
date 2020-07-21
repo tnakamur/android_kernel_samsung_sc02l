@@ -36,9 +36,6 @@
 #include <soc/samsung/cal-if.h>
 #include <soc/samsung/exynos-pd.h>
 #include <dt-bindings/clock/exynos7885.h>
-#ifdef CONFIG_SEC_DEBUG
-#include <linux/sec_debug.h>
-#endif
 
 #include "decon.h"
 #include "dsim.h"
@@ -156,66 +153,6 @@ void decon_dump(struct decon_device *decon)
 	if (acquired)
 		console_unlock();
 }
-
-#ifdef CONFIG_LOGGING_BIGDATA_BUG
-extern unsigned int get_panel_bigdata(struct dsim_device *dsim);
-
-/* Gen Big Data Error for Decon's Bug
- *
- * return value
- * 1. 31 ~ 28 : decon_id
- * 2. 27 ~ 24 : decon eing pend register
- * 3. 23 ~ 16 : dsim underrun count
- * 4. 15 ~  8 : 0x0e panel register
- * 5.  7 ~  0 : 0x0a panel register
- * */
-
-static unsigned int gen_decon_bug_bigdata(struct decon_device *decon)
-{
-	struct dsim_device *dsim;
-	unsigned int value, panel_value;
-	unsigned int underrun_cnt = 0;
-
-	/* for decon id */
-	value = decon->id << 28;
-
-
-	if (decon->id == 0) {
-		/* for eint pend value */
-		value |= (decon->eint_pend & 0x0f) << 24;
-
-		/* for underrun count */
-		dsim = container_of(decon->out_sd[0], struct dsim_device, sd);
-
-		if (dsim != NULL) {
-			underrun_cnt = dsim->total_underrun_cnt;
-			if (underrun_cnt > 0xff) {
-				decon_info("%s:dsim underrun exceed 1byte : %d\n",
-						__func__, underrun_cnt);
-				underrun_cnt = 0xff;
-			}
-		}
-		value |= underrun_cnt << 16;
-
-		/* for panel dump */
-		panel_value = get_panel_bigdata(dsim);
-		value |= panel_value & 0xffff;
-	}
-
-	decon_info("%s:big data : %x\n", __func__, value);
-	return value;
-}
-
-void log_decon_bigdata(struct decon_device *decon)
-{
-	unsigned int bug_err_num;
-
-	bug_err_num = gen_decon_bug_bigdata(decon);
-#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
-	sec_debug_set_extra_info_decon(bug_err_num);
-#endif
-}
-#endif
 
 /* ---------- CHECK FUNCTIONS ----------- */
 static void decon_win_conig_to_regs_param
@@ -501,7 +438,7 @@ static int decon_enable(struct decon_device *decon)
 	struct decon_mode_info psr;
 	struct decon_param p;
 	int ret = 0;
-#if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
+#if defined(CONFIG_EXYNOS_DOZE)
 	struct dsim_device *dsim = NULL;
 
 	if (!decon->id && decon->dt.out_type == DECON_OUT_DSI)
@@ -539,7 +476,7 @@ static int decon_enable(struct decon_device *decon)
 
 	if (decon->state == DECON_STATE_ON) {
 		decon_warn("decon%d already enabled\n", decon->id);
-#if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
+#if defined(CONFIG_EXYNOS_DOZE)
 		decon_info("%s: doze_state: %d\n", __func__, decon->doze_state);
 		if (IS_DOZE(decon->doze_state)) {
 			ret = v4l2_subdev_call(decon->out_sd[0], video, s_stream, 1);
@@ -620,14 +557,13 @@ static int decon_enable(struct decon_device *decon)
 
 	decon->state = DECON_STATE_ON;
 	decon_reg_set_int(decon->id, &psr, 1);
-#if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
+#if defined(CONFIG_EXYNOS_DOZE)
 	decon_info("%s: doze_state: %d\n", __func__, decon->doze_state);
 	decon->doze_state = DOZE_STATE_NORMAL;
 	if (IS_DOZE(decon->doze_state))
 		call_panel_ops(dsim, displayon, dsim);
 #endif
 
-	decon_abd_enable(decon, 1);
 err:
 	mutex_unlock(&decon->lock);
 	return ret;
@@ -638,8 +574,6 @@ static int decon_disable(struct decon_device *decon)
 	struct decon_mode_info psr;
 	int ret = 0;
 	struct dsim_device *dsim = NULL;
-
-	decon_abd_enable(decon, 0);
 
 	if (decon->state == DECON_STATE_TUI) {
 #ifdef CONFIG_SAMSUNG_TUI
@@ -744,7 +678,7 @@ static int decon_disable(struct decon_device *decon)
 	decon_runtime_suspend(decon->dev);
 #endif
 	decon->state = DECON_STATE_OFF;
-#if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
+#if defined(CONFIG_EXYNOS_DOZE)
 	decon->doze_state = DOZE_STATE_SUSPEND;
 #endif
 
@@ -797,6 +731,7 @@ static int decon_blank(int blank_mode, struct fb_info *info)
 			decon_err("skipped to disable decon\n");
 			goto blank_exit;
 		}
+		atomic_set(&decon->ffu_flag, 2);
 		break;
 	case FB_BLANK_UNBLANK:
 		DPU_EVENT_LOG(DPU_EVT_UNBLANK, &decon->sd, ktime_set(0, 0));
@@ -805,8 +740,7 @@ static int decon_blank(int blank_mode, struct fb_info *info)
 			decon_err("skipped to enable decon\n");
 			goto blank_exit;
 		}
-		if (!ret)
-			atomic_set(&decon->win_config, 1);
+		atomic_set(&decon->ffu_flag, 2);
 		break;
 	case FB_BLANK_VSYNC_SUSPEND:
 	case FB_BLANK_HSYNC_SUSPEND:
@@ -1418,12 +1352,47 @@ static void decon_set_afbc_recovery_time(struct decon_device *decon)
 	decon->prev_aclk_khz = aclk_khz;
 }
 
+#if defined(CONFIG_SUPPORT_MASK_LAYER)
+static int decon_set_mask_layer(struct decon_device *decon, struct decon_reg_data *regs)
+{
+	int ret = 0;
+	struct dsim_device *dsim = NULL;
+
+	if (decon->dt.out_type != DECON_OUT_DSI)
+		return 0;
+
+	if (regs->mask_layer == decon->current_mask_layer)
+		return 0;
+
+	decon_info("%s: current_mask: %s, request_mask: %s\n", __func__,
+		decon->current_mask_layer ? "on" : "off", regs->mask_layer ? "on" : "off");
+
+	dsim = container_of(decon->out_sd[0], struct dsim_device, sd);
+	if (!dsim) {
+		decon_info("%s: invalid dsim\n", __func__);
+		return 0;
+	}
+
+	decon_abd_save_str(&decon->abd, "mask_te_0");
+	decon_wait_for_vsync(decon, VSYNC_TIMEOUT_MSEC);
+	decon_info("%s: MASK_LAYER TE 1\n", __func__);
+	decon_abd_save_str(&decon->abd, "mask_te_1");
+
+	decon->mask_regs = regs;
+	ret = call_panel_ops(dsim, mask_brightness, dsim);
+
+	return 1; /* return 1 for checking trigger done */
+}
+#endif
+
 static void __decon_update_regs(struct decon_device *decon, struct decon_reg_data *regs)
 {
 	int err_cnt = 0;
 	unsigned short i, j;
 	struct decon_mode_info psr;
-
+#if defined(CONFIG_SUPPORT_MASK_LAYER)
+	int trigger_check = 0;
+#endif
 	decon_dbg("%s +\n", __func__);
 
 	decon_to_psr_info(decon, &psr);
@@ -1469,6 +1438,12 @@ static void __decon_update_regs(struct decon_device *decon, struct decon_reg_dat
 	/* aclk_khz = 1ms (calculated in afbc_recovery_time() */
 	decon_reg_set_timeout_value(decon->id, decon->prev_aclk_khz * 20);
 
+#if defined(CONFIG_SUPPORT_MASK_LAYER)
+	trigger_check = decon_set_mask_layer(decon, regs);
+	if (trigger_check)
+		goto trigger_done;
+#endif
+
 	decon_reg_all_win_shadow_update_req(decon->id);
 	decon_to_psr_info(decon, &psr);
 
@@ -1485,7 +1460,9 @@ static void __decon_update_regs(struct decon_device *decon, struct decon_reg_dat
 #endif
 		BUG();
 	}
-
+#if defined(CONFIG_SUPPORT_MASK_LAYER)
+trigger_done:
+#endif
 #if defined(CONFIG_SEC_INCELL)
 update_exit:
 #endif
@@ -1588,7 +1565,7 @@ static void decon_update_regs(struct decon_device *decon,
 	for (i = 0; i < decon->dt.max_win; i++) {
 		if (regs->dma_buf_data[i][0].fence) {
 			if (decon_wait_fence(regs->dma_buf_data[i][0].fence) < 0)
-				decon_abd_save_log_fto(&decon->abd, regs->dma_buf_data[i][0].fence);
+				decon_abd_save_fto(&decon->abd, regs->dma_buf_data[i][0].fence);
 		}
 	}
 
@@ -1641,6 +1618,14 @@ static void decon_update_regs(struct decon_device *decon,
 #endif
 			BUG();
 		}
+
+		if (decon->dt.out_type == DECON_OUT_DSI && atomic_read(&decon->ffu_flag)) {
+			if (regs->num_of_window) {
+				atomic_dec(&decon->ffu_flag);
+				decon_simple_notifier_call_chain(DECON_EVENT_FRAME_SEND, FB_BLANK_UNBLANK);
+			}
+		}
+
 		if(!video_emul)
 			decon_reg_set_trigger(decon->id, &psr, DECON_TRIG_DISABLE);
 	}
@@ -1788,16 +1773,39 @@ static int decon_prepare_win_config(struct decon_device *decon,
 			dpu_translate_fmt_to_dpp(regs->dpp_config[i].format);
 	}
 
-	if (atomic_read(&decon->win_config)) {
-		decon_info("%s: %d\n", __func__, regs->num_of_window);
-		if (regs->num_of_window)
-			atomic_set(&decon->win_config, 0);
+	if (decon->dt.out_type == DECON_OUT_DSI && atomic_read(&decon->ffu_flag)) {
+		if (regs->num_of_window) {
+			atomic_dec(&decon->ffu_flag);
+			decon_simple_notifier_call_chain(DECON_EVENT_FRAME, FB_BLANK_UNBLANK);
+		}
 	}
 
 	decon_dbg("%s -\n", __func__);
 
 	return ret;
 }
+
+#if defined(CONFIG_SUPPORT_MASK_LAYER)
+static bool decon_get_mask_layer(struct decon_device *decon,
+	struct decon_win_config_data *win_data)
+{
+	int i;
+	bool mask = false;
+	struct decon_win_config *config;
+	struct decon_win_config *win_config = win_data->config;
+
+	for (i = 0; i < decon->dt.max_win; i++) {
+		config = &win_config[i];
+		if (config && (config->state == DECON_WIN_STATE_FINGERPRINT)) {
+			decon_dbg("%s: mask layer enable: %d\n", __func__, i);
+			config->state = DECON_WIN_STATE_BUFFER;
+			mask = true;
+		}
+	}
+
+	return mask;
+}
+#endif
 
 static int decon_set_win_config(struct decon_device *decon,
 		struct decon_win_config_data *win_data)
@@ -1827,6 +1835,11 @@ static int decon_set_win_config(struct decon_device *decon,
 		ret = -ENOMEM;
 		goto err;
 	}
+
+#if defined(CONFIG_SUPPORT_MASK_LAYER)
+	if (decon->dt.out_type == DECON_OUT_DSI)
+		regs->mask_layer = decon_get_mask_layer(decon, win_data);
+#endif
 
 	num_of_window = decon_get_active_win_count(decon, win_data);
 	if (num_of_window) {
@@ -1898,7 +1911,7 @@ static int decon_ioctl(struct fb_info *info, unsigned int cmd,
 	bool active;
 	u32 crc_bit, crc_start;
 	u32 crc_data[2];
-#if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
+#if defined(CONFIG_EXYNOS_DOZE)
 	u32 doze;
 #endif
 	decon_hiber_block_exit(decon);
@@ -2072,7 +2085,7 @@ static int decon_ioctl(struct fb_info *info, unsigned int cmd,
 		}
 		break;
 
-#if defined(CONFIG_EXYNOS_SUPPORT_DOZE)
+#if defined(CONFIG_EXYNOS_DOZE)
 	case S3CFB_POWER_MODE:
 		if (get_user(doze, (int __user *)arg)) {
 			ret = -EFAULT;
@@ -2107,6 +2120,7 @@ int decon_release(struct fb_info *info, int user)
 {
 	struct decon_win *win = info->par;
 	struct decon_device *decon = win->decon;
+	int fb_count = atomic_read(&info->count);
 
 	decon_info("%s +\n", __func__);
 
@@ -2116,11 +2130,19 @@ int decon_release(struct fb_info *info, int user)
 				decon->id, decon->out_sd[0]->name);
 	}
 
+	if (fb_count != 1) {
+		decon_info("%s: fb_count is %d\n", __func__, fb_count);
+		return 0;
+	}
+
 	if (decon->dt.out_type == DECON_OUT_DSI) {
 		decon_hiber_block_exit(decon);
 		/* Unused DECON state is DECON_STATE_INIT */
-		if (decon->state == DECON_STATE_ON)
+		if (decon->state == DECON_STATE_ON) {
+			decon_simple_notifier_call_chain(FB_EARLY_EVENT_BLANK, FB_BLANK_POWERDOWN);
 			decon_disable(decon);
+			decon_simple_notifier_call_chain(FB_EVENT_BLANK, FB_BLANK_POWERDOWN);
+		}
 
 		decon_hiber_unblock(decon);
 	}
@@ -2978,14 +3000,6 @@ static int decon_probe(struct platform_device *pdev)
 
 		pm_stay_awake(decon->dev);
 		dev_warn(decon->dev, "pm_stay_awake");
-
-		decon->ignore_vsync = lcdtype ? 0 : 1;
-		decon_info("%s: lcdtype: %8X\n", __func__, lcdtype);
-
-		if (lcdtype) {
-			decon_abd_register(decon);
-			decon_abd_enable(decon, 1);
-		}
 	}
 
 #ifndef CONFIG_EXYNOS_SUPPORT_FB_HANDOVER
@@ -3045,8 +3059,6 @@ static void decon_shutdown(struct platform_device *pdev)
 {
 	struct decon_device *decon = platform_get_drvdata(pdev);
 	struct fb_info *fbinfo = decon->win[decon->dt.dft_win]->fbinfo;
-	struct fb_event v = {0, };
-	int blank = FB_BLANK_POWERDOWN;
 
 	decon_info("%s + state:%d\n", __func__, decon->state);
 	decon_enter_shutdown(decon);
@@ -3064,12 +3076,9 @@ static void decon_shutdown(struct platform_device *pdev)
 	decon_hiber_block_exit(decon);
 	/* Unused DECON state is DECON_STATE_INIT */
 	if (decon->state == DECON_STATE_ON) {
-		v.info = fbinfo;
-		v.data = &blank;
-
-		decon_notifier_call_chain(FB_EARLY_EVENT_BLANK, &v);
+		decon_simple_notifier_call_chain(FB_EARLY_EVENT_BLANK, FB_BLANK_POWERDOWN);
 		decon_disable(decon);
-		decon_notifier_call_chain(FB_EVENT_BLANK, &v);
+		decon_simple_notifier_call_chain(FB_EVENT_BLANK, FB_BLANK_POWERDOWN);
 	}
 
 	unlock_fb_info(fbinfo);

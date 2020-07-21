@@ -886,6 +886,10 @@ void process_cc_attach(void * data,u8 *plug_attach_done)
 				dev_info(&i2c->dev, "%s No DFP! is_dfp:%d\n", __func__, is_dfp);
 				return;
 			}
+			/*for case after smart switch CtoC, device doesn't recharge*/
+			else if (usbpd_data->pd_state == State_PE_SRC_Send_Capabilities && usbpd_data->is_host == HOST_ON_BY_RD)
+				usbpd_data->is_host = HOST_OFF;
+			
 			if (usbpd_data->is_client == CLIENT_ON) {
 				dev_info(&i2c->dev, "%s %d: pd_state:%02d, turn off client\n",
 							__func__, __LINE__, usbpd_data->pd_state);
@@ -1242,6 +1246,33 @@ void process_cc_get_int_status(void *data, uint32_t *pPRT_MSG, MSG_IRQ_STATUS_Ty
 						USB_STATUS_NOTIFY_ATTACH_DFP/*drp*/, 0);
 				usbpd_data->is_host = HOST_ON_BY_RD;
 				usbpd_data->is_client = CLIENT_OFF;
+			} else {
+				/* both of host and device not worked case. 
+				    rebooting case with dex connection */
+				   
+				    if (is_dfp) {
+						pr_info("%s: all usb off case : is dfp=%d : run usb host \n", __func__, is_dfp);
+						ccic_event_work(usbpd_data, CCIC_NOTIFY_DEV_MUIC,
+							CCIC_NOTIFY_ID_ATTACH, 1/*attach*/, 1/*rprd*/,0);
+						ccic_event_work(usbpd_data,
+								CCIC_NOTIFY_DEV_USB, CCIC_NOTIFY_ID_USB,
+								1/*attach*/,
+								USB_STATUS_NOTIFY_ATTACH_DFP/*drp*/, 0);
+						usbpd_data->is_host = HOST_ON_BY_RD;
+						usbpd_data->is_client = CLIENT_OFF;					
+				    } else {
+				    		pr_info("%s: all usb off case : is dfp=%d : run usb client \n", __func__, is_dfp);
+						ccic_event_work(usbpd_data,
+							CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_ATTACH,
+							1/*attach*/, 0/*rprd*/,0);
+						ccic_event_work(usbpd_data,
+								CCIC_NOTIFY_DEV_USB, CCIC_NOTIFY_ID_USB,
+								1/*attach*/, USB_STATUS_NOTIFY_ATTACH_UFP/*drp*/, 0);
+						usbpd_data->is_host = HOST_OFF;
+						usbpd_data->is_client = CLIENT_ON;
+
+				    }
+		
 			}
 #if defined(CONFIG_CCIC_ALTERNATE_MODE)
 		}

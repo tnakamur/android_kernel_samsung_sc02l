@@ -120,7 +120,7 @@ static struct v4l2_ctrl_config s610_ctrls[] = {
 				.type	= V4L2_CTRL_TYPE_INTEGER,
 				.name	= "Channel Band",
 				.min	= 0,
-				.max	= 1,
+				.max	= 2,
 				.step	= 1,
 		},
 		[S610_IDX_SOFT_STEREO_BLEND] = { /*0x03*/
@@ -264,10 +264,23 @@ static const struct v4l2_frequency_band s610_bands[] = {
 				| V4L2_TUNER_CAP_RDS
 				| V4L2_TUNER_CAP_RDS_BLOCK_IO
 				| V4L2_TUNER_CAP_FREQ_BANDS,
-				/* default region Eu/US */
+				/* Japan region       */
 				.rangelow	= 76000*FAC_VALUE,
 				.rangehigh	= 90000*FAC_VALUE,
 				.modulation	= V4L2_BAND_MODULATION_FM,
+		},
+		[2] = {
+				.type		= V4L2_TUNER_RADIO,
+				.index		= S610_BAND_FM,
+				.capability = V4L2_TUNER_CAP_LOW
+				| V4L2_TUNER_CAP_STEREO
+				| V4L2_TUNER_CAP_RDS
+				| V4L2_TUNER_CAP_RDS_BLOCK_IO
+				| V4L2_TUNER_CAP_FREQ_BANDS,
+				/* custom region */
+				.rangelow	= 76000*FAC_VALUE,
+				.rangehigh	= 108000*FAC_VALUE,
+				.modulation = V4L2_BAND_MODULATION_FM,
 		},
 };
 
@@ -287,6 +300,14 @@ static struct region_info region_configs[] = {
 			.top_freq = 90000,	/* 90 MHz */
 			.fm_band = 1,
 		},
+		/* Custom */
+		{
+			.chanl_space = FM_CHANNEL_SPACING_200KHZ * FM_FREQ_MUL,
+			.bot_freq = 76000,	/* 76 MHz */
+			.top_freq = 108000,	/* 108 MHz */
+			.fm_band = 2,
+		},
+
 };
 
 static inline bool s610_radio_freq_is_inside_of_the_band(u32 freq, int band)
@@ -2066,22 +2087,6 @@ static int s610_radio_probe(struct platform_device *pdev)
 	radio->pdev = pdev;
 	gradio = radio;
 
-#ifdef USE_FM_LNA_ENABLE
-	radio->elna_gpio = of_get_named_gpio(dnode, "elna_gpio", 0);
-	if (!gpio_is_valid(radio->elna_gpio)) {
-		dev_err(dev, "(%s) elna_gpio invalid. Disable elna_gpio control\n",
-			__func__);
-		radio->elna_gpio = -EINVAL;
-	} else {
-		ret = gpio_request_one(radio->elna_gpio, GPIOF_OUT_INIT_LOW,
-					"LNA_GPIO_EN");
-		if (ret)
-			gpio_set_value(radio->elna_gpio, GPIO_LOW);
-		dev_info(dev, "(%s) Enable elna_gpio control :%d\n",
-			__func__, gpio_get_value(radio->elna_gpio));
-	}
-#endif /* USE_FM_LNA_ENABLE */
-
 #ifdef USE_AUDIO_PM
 	if (!exynos_audio_parse_dt(radio)) {
 		dev_err(dev, "audio dt not used\n");
@@ -2362,6 +2367,24 @@ skip_vol_sel:
 	if (ret)
 		radio->agc_thresh = 0xFF64;
 	dev_info(radio->dev, "agc thresh: %d\n", radio->agc_thresh);
+
+#ifdef USE_FM_LNA_ENABLE
+	if(radio->without_elna != 1) {
+		radio->elna_gpio = of_get_named_gpio(dnode, "elna_gpio", 0);
+		if (!gpio_is_valid(radio->elna_gpio)) {
+			dev_err(dev, "(%s) elna_gpio invalid. Disable elna_gpio control\n",
+				__func__);
+			radio->elna_gpio = -EINVAL;
+		} else {
+			ret = gpio_request_one(radio->elna_gpio, GPIOF_OUT_INIT_LOW,
+						"LNA_GPIO_EN");
+			if (ret)
+				gpio_set_value(radio->elna_gpio, GPIO_LOW);
+			dev_info(dev, "(%s) Enable elna_gpio control :%d\n",
+				__func__, gpio_get_value(radio->elna_gpio));
+		}
+	}
+#endif /* USE_FM_LNA_ENABLE */
 
 	pm_runtime_put_sync(dev);
 	exynos_pmu_shared_reg_disable();

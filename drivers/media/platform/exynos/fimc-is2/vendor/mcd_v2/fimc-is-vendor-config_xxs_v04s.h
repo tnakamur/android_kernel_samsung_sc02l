@@ -25,7 +25,7 @@
 //#define ENABLE_REMOSAIC_CAPTURE                   /* Base Remosaic */
 //#define ENABLE_REMOSAIC_CAPTURE_WITH_ROTATION     /* M2M and Rotation is used during Remosaic */
 #define USE_AP_PDAF                             /* Support sensor PDAF SW Solution */
-#define USE_SENSOR_WDR                          /* Support sensor WDR */
+//#define USE_SENSOR_WDR                          /* Support sensor WDR */
 
 /* VRA 1.4 improvement - adding VRA 1.4 interface : This feature is moved to fimc-is-config.h */
 /* Be enable this feature for New Model since A7 2018 */

@@ -1797,6 +1797,75 @@ p_err:
 	return ret;
 }
 
+
+int sensor_5e9_cis_wait_streamoff(struct v4l2_subdev *subdev)
+{
+	int ret = 0;
+	struct fimc_is_cis *cis;
+	struct i2c_client *client;
+	cis_shared_data *cis_data;
+	u32 wait_cnt = 0, time_out_cnt = 250;
+	u8 sensor_fcount = 0;
+
+	BUG_ON(!subdev);
+
+	cis = (struct fimc_is_cis *)v4l2_get_subdevdata(subdev);
+	if (unlikely(!cis)) {
+		err("cis is NULL");
+		ret = -EINVAL;
+		goto p_err;
+	}
+
+	cis_data = cis->cis_data;
+	if (unlikely(!cis_data)) {
+		err("cis_data is NULL");
+		ret = -EINVAL;
+		goto p_err;
+	}
+
+	client = cis->client;
+	if (unlikely(!client)) {
+		err("client is NULL");
+		ret = -EINVAL;
+		goto p_err;
+	}
+
+	I2C_MUTEX_LOCK(cis->i2c_lock);
+	ret = fimc_is_sensor_read8(client, 0x0005, &sensor_fcount);
+	if (ret < 0)
+		err("i2c transfer fail addr(%x), val(%x), ret = %d\n", 0x0005, sensor_fcount, ret);
+
+	/*
+	 * Read sensor frame counter (sensor_fcount address = 0x0005)
+	 * stream on (0x00 ~ 0xFE), stream off (0xFF)
+	 */
+	while (sensor_fcount != 0xFF) {
+		ret = fimc_is_sensor_read8(client, 0x0005, &sensor_fcount);
+		if (ret < 0)
+			err("i2c transfer fail addr(%x), val(%x), ret = %d\n", 0x0005, sensor_fcount, ret);
+
+		usleep_range(CIS_STREAM_OFF_WAIT_TIME, CIS_STREAM_OFF_WAIT_TIME);
+		wait_cnt++;
+
+		if (wait_cnt >= time_out_cnt) {
+			err("[MOD:D:%d] %s, time out, wait_limit(%d) > time_out(%d), sensor_fcount(%d)",
+					cis->id, __func__, wait_cnt, time_out_cnt, sensor_fcount);
+			ret = -EINVAL;
+			goto p_err;
+		}
+
+		dbg_sensor(1, "[MOD:D:%d] %s, sensor_fcount(%d), (wait_limit(%d) < time_out(%d))\n",
+				cis->id, __func__, sensor_fcount, wait_cnt, time_out_cnt);
+	}
+
+	usleep_range(30000, 30000);
+
+p_err:
+	I2C_MUTEX_UNLOCK(cis->i2c_lock);
+	return ret;
+}
+
+
 static struct fimc_is_cis_ops cis_ops = {
 	.cis_init = sensor_5e9_cis_init,
 	.cis_log_status = sensor_5e9_cis_log_status,
@@ -1822,7 +1891,7 @@ static struct fimc_is_cis_ops cis_ops = {
 	.cis_get_min_digital_gain = sensor_5e9_cis_get_min_digital_gain,
 	.cis_get_max_digital_gain = sensor_5e9_cis_get_max_digital_gain,
 	.cis_compensate_gain_for_extremely_br = sensor_cis_compensate_gain_for_extremely_br,
-	.cis_wait_streamoff = sensor_cis_wait_streamoff,
+	.cis_wait_streamoff = sensor_5e9_cis_wait_streamoff,
 	.cis_set_initial_exposure = sensor_cis_set_initial_exposure,
 };
 

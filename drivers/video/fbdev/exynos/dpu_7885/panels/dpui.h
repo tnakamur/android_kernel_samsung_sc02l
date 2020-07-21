@@ -86,6 +86,7 @@ enum dpui_key {
 	DPUI_KEY_PNPOC_RD_TRY,	/* panel POC read try count */
 	DPUI_KEY_PNPOC_RD_FAIL,	/* panel POC read fail count */
 #endif
+	DPUI_KEY_UB_CON,		/* panel ub_con pin interrupt count */
 
 	/* dependent on processor */
 	DPUI_KEY_EXY_SWRCV,	/* exynos sw recovery count */

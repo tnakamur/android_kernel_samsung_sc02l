@@ -49,6 +49,7 @@ enum otg_notify_events {
 	NOTIFY_EVENT_VBUSPOWER,
 	NOTIFY_EVENT_POGO,
 	NOTIFY_EVENT_RESERVE_BOOSTER,
+	NOTIFY_EVENT_PD_CONTRACT,
 	NOTIFY_EVENT_VIRTUAL,
 };
 
@@ -154,6 +155,7 @@ extern const char *event_string(enum otg_notify_events event);
 extern const char *status_string(enum otg_notify_event_status status);
 extern void send_otg_notify(struct otg_notify *n,
 					unsigned long event, int enable);
+extern int get_typec_status(struct otg_notify *n, int event);
 extern struct otg_booster *find_get_booster(struct otg_notify *n);
 extern int register_booster(struct otg_notify *n, struct otg_booster *b);
 extern int register_ovc_func(struct otg_notify *n,

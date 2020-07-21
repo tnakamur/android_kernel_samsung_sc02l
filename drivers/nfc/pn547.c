@@ -197,6 +197,7 @@ static irqreturn_t pn547_nfc_clk_irq(int irq, void *dev_id)
 {
 	struct pn547_dev *pn547_dev = dev_id;
 
+#if 0
 	if (gpio_get_value(pn547_dev->clk_req_gpio)) {
 		if(!wake_lock_active(&pn547_dev->nfc_clk_wake_lock))
 			wake_lock(&pn547_dev->nfc_clk_wake_lock);
@@ -204,6 +205,10 @@ static irqreturn_t pn547_nfc_clk_irq(int irq, void *dev_id)
 		if (wake_lock_active(&pn547_dev->nfc_clk_wake_lock))
 			wake_unlock(&pn547_dev->nfc_clk_wake_lock);
 	}
+#else
+	wake_lock_timeout(&pn547_dev->nfc_clk_wake_lock, 2*HZ);
+
+#endif
 
 	return IRQ_HANDLED;
 }
@@ -1281,6 +1286,13 @@ static CLASS_ATTR(test, 0664, pn547_class_show, pn547_class_store);
 
 #endif //FEATURE_SEC_NFC_TEST
 
+static ssize_t pn547_support_show(struct class * class, struct class_attribute *attr, char *buf)
+{
+	pr_info("\n");
+	return 0;
+}
+static CLASS_ATTR(nfc_support, 0444, pn547_support_show, NULL);
+
 static int pn547_probe(struct i2c_client *client,
 		       const struct i2c_device_id *id)
 {
@@ -1313,7 +1325,7 @@ static int pn547_probe(struct i2c_client *client,
 	if (IS_ERR(&nfc_class)) 
 	{
 
-		pr_err("NFC: failed to create nfc class\n");
+		pr_err("NFC: failed to create nfc_test class\n");
 	}
 	else
 	{
@@ -1322,6 +1334,18 @@ static int pn547_probe(struct i2c_client *client,
 		    pr_err("NFC: failed to create attr_test\n");
 	}
 #endif //FEATURE_SEC_NFC_TEST
+	nfc_class = class_create(THIS_MODULE, "nfc");
+	if (IS_ERR(&nfc_class)) 
+	{
+
+		pr_err("NFC: failed to create nfc class\n");
+	}
+	else
+	{
+		ret = class_create_file(nfc_class, &class_attr_nfc_support);
+		if (ret)
+		    pr_err("NFC: failed to create attr_nfc_support\n");
+	}
 
 	pr_info("%s entered\n", __func__);
 

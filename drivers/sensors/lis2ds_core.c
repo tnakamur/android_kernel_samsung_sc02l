@@ -2035,7 +2035,7 @@ static ssize_t lis2ds_write_register_store(struct device *dev,
 
 static void lis2ds_read_register(struct lis2ds_data *cdata)
 {
-	u8 reg;
+	u8 reg, offset;
 	u8 reg_value[16] = {0x00,};
 	u8 i, unit = 16;
 	s8 ret;
@@ -2047,8 +2047,9 @@ static void lis2ds_read_register(struct lis2ds_data *cdata)
 			SENSOR_ERR("[0x%02x-0x%02x]: fail %d\n", reg, reg+unit-1, ret);
 		}
 		else {
+			offset = 0;
 			for (i = 0; i < unit; i++)
-				snprintf(buf+5*i, 84, "0x%02x ", reg_value[i]);
+				offset += snprintf(buf + offset, sizeof(buf) - offset, "0x%02x ", reg_value[i]);
 			SENSOR_INFO("[0x%02x-0x%02x]:%s\n", reg, reg+unit-1, buf);
 		}
 	}

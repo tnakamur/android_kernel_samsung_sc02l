@@ -64,7 +64,12 @@
 
 #define HIGH_BRIGHTNESS_CODE 77
 
+#if defined(CONFIG_SENSORS_TCS3701_A40)
+#define DEFAULT_DFG    3357
+#else 
 #define DEFAULT_DFG    2772
+#endif
+
 #define DEFAULT_C_COEF 573
 #define DEFAULT_R_COEF -422
 #define DEFAULT_G_COEF 981

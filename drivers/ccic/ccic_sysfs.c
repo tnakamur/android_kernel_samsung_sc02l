@@ -930,6 +930,36 @@ static ssize_t ccic_get_gpio(struct device *dev,
 static DEVICE_ATTR(control_gpio, 0664, ccic_get_gpio, ccic_set_gpio);
 #endif
 
+#if defined(CONFIG_SEC_FACTORY)
+#if defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)
+static ssize_t ccic_power_off_water_check_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+#if defined(CONFIG_CCIC_S2MU106)
+	struct s2mu106_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#elif defined(CONFIG_CCIC_S2MU205)
+	struct s2mu205_usbpd_data *usbpd_data = dev_get_drvdata(dev);
+#endif
+	int ret = 0;
+
+	if (!usbpd_data) {
+		pr_err("%s usbpd_data is null!!\n", __func__);
+		return -ENODEV;
+	}
+
+#if defined(CONFIG_CCIC_S2MU106)
+	ret = s2mu106_sys_power_off_water_check(usbpd_data);
+#elif defined(CONFIG_CCIC_S2MU205)
+	ret = s2mu205_power_off_water_check(usbpd_data);
+#endif
+
+	return sprintf(buf, "%d\n", ret);
+}
+
+static DEVICE_ATTR(water_check, 0444, ccic_power_off_water_check_show, NULL);
+#endif
+#endif /* CONFIG_SEC_FACTORY */
+
 static ssize_t ccic_usbpd_ids_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1085,6 +1115,9 @@ static struct attribute *ccic_attributes[] = {
 	&dev_attr_rid.attr,
 	&dev_attr_ccic_control_option.attr,
 	&dev_attr_booting_dry.attr,
+#endif
+#if (defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU205)) && defined(CONFIG_SEC_FACTORY)
+	&dev_attr_water_check.attr,
 #endif
 #ifdef CONFIG_CCIC_S2MM005
 	&dev_attr_fw_update.attr,

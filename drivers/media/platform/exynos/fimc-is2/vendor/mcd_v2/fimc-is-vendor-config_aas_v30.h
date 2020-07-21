@@ -34,6 +34,9 @@
 
 /***** DDK - DRIVER INTERFACE *****/
 #define USE_WDR_INTERFACE
+/* This feature since A50s(ramen) and A30s(lassen).
+   In previous projects, only A30 is applied for sensor duplication */
+#define USE_DEBUG_LIBRARY_VER
 
 //#define USE_BINARY_PADDING_DATA_ADDED           /* Apply Signed DDK/RTA Binary */
 
@@ -42,11 +45,14 @@
 #define USE_COMMON_CAM_IO_PWR
 //#define DIVISION_EEP_IO_PWR                     /* Use Rear IO power for Front EEPROM i2c pull-up power */
 
+
 #define ENABLE_MCSC_TDNR_VENDOR_SIZE
 #if defined(ENABLE_MCSC_TDNR_VENDOR_SIZE)
 #define MAX_MCSC_DNR_WIDTH		(4608)
 #define MAX_MCSC_DNR_HEIGHT		(3456)
 #endif
+
+#define HEAP_SIZE_VENDOR_DEFINE	(0x02300000)      /* Define FIMC_IS_HEAP_SIZE in Vendor : 35MB */
 
 
 /***** SUPPORT EXTERNEL FUNCTION DEFINE *****/

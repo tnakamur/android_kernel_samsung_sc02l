@@ -906,6 +906,7 @@ bool muic_core_get_ccic_cable_state(struct muic_platform_data *muic_pdata)
 	case ATTACHED_DEV_OTG_MUIC:
 #if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
 	case ATTACHED_DEV_USB_MUIC:
+	case ATTACHED_DEV_TIMEOUT_OPEN_MUIC:
 #endif
 		return true;
 	default:
@@ -1112,15 +1113,16 @@ void muic_core_hv_handle_state(struct muic_platform_data *muic_pdata,
 	case HV_STATE_QC_CHARGER:
 		MUIC_PDATA_VOID_FUNC(muic_if->hv_qc_charger, muic_pdata->drv_data);
 		break;
+#if !IS_ENABLED(CONFIG_MUIC_NOT_SUPPORT_QC)
 	case HV_STATE_QC_5V_CHARGER:
 		MUIC_PDATA_VOID_FUNC(muic_if->hv_qc_5v_charger, muic_pdata->drv_data);
 		break;
 	case HV_STATE_QC_9V_CHARGER:
 		MUIC_PDATA_VOID_FUNC(muic_if->hv_qc_9v_charger, muic_pdata->drv_data);
 		break;
+#endif
 	default:
-		pr_err("%s not defined state : %d\n",
-				__func__, next_state);
+		pr_err("%s not defined state : %d\n", __func__, next_state);
 		break;
 	}
 }

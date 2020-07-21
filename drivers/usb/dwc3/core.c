@@ -74,7 +74,7 @@ static void dwc3_exynos_set_vbus_current_work(struct work_struct *w)
 {
 	struct dwc3 *dwc = container_of(w, struct dwc3, set_vbus_current_work);
 
-	dwc3_set_vbus_current(dwc->vbus_curernt);
+	dwc3_set_vbus_current(dwc->vbus_current);
 }
 
 static void dwc3_qos_work_fsys(struct work_struct *work)

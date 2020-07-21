@@ -8,10 +8,13 @@
 #define UI_DEFAULT_BRIGHTNESS	128
 
 struct lcd_seq_info {
-	unsigned char	*cmd;
+	const unsigned char	*cmd;
 	unsigned int	len;
 	unsigned int	sleep;
 };
+
+#define TYPE_WRITE	I2C_SMBUS_WRITE
+#define TYPE_DELAY	U8_MAX
 
 /* 0x20 for Enable */
 enum {
@@ -22,35 +25,32 @@ enum {
 	S2DPS01_SVDD_EN	= 4,
 };
 
-#define BLIC_WRITE	I2C_SMBUS_WRITE
-#define BLIC_DELAY	0xFF
-
-static u8 s2dps01_init_param[] = {
-	BLIC_WRITE, 0x0E, 0x41,
-	BLIC_WRITE, 0x11, 0xDF,
-	BLIC_WRITE, 0x1C, 0x10,
-	BLIC_WRITE, 0x1D, 0x86,
-	BLIC_WRITE, 0x1E, 0x58,
-	BLIC_WRITE, 0x1F, 0x12,
-	BLIC_WRITE, 0x21, 0x0F,
-	BLIC_WRITE, 0x22, 0x00,
-	BLIC_WRITE, 0x23, 0x00,
-	BLIC_WRITE, 0x24, 0x00,
-	BLIC_WRITE, 0x25, 0x01,
-	BLIC_WRITE, 0x26, 0x02,
-	BLIC_WRITE, 0x20, BIT(S2DPS01_VPOS_EN),							/* 0x04 */
-	BLIC_DELAY, 5, 0,
-	BLIC_WRITE, 0x20, BIT(S2DPS01_VPOS_EN) | BIT(S2DPS01_VNEG_EN),				/* 0x0C */
-	BLIC_DELAY, 5, 0,
-	BLIC_WRITE, 0x20, BIT(S2DPS01_VPOS_EN) | BIT(S2DPS01_VNEG_EN) | BIT(S2DPS01_BL_EN),	/* 0x0D */
+static u8 S2DPS01_INIT[] = {
+	TYPE_WRITE, 0x0E, 0x41,
+	TYPE_WRITE, 0x11, 0xDF,
+	TYPE_WRITE, 0x1C, 0x10,
+	TYPE_WRITE, 0x1D, 0x86,
+	TYPE_WRITE, 0x1E, 0x58,
+	TYPE_WRITE, 0x1F, 0x12,
+	TYPE_WRITE, 0x21, 0x0F,
+	TYPE_WRITE, 0x22, 0x00,
+	TYPE_WRITE, 0x23, 0x00,
+	TYPE_WRITE, 0x24, 0x00,
+	TYPE_WRITE, 0x25, 0x01,
+	TYPE_WRITE, 0x26, 0x02,
+	TYPE_WRITE, 0x20, BIT(S2DPS01_VPOS_EN),							/* 0x04 */
+	TYPE_DELAY, 5, 0,
+	TYPE_WRITE, 0x20, BIT(S2DPS01_VPOS_EN) | BIT(S2DPS01_VNEG_EN),				/* 0x0C */
+	TYPE_DELAY, 5, 0,
+	TYPE_WRITE, 0x20, BIT(S2DPS01_VPOS_EN) | BIT(S2DPS01_VNEG_EN) | BIT(S2DPS01_BL_EN),	/* 0x0D */
 };
 
-static u8 s2dps01_exit_param[] = {
-	BLIC_WRITE, 0x20, BIT(S2DPS01_VPOS_EN) | BIT(S2DPS01_VNEG_EN),				/* 0x0C */
-	BLIC_WRITE, 0x20, BIT(S2DPS01_VPOS_EN),							/* 0x04 */
-	BLIC_DELAY, 3, 0,
-	BLIC_WRITE, 0x20, 0x00,
-	BLIC_DELAY, 3, 0,
+static u8 S2DPS01_EXIT[] = {
+	TYPE_WRITE, 0x20, BIT(S2DPS01_VPOS_EN) | BIT(S2DPS01_VNEG_EN),				/* 0x0C */
+	TYPE_WRITE, 0x20, BIT(S2DPS01_VPOS_EN),							/* 0x04 */
+	TYPE_DELAY, 3, 0,
+	TYPE_WRITE, 0x20, 0x00,
+	TYPE_DELAY, 3, 0,
 };
 
 static const unsigned char SEQ_SET_B9_EXTC[] = {

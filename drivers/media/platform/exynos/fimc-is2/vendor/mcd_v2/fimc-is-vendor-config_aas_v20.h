@@ -35,11 +35,16 @@
 #define USE_WDR_INTERFACE                         /* This feature since A7 2018 */
 #define USE_NEW_PER_FRAME_CONTROL
 
+/* This feature since A50s(ramen) and A30s(lassen).
+   In previous projects, only A30 / A20 / A20p is applied for sensor duplication */
+#define USE_DEBUG_LIBRARY_VER
+
 //#define USE_BINARY_PADDING_DATA_ADDED            /* Apply Signed DDK/RTA Binary */
 
 
 /***** HW DEFENDANT DEFINE *****/
 #define USE_COMMON_CAM_IO_PWR
+#define NEED_SET_CORE_VOLTAGE
 //#define DIVISION_EEP_IO_PWR                     /* Use Rear IO power for Front EEPROM i2c pull-up power */
 
 #define ENABLE_MCSC_TDNR_VENDOR_SIZE

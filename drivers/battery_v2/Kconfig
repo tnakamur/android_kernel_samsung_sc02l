@@ -666,3 +666,9 @@ config S2MU004_MODE_CHANGE_BY_TOPOFF
 	default n
 	help
 	  Say Y to enable s2mu004 mode change by topoff
+	  
+config A10_FACTORY_MAX_SOC
+	bool "enable maximum store mode SOC in factory binary"
+	default n
+	help
+	  Say Y to enable  maximum store mode SOC in factory binary

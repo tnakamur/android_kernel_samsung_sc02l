@@ -71,6 +71,9 @@ enum power_supply_ext_property {
 };
 
 enum sec_battery_usb_conf {
+#if defined(CONFIG_ENABLE_USB_SUSPEND_STATE)
+	USB_CURRENT_SUSPENDED = 1,
+#endif
 	USB_CURRENT_UNCONFIGURED = 100,
 	USB_CURRENT_HIGH_SPEED = 500,
 	USB_CURRENT_SUPER_SPEED = 900,
@@ -961,8 +964,8 @@ struct sec_battery_platform_data {
 
 	bool fake_capacity;
 
-#if defined(CONFIG_BATTERY_CISD)
 	unsigned int battery_full_capacity;
+#if defined(CONFIG_BATTERY_CISD)
 	unsigned int cisd_cap_high_thr;
 	unsigned int cisd_cap_low_thr;
 	unsigned int cisd_cap_limit;

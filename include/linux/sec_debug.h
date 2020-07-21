@@ -74,6 +74,7 @@ enum sec_debug_reset_reason_t {
 	RR_B = 8,
 	RR_N = 9,
 	RR_T = 10,
+	RR_C = 11,
 };
 
 extern unsigned reset_reason;
@@ -265,6 +266,7 @@ extern void sec_debug_set_extra_info_batt(int cap, int volt, int temp, int curr)
 extern void sec_debug_set_extra_info_ufs_error(char *str);
 extern void sec_debug_set_extra_info_zswap(char *str);
 extern void sec_debug_set_extra_info_mfc_error(char *str);
+extern void sec_debug_set_extra_info_aud(char *str);
 
 #else
 
@@ -294,6 +296,7 @@ extern void sec_debug_set_extra_info_mfc_error(char *str);
 #define sec_debug_set_extra_info_ufs_error(a)	do { } while (0)
 #define sec_debug_set_extra_info_zswap(a)	do { } while (0)
 #define sec_debug_set_extra_info_mfc_error(a)	do { } while (0)
+#define sec_debug_set_extra_info_aud(a)	do { } while (0)
 
 #endif /* CONFIG_SEC_DEBUG_EXTRA_INFO */
 
@@ -491,16 +494,8 @@ int sec_debug_save_die_info(const char *str, struct pt_regs *regs);
 int sec_debug_save_panic_info(const char *str, unsigned long caller);
 #endif
 
+#ifdef CONFIG_SEC_DEBUG_LIMIT_BACKTRACE
 #define MAX_UNWINDING_LOOP 50 /* maximum number of unwind frame */
-
-#ifdef CONFIG_SEC_DEBUG_INFINITY_BACKTRACE
-extern int s3c2410wdt_set_emergency_reset(unsigned int timeout);
-static inline void exynos_ss_spin_func(void)
-{
-	do {
-		wfi();
-	} while(1);
-}
 #endif
 
 #endif /* SEC_DEBUG_H */

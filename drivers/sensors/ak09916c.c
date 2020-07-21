@@ -63,6 +63,17 @@
 #define AK09916C_BOTTOM_UPPER_LEFT       6
 #define AK09916C_BOTTOM_UPPER_RIGHT      7
 
+#define SELF_TEST_HX_MIN		-200
+#define SELF_TEST_HX_MAX		200
+#define SELF_TEST_HY_MIN		-200
+#define SELF_TEST_HY_MAX		200
+#define SELF_TEST_HZ_MIN		-1000
+#ifdef CONFIG_SENSORS_AK09918C
+#define SELF_TEST_HZ_MAX		-150
+#else
+#define SELF_TEST_HZ_MAX		-200
+#endif
+
 #define MAG_LOG_TIME                15 /* 15 sec */
 
 struct ak09916c_v {
@@ -220,7 +231,6 @@ static int ak09916c_ecs_set_mode(struct ak09916c_p *data, char mode)
 		ret = ak09916c_i2c_write(data->client, AK09916C_REG_CNTL2, reg);
 		break;
 	case AK09916C_MODE_POWERDOWN:
-		reg = AK09916C_MODE_SNG_MEASURE;
 		ret = ak09916c_ecs_set_mode_power_down(data);
 		break;
 	case AK09916C_MODE_SELF_TEST:
@@ -250,6 +260,8 @@ static int ak09916c_read_mag_xyz(struct ak09916c_p *data,
 	ret = ak09916c_ecs_set_mode(data, AK09916C_MODE_SNG_MEASURE);
 	if (ret < 0)
 		goto exit_i2c_read_err;
+	if(!atomic_read(&data->enable))
+		udelay(10000);
 
 again:
 	ret = ak09916c_i2c_read(data->client, AK09916C_REG_ST1, &temp[0]);
@@ -462,9 +474,7 @@ static int ak09916c_selftest(struct ak09916c_p *data, int *dac_ret, int *sf)
 retry:
 	mutex_lock(&data->lock);
 	/* power down */
-	reg = AK09916C_MODE_POWERDOWN;
-	*dac_ret = ak09916c_i2c_write(data->client, AK09916C_REG_CNTL2, reg);
-	udelay(100);
+	*dac_ret = ak09916c_ecs_set_mode(data, AK09916C_MODE_POWERDOWN);
 	*dac_ret += ak09916c_i2c_read(data->client, AK09916C_REG_CNTL2, &reg);
 
 	/* read device info */
@@ -495,26 +505,26 @@ retry:
 	z = temp[4] | (temp[5] << 8);
 
 	SENSOR_INFO("self test x = %d, y = %d, z = %d\n", x, y, z);
-	if ((x >= -200) && (x <= 200))
-		SENSOR_INFO("x passed self test, -200<=x<=200\n");
+	if ((x >= SELF_TEST_HX_MIN) && (x <= SELF_TEST_HX_MAX))
+		SENSOR_INFO("x passed self test, %d<=x<=%d\n", SELF_TEST_HX_MIN, SELF_TEST_HX_MAX);
 	else
-		SENSOR_INFO("x failed self test, -200<=x<=200\n");
-	if ((y >= -200) && (y <= 200))
-		SENSOR_INFO("y passed self test, -200<=y<=200\n");
+		SENSOR_INFO("x failed self test, %d<=x<=%d\n", SELF_TEST_HX_MIN, SELF_TEST_HX_MAX);
+	if ((y >= SELF_TEST_HY_MIN) && (y <= SELF_TEST_HY_MAX))
+		SENSOR_INFO("y passed self test, %d<=y<=%d\n", SELF_TEST_HY_MIN, SELF_TEST_HY_MAX);
 	else
-		SENSOR_INFO("y failed self test, -200<=y<=200\n");
-	if ((z >= -1000) && (z <= -200))
-		SENSOR_INFO("z passed self test, -1000<=z<=-200\n");
+		SENSOR_INFO("y failed self test, %d<=y<=%d\n", SELF_TEST_HY_MIN, SELF_TEST_HY_MAX);
+	if ((z >= SELF_TEST_HZ_MIN) && (z <= SELF_TEST_HZ_MAX))
+		SENSOR_INFO("z passed self test, %d<=z<=%d\n", SELF_TEST_HZ_MIN, SELF_TEST_HZ_MAX);
 	else
-		SENSOR_INFO("z failed self test, -1000<=z<=-200\n");
+		SENSOR_INFO("z failed self test, %d<=z<=%d\n", SELF_TEST_HZ_MIN, SELF_TEST_HZ_MAX);
 
 	sf[0] = x;
 	sf[1] = y;
 	sf[2] = z;
 
-	if (((x >= -200) && (x <= 200)) &&
-		((y >= -200) && (y <= 200)) &&
-		((z >= -1000) && (z <= -200))) {
+	if (((x >= SELF_TEST_HX_MIN) && (x <= SELF_TEST_HX_MAX)) &&
+		((y >= SELF_TEST_HY_MIN) && (y <= SELF_TEST_HY_MAX)) &&
+		((z >= SELF_TEST_HZ_MIN) && (z <= SELF_TEST_HZ_MAX))) {
 		SENSOR_INFO("successful.\n");
 		ret = 0;
 	} else {
@@ -633,7 +643,6 @@ static ssize_t ak09916c_get_selftest(struct device *dev,
 			break;
 		}
 
-		usleep_range(20000, 21000);
 		SENSOR_ERR("adc retries %d", retries);
 	}
 
@@ -651,13 +660,12 @@ static ssize_t ak09916c_get_selftest(struct device *dev,
 static ssize_t ak09916c_check_registers(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	u8 temp[13], reg;
+	u8 temp[13];
 	struct ak09916c_p *data = dev_get_drvdata(dev);
 
 	mutex_lock(&data->lock);
 	/* power down */
-	reg = AK09916C_MODE_POWERDOWN;
-	ak09916c_i2c_write(data->client, AK09916C_REG_CNTL2, reg);
+	ak09916c_ecs_set_mode(data, AK09916C_MODE_POWERDOWN);
 	/* get the value */
 	ak09916c_i2c_read_block(data->client, AK09916C_REG_WIA1, temp, 13);
 
@@ -679,10 +687,7 @@ static ssize_t ak09916c_check_cntl(struct device *dev,
 
 	mutex_lock(&data->lock);
 	/* power down */
-	reg = AK09916C_MODE_POWERDOWN;
-
-	ret = ak09916c_i2c_write(data->client, AK09916C_REG_CNTL2, reg);
-	udelay(100);
+	ret = ak09916c_ecs_set_mode(data, AK09916C_MODE_POWERDOWN);
 	ret += ak09916c_i2c_read(data->client, AK09916C_REG_CNTL2, &reg);
 	mutex_unlock(&data->lock);
 
@@ -774,7 +779,7 @@ exit:
 
 static int ak09916c_check_device(struct ak09916c_p *data)
 {
-	unsigned char reg, buf[2];
+	unsigned char buf[2];
 	int ret;
 
 	ret = ak09916c_i2c_read_block(data->client, AK09916C_REG_WIA1, buf, 2);
@@ -783,8 +788,7 @@ static int ak09916c_check_device(struct ak09916c_p *data)
 		return ret;
 	}
 
-	reg = AK09916C_MODE_POWERDOWN;
-	ret = ak09916c_i2c_write(data->client, AK09916C_REG_CNTL2, reg);
+	ret = ak09916c_ecs_set_mode(data, AK09916C_MODE_POWERDOWN);
 	if (ret < 0) {
 		SENSOR_ERR("Error in setting power down mode\n");
 		return ret;
@@ -1017,7 +1021,7 @@ static int ak09916c_probe(struct i2c_client *client,
 	data->asa[0] = 128;
 	data->asa[1] = 128;
 	data->asa[2] = 128;
-	data->reset_flag = 0;	
+	data->reset_flag = 0;
 
 	SENSOR_INFO("done!(chip pos : %d)\n", data->chip_pos);
 
